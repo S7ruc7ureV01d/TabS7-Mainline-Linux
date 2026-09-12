@@ -21,3 +21,11 @@ CONFIG_SCSI_UFS_QCOM=y
 # or PHY_QCOM_QMP_UFS silently stays =m no matter what this fragment says.
 CONFIG_PHY_QCOM_QMP=y
 CONFIG_PHY_QCOM_QMP_UFS=y
+
+# CONFIG_FB_SIMPLE + a simple-framebuffer devicetree node reusing the ABL's
+# splash region were tried on 2026-09-12 to get an on-screen boot console
+# (neither /proc/last_kmsg nor pstore console-ramoops could show our own
+# kernel's output - see kernel/dts/sm8250-samsung-gts7l.dts for why). An
+# isolated test showed this combination regressed a previously-working
+# boot back to Download Mode, so both halves were reverted together.
+# Revisit alongside real panel/display driver work in Phase 2, not alone.

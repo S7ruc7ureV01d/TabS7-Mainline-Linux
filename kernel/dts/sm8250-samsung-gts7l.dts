@@ -42,36 +42,83 @@
 
 / {
 	model = "Samsung Galaxy Tab S7";
-	compatible = "samsung,gts7l", "qcom,sm8250";
+	/*
+	 * `qcom,kona` + `qcom,msm-id` fix attempt #2 (2026-09-13), after
+	 * attempt #1 (DTS-property-only, single DTB) made zero observable
+	 * difference to the "No match found for Soc Dtb type" failure - see
+	 * docs/kernel-boot-debugging.md Round 5 for the full comparison.
+	 *
+	 * Root cause found by extracting the STOCK boot.img's own `dtb`
+	 * section (via magiskboot unpack) and inspecting it directly: it is
+	 * not one DTB, it's **three plain FDT blobs concatenated
+	 * back-to-back** (FDT magic 0xd00dfeed found at byte offsets 0,
+	 * 519810, 1039616 - confirmed by hand, not assumed), one per `kona`
+	 * silicon stepping this retail unit's kernel expects to possibly see:
+	 *
+	 *   entry 0: model "kona v2.1 SoC", qcom,msm-id = <0x164 0x20001>
+	 *   entry 1: model "kona v2 SoC",   qcom,msm-id = <0x164 0x20000>
+	 *   entry 2: model "kona v1 SoC",   qcom,msm-id = <0x164 0x10000>
+	 *
+	 * All three use plain `compatible = "qcom,kona";` and none carry
+	 * `qcom,board-id` at all (board-id belongs to a separate per-board
+	 * dtbo overlay, applied later in the boot chain - Samsung's real
+	 * overlay for this exact unit is
+	 * references/gts7l/arch/arm64/boot/dts/samsung/gts7l/
+	 * kona-sec-gts7l-eur-overlay-r07.dts, `qcom,board-id = <0x8 0x7>`).
+	 * `qcom,board-id` is deliberately NOT set here for that reason - it
+	 * doesn't belong in this stepping-selection blob per stock's own
+	 * structure, and attempt #1 including it here proved that placement
+	 * doesn't help anyway.
+	 *
+	 * Attempt #1's single DTB only covered the v1 (0x10000) stepping -
+	 * if this physical unit's actual fused silicon revision is v2 or
+	 * v2.1 (which stock clearly hedges for by shipping all three), a
+	 * lone v1 entry would never match, exactly reproducing the
+	 * unmodified failure we saw. The fix built from this DTS (see
+	 * docs/kernel-boot-debugging.md Round 5) concatenates three
+	 * otherwise-identical builds of this DTB, one per stepping, mirroring
+	 * stock's exact structure - see work/build-appended-dtb.sh (or the
+	 * Round 5 writeup) for how that's assembled from this single source
+	 * file via `fdtput` patching qcom,msm-id per copy.
+	 *
+	 * Sourcing: stock dtb extraction done locally this session;
+	 * cross-checked against Samsung's own base platform file
+	 * (references/gts7l/arch/arm64/boot/dts/vendor/qcom/kona.dtsi,
+	 * `compatible = "qcom,kona"` + `qcom,msm-id = <356 0x10000>` i.e.
+	 * 0x164 0x10000 - matches stock entry 2 exactly) and against the
+	 * sibling S9 Ultra project's independently-documented fix for the
+	 * identical ABL error string on the same Samsung-ABL family
+	 * (references/postmarketos-galaxy-tab-s9-ultra/docs/porting-log.md).
+	 */
+	compatible = "samsung,gts7l", "qcom,kona", "qcom,sm8250";
+	qcom,msm-id = <0x164 0x10000>;
 	chassis-type = "tablet";
 
 	/*
-	 * The inherited phone framebuffer/cont_splash_mem node from
-	 * sm8250-samsung-common.dtsi describes the Galaxy S20's splash
-	 * buffer address and 1080x2400 phone panel geometry. Neither the
-	 * physical address nor the resolution has been confirmed for this
-	 * tablet's actual bootloader-reserved splash region, and guessing
-	 * wrong here risks colliding with real memory rather than just
-	 * losing a splash screen. Deliberately dropped rather than carried
-	 * forward incorrect - Phase 1 only needs a working console, not an
-	 * early graphical splash. Revisit once the panel driver (Phase 2)
-	 * makes the framebuffer node moot anyway.
+	 * TODO(phase2/debugging): a `chosen`/`simple-framebuffer` node reusing
+	 * the ABL's real splash region (address/size confirmed correct via
+	 * Samsung's own GPL source, kona.dtsi's `cont_splash_region@9c000000`)
+	 * was tried here on 2026-09-12 to get an on-screen boot console, since
+	 * neither of this device's two persistent log mechanisms
+	 * (`/proc/last_kmsg` - bootloader-only; `console-ramoops-0` - only
+	 * ever reflects whichever kernel is *currently* running, never a
+	 * prior failed boot) could show what our kernel does after the ABL
+	 * hands off.
 	 *
-	 * TODO(phase2): if an early splash console turns out to be wanted,
-	 * get the real reserved-memory address/size from the tablet's own
-	 * boot chain (e.g. the ABL-passed /chosen properties on a live
-	 * boot) before reintroducing this node.
-	 *
-	 * The sibling `reserved-memory` node (cont_splash_mem + ramoops,
-	 * inherited unmodified from common.dtsi) is left in place: ramoops
-	 * is generically useful and address-tolerant, and cont_splash_mem's
-	 * region is merely marked no-map (safe even if unused) rather than
-	 * actively consumed once its only consumer (this framebuffer node)
-	 * is gone. Its exact address/size is still phone-derived and
-	 * unverified against this tablet's actual memory map - flagged here
-	 * rather than silently trusted.
+	 * Reverted: a controlled isolation test (stock ramdisk + this
+	 * framebuffer-enabled kernel, vs. the earlier stock-ramdisk build
+	 * without it) showed a real regression - the earlier build reliably
+	 * got past the ABL into genuine Android `init` (confirmed via the
+	 * automatic `fs_mgr`-triggered recovery-boot request when `/data`
+	 * failed to mount), but adding this framebuffer node made the same
+	 * stock-ramdisk kernel fail before that point, going straight to
+	 * Download Mode instead. The reserved-memory region *does* look
+	 * correctly `no-map`'d at the matching address, so the actual failure
+	 * mode isn't understood yet - not worth chasing further right now
+	 * since this feature only existed to help debugging, not because
+	 * Phase 1 needs it. Revisit alongside the real panel/display driver
+	 * work in Phase 2 instead of in isolation.
 	 */
-	/delete-node/ chosen;
 };
 
 /*

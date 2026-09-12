@@ -284,6 +284,116 @@ Progress log:
   confirmed functional. Full story in `../docs/twrp-build-notes.md`. Next:
   the actual Phase 1 goal — flash `gts7l-kernel-test.tar` (mainline kernel +
   our DTS + noop DTBO) and see if it boots.
+- 2026-09-12: First real hardware boot-testing round on our own kernel/DTB,
+  using `magiskboot unpack`/`repack` against the stock `boot.img` as
+  template (far more reliable than the earlier from-scratch `mkbootimg`
+  approach, confirmed against AnyKernel3's own real repack path). **Got a
+  confirmed-good baseline**: stock ramdisk + our kernel/DTB reaches genuine
+  Android `init`, which then requests recovery via `param` when `/data`
+  fails to mount (expected, given our minimal DTS lacks matching
+  FBE/crypto support) — real progress past the ABL. Also confirmed via
+  `/proc/last_kmsg` evidence that the ABL's "fail but allow" authentication
+  leniency applies uniformly to `vbmeta`/`recovery`/`boot` on this unlocked
+  unit, closing out the SEANDROID/AVB-footer theory chased earlier as very
+  likely never the real blocker. Two follow-up additions
+  (`simple-framebuffer` devicetree node + `CONFIG_FB_SIMPLE`, and separately
+  `qcom,msm-id`/`qcom,board-id` copied from `itzreesa/sm8250-mainline`'s WIP
+  DTS) were each tested and **each caused a real regression** back to
+  Download Mode, confirmed via direct log comparison against the
+  known-good baseline rather than guessed — both reverted. Full writeup,
+  including the exact log evidence, in `../docs/kernel-boot-debugging.md`.
+  Next: retest our own busybox initramfs alone against the clean baseline,
+  single-variable, to keep closing in on an interactive shell.
+- 2026-09-12 (later): Rebuilt the kernel/DTB from the just-reverted clean
+  baseline and ran the planned single-variable busybox-initramfs test —
+  bounced to Download Mode. Then ran an immediate sanity re-check (same
+  kernel/DTB, stock ramdisk restored — nominally the exact combo that
+  originally worked) as a control, and **it also bounced to Download
+  Mode**, which means the busybox result can't actually be attributed to
+  the ramdisk — the "known-good baseline" itself isn't currently
+  reproducing. Also confirmed `/proc/last_kmsg` cannot be cleared from
+  userspace (tried as root, no effect). Tablet restored to stock
+  `boot.img`, `rp` confirmed unaffected. Next: a real power-cycle test of
+  the known-good combo, to check whether cold vs. warm boot is the actual
+  variable.
+- 2026-09-12 (still later): **Major correction — the "confirmed baseline
+  reaches genuine Android init" claim from earlier today was wrong.** The
+  cold-boot test (done to chase the warm-reboot theory above) also bounced
+  to Download Mode, with a `/proc/last_kmsg` capture whose timestamps
+  matched every prior capture to the microsecond — which turned out to be
+  because early ABL/XBL execution on this hardware is fully deterministic
+  up to the failure point, not because of a stale ring buffer. That
+  determinism made it possible to re-audit every `last_kmsg` capture taken
+  this session by checking what *actually* follows each file's own
+  `Booting Into Mission Mode` marker (rather than searching the whole 2MB
+  buffer for a success string). Finding, with zero exceptions across all
+  seven captures taken today: our kernel's own boot attempt is *always*
+  followed 150 lines later by `No match found for Soc Dtb type` → Download
+  Mode. It has never once reached the `EDTBO check fail` → continue path —
+  including in the exact file the original "confirmed baseline" claim was
+  built from. Those `EDTBO check fail` lines belonged to a different
+  (almost certainly TWRP/recovery) boot session sitting nearby in the same
+  ring buffer; the earlier analysis conflated the two. This means: the
+  `msm-id`/`board-id` and `simple-framebuffer` "regressions" logged earlier
+  today were compared against a baseline that itself never worked, so
+  those conclusions are unverified too (not necessarily wrong, just not
+  established the way they were claimed to be). **Real state of Phase 1**:
+  our custom kernel/DTB has never gotten past the ABL's DTB-identity
+  check, in any configuration tried so far today. Leading new theory: the
+  failure strings match Qualcomm's legacy QCDT appended-DTB table format
+  (built by `dtbTool`), a different mechanism from DT properties inside
+  our single FDT blob — worth investigating directly rather than more DTS
+  property experiments. Full evidence and reasoning in
+  `../docs/kernel-boot-debugging.md` (Round 4). Tablet is safe, stock
+  `boot.img` restored, `rp` unaffected throughout all of today's testing.
+- 2026-09-13: Per the owner's direction, researched and cloned external
+  reference projects into `references/` instead of continuing to guess:
+  `sm8250-mainline` (fully, was only remotely referenced before),
+  `galaxy-tab-s7-plus-droidian`/`adaptation-samsung-gts7xlwifi`/
+  `kernel_samsung_sm8250`/`droidian-recipes` (a real working Halium/Droidian
+  port for the sibling Tab S7+ Wi-Fi, same SM8250 family, found via an XDA
+  thread the owner linked), and re-examined the already-local
+  `postmarketos-galaxy-tab-s9-ultra`/`ubuntu-galaxy-tab-s9-ultra` (a sibling
+  Samsung-ABL project on a different SoC that documented hitting and fixing
+  the identical error strings). **Found the real cause of `No match found
+  for Soc Dtb type` by extracting stock's own `dtb` boot.img section and
+  inspecting it directly**: it's three concatenated plain FDTs, one per
+  `kona` silicon stepping (msm-id `0x10000`/`0x20000`/`0x20001`), each just
+  `compatible = "qcom,kona"` — not a QCDT wrapper, not board-id (that's a
+  separate later overlay). Our DTS only ever produced one DTB for one
+  stepping. Rebuilt the artifact to match stock's exact 3-entry structure
+  (`kernel/dts/sm8250-samsung-gts7l.dts` updated with `qcom,kona` +
+  `qcom,msm-id`, three `fdtput`-patched copies concatenated before
+  `magiskboot repack`). **Evidence it worked**: the previously
+  100%-reliable `No match found for Soc Dtb type` string is now absent
+  from all three post-fix `/proc/last_kmsg` captures, versus present in
+  all five pre-fix ones. Also preemptively applied the S9 Ultra project's
+  next documented fix (`DTC_FLAGS ... := -@` for `/__symbols__`, needed for
+  Samsung's `ufdt` overlay fork) — not yet confirmed either way, since three
+  post-fix test attempts all ended in Download Mode per direct observation
+  but none of the three log pulls captured the actual boot-attempt entries
+  before ring-buffer eviction. **The evidence-capture methodology (the
+  ~2MB `/proc/last_kmsg` ring buffer vs. how many reboots it takes to get
+  back to a working `adb` session) is now the practical bottleneck**, not
+  any specific DTS content. Full writeup in
+  `../docs/kernel-boot-debugging.md` (Round 5/6). Tablet safe throughout,
+  `rp` unaffected. Next: either a cleaner/faster log capture, or an
+  alternative evidence source (real UART, or matching `ramoops` address so
+  TWRP's own pstore might surface something).
+- 2026-09-13 (later): Researched getting a live UART console to sidestep
+  the `last_kmsg` ring-buffer eviction problem above. Ruled out Samsung's
+  real "AnyWay" USB-C JIG (needs a rare factory PD-VDM tool, weeks of lead
+  time, unconfirmed payoff even for people with the real hardware). Found
+  something more promising by reading our own device's real GPL kernel
+  source (`references/gts7l/drivers/muic/max77705-muic.c`): JIG UART mode
+  is actually triggered by the CCIC's own hardware CC-line resistance
+  detection (a real USB-C accessory-detection mechanism, not a PD
+  message), and the `uart_en`/`uart_sel` sysfs controls for it already
+  exist and are readable/settable as root on the physical unit right now
+  via TWRP. Full findings, exact driver code, and a concrete next
+  experiment (bare USB-C breakout + ~619kΩ resistor on CC1/CC2-to-GND,
+  battery power only, probe D+/D− at 115200 baud) written up in
+  `../docs/uart-debug-research.md`. Not yet attempted on hardware.
 
 ---
 
