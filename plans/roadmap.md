@@ -142,27 +142,43 @@ Progress log:
 
 ## Phase 1 — Boot to a shell (no display, no peripherals)
 
-**Status:** not started
+**Status:** in progress
 
 Goal: mainline (or near-mainline) kernel boots on the Tab S7 far enough to get
 a serial/USB shell — proof the boot chain, DTB, and minimal platform drivers
 (clocks, RPMh, pinctrl, UFS) work.
 
 Exit criteria:
-- [ ] Devicetree for `gts7l` created (`sm8250-samsung-gts7l.dts`), forked from
-      upstream's `sm8250-samsung-common.dtsi` per the decision in
-      `../docs/kernel-baseline.md`, cross-checked against
-      `references/gts7l/arch/arm64/boot/dts/samsung/gts7l/
-      kona-sec-gts7l-eur-overlay-r07.dts` (the exact board-revision DTS
-      matching our physical unit — see `../docs/hardware-inventory.md`) for
-      regulator/pinctrl/GPIO topology.
+- [x] Devicetree for `gts7l` created —
+      **`kernel/dts/sm8250-samsung-gts7l.dts`**, forked from upstream's
+      `sm8250-samsung-common.dtsi` per `../docs/kernel-baseline.md`.
+      Cross-checked two independent ways (Samsung's GPL board-revision
+      overlay + live `/proc/interrupts`/`/sys/kernel/debug/gpio` introspection
+      of the physical unit) for volume-up (PM8150L, not PM8150 as on the
+      phone reference), touchscreen/S-Pen/MAX77705 IRQ-GPIO wiring, and
+      confirmed the Wi-Fi/BT combo is PCIe-attached. Full derivation and
+      remaining gaps in `../docs/devicetree-notes.md`. **Builds clean (zero
+      DTC warnings) against the `v7.2` tree proven in
+      `build-environment.md`**, and decompiling the output DTB confirmed
+      every override actually took effect — this is devicetree-level
+      validation only, not a real hardware boot test yet. Panel, touch I2C
+      bus/reset, S Pen driver binding, MAX77705 driver, Wi-Fi PCIe
+      instantiation, and Book Cover Keyboard are explicitly deferred to their
+      later phases per the file's own `TODO` comments, not silently missing.
 - [ ] Kernel builds and boots to an initramfs/console (UART or USB) on the
       physical tablet.
 - [ ] UFS storage enumerates and is readable.
 - [ ] Root filesystem reachable via ADB/serial shell, even without display.
 
 Progress log:
-- (none yet)
+- 2026-09-11: Wrote and validated (build-only, not hardware-booted)
+  `sm8250-samsung-gts7l.dts`. Notable finding along the way: our tablet has a
+  three-PMIC complex (PM8150+PM8150L+PM8009) that upstream's
+  `sm8250-samsung-common.dtsi` doesn't include by default (the Galaxy S20
+  phones it was written for apparently don't need PM8150L/PM8009 wired up at
+  this level) — added both `#include`s to our board file. Next: a
+  `gts7l`-flavored kernel config and an actual boot attempt, which loops back
+  to the still-open recovery/flashing question in `recovery-options.md`.
 
 ---
 

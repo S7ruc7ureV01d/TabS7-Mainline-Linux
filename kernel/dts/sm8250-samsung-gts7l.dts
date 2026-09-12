@@ -1,0 +1,257 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/*
+ * Samsung Galaxy Tab S7 LTE (SM-T875, "gts7l")
+ *
+ * Forked from upstream's sm8250-samsung-common.dtsi (shared Samsung SM8250
+ * phone platform base: PM8150 PMIC, ADSP/CDSP/SLPI scaffolding, base
+ * regulators) per the decision in docs/kernel-baseline.md. That base file is
+ * phone-shaped (single volume-up key, phone-sized splash framebuffer) and is
+ * overridden below wherever this tablet's actual hardware differs.
+ *
+ * Hardware facts below are sourced from two places, both cited inline:
+ *   - Samsung's GPL kernel source for this device (T875XXU1ATK1),
+ *     specifically the board-revision overlay that matches our physical
+ *     unit's `androidboot.revision=7`:
+ *     references/gts7l/arch/arm64/boot/dts/samsung/gts7l/
+ *       kona-sec-gts7l-eur-overlay-r07.dts
+ *   - Live confirmation pulled directly off the physical tablet (rooted,
+ *     stock T875XXU1ATK4) via `cat /proc/interrupts` and
+ *     `cat /sys/kernel/debug/gpio`, cross-checked against the above.
+ * See docs/hardware-inventory.md and docs/devicetree-notes.md for the full
+ * writeup and provenance of every value below. Anything not confirmed by
+ * both sources is marked TODO rather than guessed.
+ */
+
+/dts-v1/;
+
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/input/input.h>
+#include "sm8250-samsung-common.dtsi"
+
+/*
+ * Unlike the Galaxy S20 phones sm8250-samsung-common.dtsi was written for,
+ * this tablet has a full three-PMIC complex (PM8150 + PM8150L + PM8009),
+ * confirmed in docs/hardware-inventory.md from Samsung's own GPL source.
+ * common.dtsi only pulls in pm8150.dtsi - add the other two here so the
+ * &pm8150l_gpios references below (volume-up, S Pen, MAX77705 irq - all
+ * confirmed wired to PM8150L, not PM8150) resolve. Both self-attach to
+ * &spmi_bus internally, so #include is all that's needed.
+ */
+#include "pm8150l.dtsi"
+#include "pm8009.dtsi"
+
+/ {
+	model = "Samsung Galaxy Tab S7";
+	compatible = "samsung,gts7l", "qcom,sm8250";
+	chassis-type = "tablet";
+
+	/*
+	 * The inherited phone framebuffer/cont_splash_mem node from
+	 * sm8250-samsung-common.dtsi describes the Galaxy S20's splash
+	 * buffer address and 1080x2400 phone panel geometry. Neither the
+	 * physical address nor the resolution has been confirmed for this
+	 * tablet's actual bootloader-reserved splash region, and guessing
+	 * wrong here risks colliding with real memory rather than just
+	 * losing a splash screen. Deliberately dropped rather than carried
+	 * forward incorrect - Phase 1 only needs a working console, not an
+	 * early graphical splash. Revisit once the panel driver (Phase 2)
+	 * makes the framebuffer node moot anyway.
+	 *
+	 * TODO(phase2): if an early splash console turns out to be wanted,
+	 * get the real reserved-memory address/size from the tablet's own
+	 * boot chain (e.g. the ABL-passed /chosen properties on a live
+	 * boot) before reintroducing this node.
+	 *
+	 * The sibling `reserved-memory` node (cont_splash_mem + ramoops,
+	 * inherited unmodified from common.dtsi) is left in place: ramoops
+	 * is generically useful and address-tolerant, and cont_splash_mem's
+	 * region is merely marked no-map (safe even if unused) rather than
+	 * actively consumed once its only consumer (this framebuffer node)
+	 * is gone. Its exact address/size is still phone-derived and
+	 * unverified against this tablet's actual memory map - flagged here
+	 * rather than silently trusted.
+	 */
+	/delete-node/ chosen;
+};
+
+/*
+ * Volume Up is wired to PM8150L (the companion/"L" PMIC), not PM8150
+ * (primary) as on the common.dtsi's Galaxy S20 phone reference. Confirmed
+ * via the GPL overlay's DT symbol table entry:
+ *   key_vol_up_default = ".../qcom,pm8150l@4/pinctrl@c000/key_vol_up/..."
+ * i.e. pin "gpio3" on pm8150l, not pm8150. Also cross-confirmed live:
+ * `/proc/interrupts` shows `volume_up` on the `pmic_arb` domain, and
+ * `/sys/kernel/debug/gpio`'s pm8150l gpiochip (gpiochip2, GPIOs 1085-1093)
+ * has gpio3 configured as an input with a pull-up - consistent with a
+ * button line, not a phone's pm8150 gpio3 wiring.
+ *
+ * This overrides (not extends) the inherited common.dtsi gpio_keys node,
+ * which points at &vol_up_n on the wrong PMIC for this board.
+ */
+/delete-node/ &gpio_keys;
+
+/ {
+	gpio_keys: gpio-keys {
+		compatible = "gpio-keys";
+
+		pinctrl-names = "default";
+		pinctrl-0 = <&vol_up_n_gts7l>;
+
+		key-vol-up {
+			label = "Volume Up";
+			gpios = <&pm8150l_gpios 3 GPIO_ACTIVE_LOW>;
+			linux,code = <KEY_VOLUMEUP>;
+			debounce-interval = <15>;
+			linux,can-disable;
+			wakeup-source;
+		};
+	};
+};
+
+&pm8150l_gpios {
+	vol_up_n_gts7l: vol-up-n-gts7l-state {
+		pins = "gpio3";
+		function = "normal";
+		power-source = <0>;
+		input-enable;
+		bias-pull-up;
+	};
+};
+
+/*
+ * Volume Down and Power both ride the PM8150 PON block's resin/pwrkey
+ * lines, already wired up correctly by sm8250-samsung-common.dtsi
+ * (&pon_pwrkey, &pon_resin -> KEY_VOLUMEDOWN) - confirmed live via
+ * `/proc/interrupts` showing `pon_kpdpwr_status` and `pon_resin_status` on
+ * the pmic_arb domain. No override needed here.
+ */
+
+/*
+ * Touchscreen: Novatek NT36523 TDDI (same IC drives the display panel -
+ * see docs/hardware-inventory.md). Wired in Samsung's DT as "novatek,nvt-ts",
+ * not yet backed by a mainline driver/binding - this node records the real
+ * wiring now so the binding can be filled in during Phase 2 without
+ * re-deriving it.
+ *
+ * irq-gpio = tlmm 15, confirmed two independent ways:
+ *   - GPL overlay: `novatek,irq-gpio = <0xffffffff 0xf 0x2002>` (0xf = 15)
+ *   - Live: `/proc/interrupts` shows `nvt-ts` on `msmgpio 15`, Edge
+ * TODO(phase2): I2C bus/address (reg = <0x62> per the GPL source, bus
+ * segment not yet identified), reset-gpio, and VDD/VCC-I2C supply rails are
+ * not yet confirmed - the GPL node only specifies the irq line and firmware
+ * blob name (novatek,firmware_name = "tsp_novatek/nt36523_gts7l.bin").
+ */
+&tlmm {
+	nvt_ts_int_gts7l: nvt-ts-int-state {
+		pins = "gpio15";
+		function = "gpio";
+		bias-disable;
+	};
+};
+
+/*
+ * S Pen: Wacom W90xx-series EMR digitizer over I2C (reg = <0x56> per the
+ * GPL source). No BLE - this is a plain passive digitizer, unlike the S9
+ * Ultra project's BLE-capable S Pen.
+ *
+ * All three GPIOs below are confirmed two independent ways:
+ *   - GPL overlay: irq-gpio=0x88(136), pdct-gpio=0x7(7), fwe-gpio=0x6(6)
+ *   - Live: `/proc/interrupts` shows `sec_epen_irq` on `msmgpio 136`
+ *     (Level) and `sec_epen_pdct` on `msmgpio 7` (Edge)
+ * AVDD supply confirmed from a second instance of this node in the GPL
+ * source tree: `wacom,regulator_avdd = "pm8150_l13"` - i.e. PM8150 LDO13.
+ * Not yet mapped to a mainline regulator phandle/supply property.
+ *
+ * TODO(phase4, tracks roadmap Phase 4): actual mainline driver binding
+ * (upstream has no "wacom,w90xx" binding yet - closest is the generic
+ * Wacom I2C digitizer support, needs evaluation), IC type 0x233d and
+ * boot_addr 0x9 (bootloader-mode alternate address) recorded above for
+ * whoever writes that driver glue.
+ */
+&tlmm {
+	epen_int_gts7l: epen-int-state {
+		pins = "gpio136";
+		function = "gpio";
+		bias-disable;
+	};
+
+	epen_pdct_gts7l: epen-pdct-state {
+		pins = "gpio7";
+		function = "gpio";
+		bias-disable;
+	};
+
+	epen_fwe_gts7l: epen-fwe-state {
+		pins = "gpio6";
+		function = "gpio";
+		bias-disable;
+	};
+};
+
+/*
+ * Charger + fuel gauge + MUIC + haptics: Maxim MAX77705 (reg = <0x66> per
+ * the GPL source). irq-gpio confirmed two independent ways:
+ *   - GPL overlay: `max77705,irq-gpio = <0x92 0xb 0x1>` - phandle 0x92
+ *     resolves (via the same overlay's own symbol table) to the PM8150L
+ *     gpio-controller node, pin 11 ("gpio11"), active-low.
+ *   - Live: `/sys/kernel/debug/gpio`'s pm8150l gpiochip (gpiochip2) shows
+ *     gpio11 configured as an input with a pull-up, consistent with an
+ *     active-low interrupt line. `/proc/interrupts` additionally shows a
+ *     large family of `max77705` interrupt names (chgin-irq, fuelgauge-irq,
+ *     muic-*, pd-*, usbc-* etc.) all live and firing on the running stock
+ *     kernel, confirming this is the real, active charger/PD/MUIC chip.
+ *
+ * TODO(phase3): mainline has no "maxim,max77705" driver - this is a
+ * Samsung/Maxim combo IC (charger + fuel gauge + MUIC + haptic + USB-PD)
+ * that will need real driver work, not just a devicetree node. VDD supply
+ * rail not yet identified.
+ */
+&pm8150l_gpios {
+	max77705_int_gts7l: max77705-int-state {
+		pins = "gpio11";
+		function = "normal";
+		power-source = <0>;
+		input-enable;
+		bias-pull-up;
+	};
+};
+
+/*
+ * Wi-Fi/BT combo: Qualcomm QCA6390 over PCIe (confirmed live -
+ * `wlan_wake_irq` and the WLAN_CE_* MSI vectors sit on the `msm_pci_msi`
+ * domain in /proc/interrupts, meaning this is the PCIe-attached ath11k
+ * path, not SDIO). CONFIG_CNSS_QCA6390=y confirmed in Samsung's own
+ * defconfig (docs/hardware-inventory.md).
+ *
+ * TODO(phase3): the actual PCIe root complex / wlan node instantiation
+ * (&pcie1 or equivalent on this platform, enable/reset GPIOs, regulator
+ * supplies) has not been identified yet - needs its own pass through the
+ * GPL source's PCIe and regulator nodes, which are large and not yet
+ * cross-referenced against a live confirmation the way the items above
+ * were. Tracked as a Phase 3 task, not attempted in this first-pass DTS.
+ */
+
+/*
+ * NOT YET ADDRESSED IN THIS FILE (left for their respective phases rather
+ * than guessed at):
+ *   - Display panel (Novatek NT36523 / PPA957DB1 WQXGA LCD) - Phase 2
+ *   - Adreno 650 GPU enablement - Phase 2
+ *   - microSD, USB host - Phase 4
+ *   - Book Cover Keyboard (stm,touchpad / stm,keypad pogo-pin nodes) - Phase 5
+ * See plans/roadmap.md for the phase breakdown these map to.
+ */
+
+&adsp {
+	firmware-name = "qcom/sm8250/Samsung/gts7l/adsp.mbn";
+	status = "okay";
+};
+
+&cdsp {
+	firmware-name = "qcom/sm8250/Samsung/gts7l/cdsp.mbn";
+	status = "okay";
+};
+
+&slpi {
+	firmware-name = "qcom/sm8250/Samsung/gts7l/slpi.mbn";
+	status = "okay";
+};
