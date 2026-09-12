@@ -1,3 +1,6 @@
 # Local reference clones (prior-art repos) - not part of this project's history
 references/*/
 !references/README.md
+
+# Build scratch space (kernel source checkouts, build output, logs) - not versioned
+work/

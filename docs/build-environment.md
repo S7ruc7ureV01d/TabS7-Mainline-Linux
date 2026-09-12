@@ -46,15 +46,43 @@ defconfig-sized build is much smaller. Not currently a blocker, but worth
 re-checking before a full build — 90G can shrink fast on a 95%-full root if
 other things are writing to it concurrently.
 
-## Not yet done (next steps when Phase 1 build work starts)
+## First build attempt — done, succeeded (2026-09-11)
 
-- Fetch actual upstream mainline Linux source (not the stale
-  `sm8250-mainline` mirror in `references/linux` — see
-  `kernel-baseline.md` for why that mirror was rejected as a base) at a
-  recent tag, e.g. `v7.2` or later, matching what `kernel-baseline.md`
-  decided to build on.
-- First build attempt: confirm `sm8250-samsung-x1q_defconfig`-equivalent (or
-  a plain `defconfig` + `CONFIG_ARCH_QCOM`) builds and boots in QEMU or on
-  the `x1q`/`r8q` upstream boards conceptually, before touching `gts7l`
-  specifics — establishes the build process works at all before adding
-  device-specific unknowns.
+Proof-of-toolchain build completed successfully:
+
+- Source: shallow-cloned upstream `torvalds/linux` at tag `v7.2`
+  (`work/linux`, gitignored scratch space — not committed, matches the
+  reference project's `work/` convention).
+- Command: `make ARCH=arm64 LLVM=1 LLVM_IAS=1 defconfig` then
+  `make ARCH=arm64 LLVM=1 LLVM_IAS=1 -j20 Image dtbs`.
+- Result: **clean build, zero compiler warnings**, `arch/arm64/boot/Image`
+  produced (40MB, verified as a real ARM64 boot Image via `file`), and both
+  `sm8250-samsung-r8q.dtb` and `sm8250-samsung-x1q.dtb` compiled without
+  issue — confirming the Samsung SM8250 board files from
+  `kernel-baseline.md`'s chosen base build cleanly on this toolchain.
+- Kernel release string: `7.2.0`. Build time: ~13 minutes on 20 cores.
+  Source tree + build output: 5.4G on disk (84G free remained afterward).
+- **This fully closes out the "toolchain works end-to-end" question** — no
+  GNU cross-`gcc` was needed, `LLVM=1`/`LLVM_IAS=1` clang+lld was sufficient
+  for a complete `arm64` build including devicetree compilation.
+
+### Important process note for next time
+
+A background kernel build was started via `nohup make ... & disown`, which
+returns almost immediately — the harness's background-task notification for
+*that launcher command* arrived within a second, **before the actual
+multi-minute compile had gone anywhere**. Do not treat that notification as
+"the build is done." The correct pattern used here: separately background a
+`until ! kill -0 <pid>; do sleep 5; done` wait-loop on the real `make` PID,
+and treat *that* command's completion notification as the real signal. Watch
+for this trap again for any future long build kicked off with
+`nohup ... & disown` rather than the Bash tool's own `run_in_background`.
+
+## Not yet done (next steps)
+
+- This proof build targeted the generic `arm64` `defconfig`, not a
+  `gts7l`-specific kernel config. Phase 1's actual devicetree/driver work
+  still needs to happen before anything boots on the physical tablet.
+- Android platform tools beyond `adb` (e.g. `fastboot`, a `heimdall` build,
+  `avbtool`) — not checked yet; needed before Phase 1 flashing attempts, not
+  before a kernel *build*.

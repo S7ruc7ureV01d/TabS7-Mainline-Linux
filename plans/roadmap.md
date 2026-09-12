@@ -112,10 +112,21 @@ Progress log:
 - 2026-09-11: Chose the kernel baseline (upstream `sm8250-samsung-common.dtsi`)
   and confirmed the local build toolchain is ready — see
   `../docs/kernel-baseline.md` and `../docs/build-environment.md`. Phase 0 is
-  now essentially complete except for the TWRP/recovery question. Next:
-  actually fetch upstream Linux source at a recent tag and attempt a first
-  `x1q`/`r8q`-equivalent build to prove the toolchain end-to-end before
-  writing any `gts7l`-specific devicetree code (Phase 1).
+  now essentially complete except for the TWRP/recovery question.
+- 2026-09-11: **First proof-of-toolchain build succeeded.** Shallow-cloned
+  upstream Linux `v7.2` into `work/linux` (gitignored scratch space) and ran
+  `make ARCH=arm64 LLVM=1 LLVM_IAS=1 defconfig && make ... -j20 Image dtbs`.
+  Clean build, zero warnings, `Image` produced, both `sm8250-samsung-r8q.dtb`
+  and `sm8250-samsung-x1q.dtb` compiled successfully — confirms the chosen
+  kernel baseline and local toolchain work end-to-end before any
+  `gts7l`-specific code is written. Full details in
+  `../docs/build-environment.md`, including a process note about a false
+  "build complete" notification from a `nohup`-backgrounded process that's
+  worth remembering for future long builds. Phase 0 is now fully done except
+  for the TWRP/recovery decision (which is intentionally left open for the
+  owner, not blocking Phase 1 kernel-side work). Next: start Phase 1 for
+  real — write `sm8250-samsung-gts7l.dts` forked from
+  `sm8250-samsung-common.dtsi`.
 - 2026-09-11: Surveyed TWRP/custom-recovery options for `gts7l` — see
   `../docs/recovery-options.md`. No option is a risk-free "just flash it":
   an actively maintained prebuilt TWRP exists but for the wrong model variant
