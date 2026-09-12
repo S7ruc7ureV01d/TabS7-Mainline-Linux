@@ -1,0 +1,23 @@
+# SPDX-License-Identifier: MIT
+#
+# Kernel config fragment for the Samsung Galaxy Tab S7 LTE (SM-T875, gts7l).
+# Layer onto the plain arm64 `defconfig` with scripts/kconfig/merge_config.sh,
+# not meant to stand alone. See docs/kernel-config-notes.md for the audit
+# this fragment came out of - what defconfig already covers, what genuinely
+# needed changing, and why.
+#
+# Phase 1 scope only (boot to a console + mount root): this fragment does
+# NOT yet enable anything for display, touch, S Pen, charging, or Wi-Fi -
+# those aren't needed to reach a shell and are deferred to their own phases
+# per plans/roadmap.md, same as kernel/dts/sm8250-samsung-gts7l.dts.
+
+# Root storage (UFS) must be able to come up without depending on module
+# load order in an early initramfs - defconfig ships both of these as
+# modules (=m). Force them built-in so the very first boot attempt has one
+# fewer moving part between "kernel starts" and "root filesystem mounts".
+CONFIG_SCSI_UFS_QCOM=y
+# PHY_QCOM_QMP_UFS lives under the PHY_QCOM_QMP menuconfig umbrella and is
+# capped at that parent's tristate value - the parent must be promoted too,
+# or PHY_QCOM_QMP_UFS silently stays =m no matter what this fragment says.
+CONFIG_PHY_QCOM_QMP=y
+CONFIG_PHY_QCOM_QMP_UFS=y

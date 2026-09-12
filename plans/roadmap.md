@@ -165,6 +165,18 @@ Exit criteria:
       bus/reset, S Pen driver binding, MAX77705 driver, Wi-Fi PCIe
       instantiation, and Book Cover Keyboard are explicitly deferred to their
       later phases per the file's own `TODO` comments, not silently missing.
+- [x] Kernel config for `gts7l` established —
+      **`kernel/config/gts7l.fragment`**, layered onto plain `defconfig` via
+      `merge_config.sh`. Audit found `defconfig` already covers nearly
+      everything Phase 1 needs (PMIC/pinctrl/clocks/IPC/console/pwrkey all
+      `=y` already) — the fragment only needed to force UFS storage
+      (`SCSI_UFS_QCOM`, `PHY_QCOM_QMP_UFS` + its `PHY_QCOM_QMP` parent)
+      built-in rather than modules, to remove initramfs module-load-ordering
+      risk from the very first boot attempt. Full audit and a Kconfig
+      parent/child tristate-ceiling gotcha worth remembering later in
+      `../docs/kernel-config-notes.md`. **Builds clean (zero warnings)**
+      merged with the `gts7l` DTS against the same `v7.2` tree — config-level
+      validation only, not hardware-booted yet.
 - [ ] Kernel builds and boots to an initramfs/console (UART or USB) on the
       physical tablet.
 - [ ] UFS storage enumerates and is readable.
@@ -176,9 +188,15 @@ Progress log:
   three-PMIC complex (PM8150+PM8150L+PM8009) that upstream's
   `sm8250-samsung-common.dtsi` doesn't include by default (the Galaxy S20
   phones it was written for apparently don't need PM8150L/PM8009 wired up at
-  this level) — added both `#include`s to our board file. Next: a
-  `gts7l`-flavored kernel config and an actual boot attempt, which loops back
-  to the still-open recovery/flashing question in `recovery-options.md`.
+  this level) — added both `#include`s to our board file.
+- 2026-09-11: Established `gts7l.fragment`, a minimal kernel config layered
+  onto plain `defconfig`. Most of what Phase 1 needs was already on by
+  default; only had to force UFS storage built-in for a more reliable first
+  boot attempt. Both the devicetree and config now build clean together.
+  **Both remaining Phase 1 exit criteria require an actual boot attempt on
+  the physical tablet**, which is blocked on the still-open recovery/flashing
+  decision in `../docs/recovery-options.md` — that's the real next step, not
+  more build-side work.
 
 ---
 
