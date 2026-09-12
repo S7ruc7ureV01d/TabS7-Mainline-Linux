@@ -139,22 +139,89 @@ hardware in this pass - **flashing anything to the device is still a
 separate, deliberate decision, not something this build step did on its
 own.**
 
+## Real-hardware validation (2026-09-12) — four more real bugs found and fixed
+
+The plan in `flashing-plan.md` was executed: `gts7l-recovery-vbmeta.tar`
+flashed via `odin4` (AP slot only, per that plan's RP-safety reasoning), then
+booted directly into recovery. **This is the first time anything from this
+project has run on the physical tablet.** Sizeable success once four more
+genuine bugs (all present in the original 2020-era device tree, none
+guessed at - each one root-caused from either a live TWRP terminal or a
+comparison against the actively-maintained sibling `gts7lwifi-twrp` build)
+were found and fixed, each requiring its own rebuild-flash-reboot cycle:
+
+1. **Touch/theme orientation mismatch.** `TW_THEME := landscape_hdpi` with
+   `RECOVERY_TOUCHSCREEN_SWAP_XY`/`FLIP_Y` was the device tree's original,
+   apparently never-actually-tested guess - the panel renders portrait on
+   real hardware, and the touch transform for a landscape UI was badly
+   misaligned against it. Fixed by switching to the tree's own
+   commented-out (also never enabled) `TW_THEME := portrait_hdpi`
+   alternative and dropping the touch swap entirely.
+
+2. **`recovery.fstab` pointed `odm`/`product`/`system`/`vendor` at physical
+   block devices that don't exist.** This is a dynamic-partitions device -
+   those four live inside `super`, not as their own by-name partitions. The
+   fstab had *both* a correct `logical,first_stage_mount` form and a broken
+   plain form for each, with the broken one left active - "Failed to mount
+   '/vendor' (Block device required)" etc. on first boot. Fixed by
+   uncommenting the correct forms (also added `ro`, since these are
+   verity/AVB-backed read-only partitions recovery has no business writing
+   to - a second, smaller "Permission denied" issue that showed up right
+   after the first fix).
+
+3. **USB was completely dead: no enumeration at all, not adb, not MTP.**
+   Root-caused via a live TWRP terminal (touch working by this point made
+   this possible) rather than guessed: `ls /sys/class/android_usb/android0`
+   failed outright - this kernel has no legacy gadget sysfs node at all,
+   only the modern `/sys/class/udc/a600000.dwc3` (confirmed present and
+   correctly probed - the controller itself was never the problem). Every
+   USB-bringup rule in TWRP's own stock `init.rc` is gated behind
+   `sys.usb.configfs=1`, which defaulted to `0`. Two wrong turns before
+   landing on this: first tried `TW_EXCLUDE_DEFAULT_USB_INIT := false`
+   (no effect - that flag doesn't control this property), then wrote a full
+   duplicate manual ConfigFS gadget-setup block in this device tree's own
+   init script (unnecessary and risked racing TWRP's own already-correct
+   stock one, which was already building a real gadget tree under
+   `/config/usb_gadget/g1` the whole time - confirmed live). The actual fix
+   ended up being one line: `setprop sys.usb.configfs 1`.
+
+4. **Even with configfs on, `sys.usb.config` read `mtp,adb`, not `adb`, and
+   nothing enumerated.** Every rule that actually writes to
+   `/config/usb_gadget/g1/UDC` (the step that attaches the gadget to the
+   physical PHY - without it, literally nothing appears on the bus, which
+   is exactly what was observed) is an **exact string match** on
+   `sys.usb.config` (`=adb`, `=fastboot`, `=sideload` - no rule matches the
+   combined `mtp,adb` value). Confirmed live: `sys.usb.ffs.ready` was stuck
+   at `0` and `UDC` was empty. Root cause of the *own* regression: an
+   earlier simplification pass moved this project's
+   `setprop sys.usb.config adb` from `on boot` (late in boot - what the
+   actively-working `ShionKanagawa/gts7lwifi-twrp` sibling build does) to
+   `on init` (early - trivially overwritten by whatever later composes
+   `mtp,adb`, likely TWRP's own MTP-enable logic). Moved back to `on boot`,
+   also forcing `persist.sys.usb.config` so nothing re-reads a stale value.
+   **Confirmed working immediately after**: `sys.usb.config: adb`,
+   `sys.usb.ffs.ready: 1`, device visible in `lsusb` (`18d1:d001`) and
+   `adb devices -l` (`product:omni_gts7l model:SM_T875`, recovery state).
+
+**Current confirmed-working state on real hardware:** correct portrait
+display/touch, `/vendor`/`/odm`/`/product`/`/system` mount cleanly, USB/adb
+fully functional in recovery. Not yet checked: MTP specifically (not needed
+for this project's purposes - forcing plain `adb` intentionally dropped it),
+and the battery-percentage display (noticed missing in TWRP's UI, not
+investigated - likely a separate, lower-priority `TW_*` battery-path config
+issue, tracked here rather than dropped: check
+`android.hardware.health@2.0-impl-default` or the equivalent battery
+capacity sysfs path this recovery reads from, if it matters later).
+
 ## Explicitly not yet done
 
-- **Nothing has been flashed to the physical tablet.** This produced a build
-  artifact only.
-- Not boot-tested even in isolation - the recovery.img's actual behavior on
-  real hardware (does it boot, does the touchscreen/display work per the
-  fstab and prebuilt kernel, does it see all the right partitions) is
-  unverified. The device tree's `README`/history gave no indication anyone
-  had done this before us for exactly `gts7l` (as opposed to the sibling
-  `gts7xl`/Tab S7+ trees, which the wider community did carry further).
-- The prebuilt kernel `Image`/`recovery_dtbo` this recovery boots are
-  external, unaudited binaries (see `../recovery/PROVENANCE.md`) - if this
-  recovery doesn't boot or misbehaves, that prebuilt kernel is one of the
-  first places to look, alongside our own two fixes above.
-- Flashing procedure/timing relative to the anti-rollback constraint still
-  needs the same care described in `recovery-options.md` before this touches
-  the physical device - building it doesn't change that calculus, it just
-  means we now have something built by us, rather than downloaded, to
-  eventually make that decision about.
+- The prebuilt kernel `Image`/`recovery_dtbo` this recovery boots are still
+  external, unaudited binaries (see `../recovery/PROVENANCE.md`) - now
+  proven to actually work on real hardware for display/touch/storage/USB,
+  which is meaningfully more confidence than before, but still not
+  something this project produced or can fully audit.
+- The actual Phase 1 kernel/dtbo test (`gts7l-kernel-test.tar` in
+  `flashing-plan.md`) has not been attempted yet - this session's hardware
+  time went entirely into getting the *recovery* fully working first, per
+  the flashing plan's own staged approach (establish a working fallback
+  before touching `boot` at all). That's the next real step.

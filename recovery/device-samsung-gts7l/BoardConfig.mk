@@ -63,14 +63,21 @@ PLATFORM_SECURITY_PATCH := 2020-10-01
 
 # Portrait orientation:
 #
-#TW_THEME := portrait_hdpi
+# The panel actually renders portrait on real hardware (confirmed booting
+# our built recovery on the physical unit 2026-09-12) - the landscape theme
+# below plus its touch-swap was the device tree's original (untested)
+# guess and was wrong: display came up portrait while touch was mapped for
+# landscape, badly misaligned. Switching to the tree's own commented-out
+# portrait alternative. TW_ROTATION left disabled for now since the visual
+# orientation is already correct without it - only touch was wrong.
+TW_THEME := portrait_hdpi
 #TW_ROTATION := 270
 
-# Landscape orientation:
+# Landscape orientation (not in use - see above):
 #
-TW_THEME := landscape_hdpi
-RECOVERY_TOUCHSCREEN_SWAP_XY := true
-RECOVERY_TOUCHSCREEN_FLIP_Y := true
+#TW_THEME := landscape_hdpi
+#RECOVERY_TOUCHSCREEN_SWAP_XY := true
+#RECOVERY_TOUCHSCREEN_FLIP_Y := true
 
 # TWRP
 RECOVERY_SDCARD_ON_DATA := true
@@ -82,6 +89,15 @@ TW_DEFAULT_BRIGHTNESS := 213
 TW_NO_REBOOT_BOOTLOADER := true
 TW_HAS_DOWNLOAD_MODE := true
 TW_EXTRA_LANGUAGES := true
+# Reverted back to `true` after a failed attempt at `false` also produced no
+# USB enumeration on real hardware (2026-09-12). The actively-maintained
+# sibling build (ShionKanagawa/android_device_samsung_gts7lwifi-twrp, T870,
+# confirmed working ADB/MTP) also keeps this `true` and instead sets
+# `sys.usb.config` directly via its own init script - added the same to
+# init.recovery.qcom.rc's `on boot` below rather than relying on either
+# TWRP's default or the original (fully commented-out, non-functional)
+# ConfigFS gadget setup this device tree shipped with. See
+# docs/twrp-build-notes.md.
 TW_EXCLUDE_DEFAULT_USB_INIT := true
 TWRP_INCLUDE_LOGCAT := true
 TARGET_USES_LOGD := true

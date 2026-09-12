@@ -87,20 +87,21 @@ Exit criteria:
       `param`/`vbmeta` byte-level behavior, and Download/TWRP mode USB VID:PID
       identification still need hands-on confirmation against `gts7l` — don't
       assume the S9 Ultra project's exact offsets carry over.
-- [x] **A working TWRP for `gts7l` has been built from source.** Resolved by
-      building option 3 from `../docs/recovery-options.md` (the two stale
-      source-only device trees named exactly for `gts7l`), rather than
-      trusting either community prebuilt (wrong variant / firmware-update
-      requirement conflicting with the RP constraint). Full build process,
-      two real bugs found and fixed in the 2020-era device tree, and what's
-      still unverified, in `../docs/twrp-build-notes.md`; what's committed
-      vs. not in `../recovery/PROVENANCE.md`. Result:
-      `../artifacts/twrp-gts7l-unofficial.img` (73MB, valid Android bootimg,
-      built clean in 15:22) plus a matching AVB-disabled
-      `../artifacts/vbmeta_disabled.img`. **Not yet flashed to the physical
-      device or boot-tested** — this is a built-and-audited artifact, not a
-      confirmed-working recovery. The flashing decision itself remains the
-      owner's call given the anti-rollback constraint, same as before.
+- [x] **A working TWRP for `gts7l` has been built, flashed, and confirmed
+      working on the physical tablet.** Built from source (option 3 from
+      `../docs/recovery-options.md`) rather than trusting either community
+      prebuilt. Flashed per `../docs/flashing-plan.md` (AP slot only, RP
+      confirmed unaffected) — **this is the first artifact from this project
+      to actually run on the physical hardware.** Four real bugs found and
+      fixed via live hardware testing (touch/theme orientation mismatch,
+      broken dynamic-partition fstab entries, and two USB gadget bugs — a
+      missing `sys.usb.configfs=1` and an exact-string-match property
+      timing issue), each root-caused from real evidence (a live TWRP
+      terminal, a comparison against an actively-working sibling build) not
+      guessed at. **Confirmed on real hardware:** correct portrait
+      display/touch, `/vendor`/`/odm`/`/product`/`/system` mount cleanly,
+      USB/adb fully functional (`adb devices -l` sees it in recovery mode).
+      Full story in `../docs/twrp-build-notes.md`.
 - [x] Toolchain/build environment checked on the primary dev machine — see
       `../docs/build-environment.md`. **Already sufficient for an `LLVM=1`
       clang/lld kernel build**: `clang` 22.1.8, `lld`, `dtc`, `mkbootimg`,
@@ -270,6 +271,19 @@ Progress log:
   problem). Full plan, all reasoning, and ready-to-flash `.tar` packages in
   `../docs/flashing-plan.md`. **Still nothing flashed** — next actual step is
   the owner physically putting the tablet into Download Mode.
+- 2026-09-12: **First flash to physical hardware, and it worked.** Flashed
+  `gts7l-recovery-vbmeta.tar` per the plan; RP confirmed unaffected. TWRP
+  booted but needed four real fixes discovered through live testing (not
+  guessed): touch/theme orientation, broken dynamic-partition fstab entries,
+  and two layered USB gadget bugs (`sys.usb.configfs` never enabled, then
+  once fixed, `sys.usb.config` reading `mtp,adb` instead of the exact string
+  `adb` that TWRP's stock UDC-bind rules require). Each fix went through its
+  own rebuild-reflash-reboot cycle using the live TWRP terminal (once touch
+  worked) to get real evidence instead of guessing further. **TWRP is now
+  fully working**: correct display/touch, all partitions mount, USB/adb
+  confirmed functional. Full story in `../docs/twrp-build-notes.md`. Next:
+  the actual Phase 1 goal — flash `gts7l-kernel-test.tar` (mainline kernel +
+  our DTS + noop DTBO) and see if it boots.
 
 ---
 
