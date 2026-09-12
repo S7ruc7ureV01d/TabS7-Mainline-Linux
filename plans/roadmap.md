@@ -52,18 +52,29 @@ of kernel code, and confirm (or correct) the assumptions in
 `PORTING_ANALYSIS.md`.
 
 Exit criteria:
-- [ ] Samsung's official GPL kernel source release for `gts7`/`gts7wifi`
-      obtained (opensource.samsung.com) and unpacked into `references/`.
-- [ ] Exact PMIC, charger/fuel-gauge, touchscreen, Wi-Fi/BT, and panel part
-      numbers identified from that source (board files / DTS / Kconfig), not
-      guessed from marketing specs.
-- [ ] Current state of SM8250 mainline Linux + postmarketOS support surveyed
-      (`sm8250-mainline` community, OnePlus 8/8T/8 Pro, Poco F2 Pro trees) and
-      the closest existing upstream board file identified as a starting DTS.
-- [ ] Confirmed whether any existing mainline/postmarketOS port for `gts7`
-      already exists anywhere (re-check beyond the initial search in
-      `PORTING_ANALYSIS.md` — check postmarketOS wiki/gitlab directly, not just
-      web search).
+- [x] Samsung's official GPL kernel source release for `gts7l`/`SM-T875`
+      obtained and cloned into `references/gts7l` (a community re-host of
+      Samsung's `SM-T875_QQ_Opensource.zip`, bootloader `T875XXU1ATK1` — close
+      to but not byte-identical to our unit's `T875XXU1ATK4`; see caveat in
+      `../docs/hardware-inventory.md`). `gts7wifi`'s equivalent not yet
+      obtained — not blocking since `gts7l` is primary target.
+- [x] Exact PMIC, charger/fuel-gauge, touchscreen, Wi-Fi/BT, and panel part
+      numbers identified from that source — **see
+      `../docs/hardware-inventory.md` for the full table.** Highlights:
+      display+touch = Novatek NT36523 TDDI (panel `PPA957DB1`), S Pen = Wacom
+      W90xx EMR, charger/fuel-gauge = Maxim MAX77705, core PMICs = standard
+      Qualcomm PM8150+PM8009 (not Samsung-proprietary — easier than the S9
+      Ultra's `sm5440`/`sm5714`), Wi-Fi/BT = Qualcomm QCA6390 (mainline
+      `ath11k`, better positioned than the `ath10k`-class chip guessed
+      earlier).
+- [x] Current state of SM8250 mainline Linux + postmarketOS support surveyed:
+      `sm8250-mainline` org's `linux` and `pmos-pmaports` repos found and
+      cloned into `references/` (targets other `kona` devices, e.g. Lenovo
+      Xiaoxin Pad Pro 2021 — not Tab-S7-specific, but the best existing
+      mainline-`kona` starting point). Not yet deep-dived to pick the single
+      closest board file to fork — do that at the start of Phase 1.
+- [x] Confirmed (again, this pass) that no existing mainline/postmarketOS port
+      for `gts7`/`gts7l` was found anywhere — remains a from-scratch bring-up.
 - [x] Bootloader unlock state and Knox status confirmed: **unlocked, Knox
       `0x1`/tripped** (see `../docs/device-state.md`). ABL log format,
       `param`/`vbmeta` byte-level behavior, and Download/TWRP mode USB VID:PID
@@ -91,9 +102,13 @@ a serial/USB shell — proof the boot chain, DTB, and minimal platform drivers
 (clocks, RPMh, pinctrl, UFS) work.
 
 Exit criteria:
-- [ ] Devicetree for `gts7wifi` created (`kernel/dts/sm8250-samsung-gts7wifi.dts`
-      or similar), derived from the closest upstream SM8250 board + Samsung's
-      GPL source for regulator/pinctrl topology.
+- [ ] Devicetree for `gts7l` created (`kernel/dts/sm8250-samsung-gts7l.dts` or
+      similar), derived from the closest `references/linux`
+      (`sm8250-mainline`) `kona` board file for platform topology, cross-
+      checked against `references/gts7l/arch/arm64/boot/dts/samsung/gts7l/
+      kona-sec-gts7l-eur-overlay-r07.dts` (the exact board-revision DTS
+      matching our physical unit — see `../docs/hardware-inventory.md`) for
+      regulator/pinctrl/GPIO topology.
 - [ ] Kernel builds and boots to an initramfs/console (UART or USB) on the
       physical tablet.
 - [ ] UFS storage enumerates and is readable.
@@ -112,12 +127,17 @@ Goal: get a usable framebuffer and touch input — the minimum for anything
 interactive.
 
 Exit criteria:
-- [ ] DSI panel driver for the Tab S7's LCD panel (not OLED — expect a
-      different driver family than the S9 Ultra's `ana38407`).
+- [ ] DSI panel driver for the **Novatek NT36523** driving the **PPA957DB1**
+      WQXGA LCD panel (confirmed in `../docs/hardware-inventory.md`; reference
+      implementation at `references/gts7l/techpack/display/msm/samsung/
+      NT36523_PPA957DB1/`, needs a mainline DRM panel driver, not a straight
+      port of that downstream one).
 - [ ] KMS/DRM brings up the native panel resolution at the correct refresh
       rate.
-- [ ] Touchscreen driver working (identify actual chip from Phase 0 recon;
-      do not assume Goodix parity with the S9 Ultra).
+- [ ] Touchscreen driver working — **same IC as the panel (Novatek NT36523
+      TDDI)**, wired in DT as `novatek,nvt-ts`; reference driver at
+      `references/gts7l/drivers/input/touchscreen/novatek/nt36523/`. Not
+      Goodix — confirmed, no longer a guess.
 - [ ] Adreno 650 GPU acceleration working (Mesa/Turnip or Freedreno, whichever
       mainline supports for this GPU generation).
 - [ ] Basic GNOME/Wayland session reaches a usable desktop on-device.
@@ -134,10 +154,14 @@ Progress log:
 Goal: the tablet is usable as a tablet — power, connectivity, audio, sensors.
 
 Exit criteria:
-- [ ] Charging + battery telemetry (PMIC/fuel-gauge driver identified and
-      ported/written for the Tab S7's actual charger IC).
-- [ ] Wi-Fi working.
-- [ ] Bluetooth working.
+- [ ] Charging + battery telemetry — charger/fuel-gauge/MUIC IC is confirmed
+      **Maxim MAX77705** (`../docs/hardware-inventory.md`; reference driver at
+      `references/gts7l/drivers/battery_v2/max77705_charger.c` +
+      `max77705_fuelgauge.c`); core PMIC rails are standard Qualcomm
+      **PM8150+PM8009**, which mainline `kona` support should already cover.
+- [ ] Wi-Fi working — combo chip confirmed **Qualcomm QCA6390**, targeted by
+      mainline `ath11k`.
+- [ ] Bluetooth working — same QCA6390 combo chip as Wi-Fi.
 - [ ] Speakers and microphone(s) working.
 - [ ] Volume/power buttons working.
 - [ ] Motion sensors (accelerometer/gyro, rotation) working.
@@ -157,9 +181,10 @@ Progress log:
 Goal: everything else the hardware has, to the extent it's feasible.
 
 Exit criteria:
-- [ ] S Pen hover/pressure/tilt input (passive EMR digitizer — no BLE features
-      expected; scope this down explicitly rather than assuming S9 Ultra
-      parity).
+- [ ] S Pen hover/pressure/tilt input — confirmed **Wacom W90xx-series EMR
+      digitizer over I2C** (`../docs/hardware-inventory.md`; reference driver
+      at `references/gts7l/drivers/input/wacom/wacom_i2c.c`), no BLE — scope
+      confirmed, not just assumed.
 - [ ] Cameras (front/rear) working via V4L2, to whatever extent the ISP allows
       under mainline.
 - [ ] Fingerprint reader: **explicitly decide and record** whether the target
@@ -190,9 +215,11 @@ Exit criteria:
       applicable.
 - [ ] Update mechanism (in-place system updates) working.
 - [ ] "Tab Companion"-equivalent app scoped down to what actually applies to
-      Tab S7 hardware (S Pen settings, keyboard remap if a cover keyboard
-      exists for this model, dual-boot toggle; drop fingerprint/UDFPS-specific
-      features that don't apply).
+      Tab S7 hardware (S Pen settings, keyboard remap — **confirmed**: this
+      device has a real Book Cover Keyboard with a pogo-pin trackpad
+      (`stm,touchpad`) and keypad (`stm,keypad`, labeled `"Tab S7 Book Cover
+      Keyboard"` in DT) per `../docs/hardware-inventory.md` — plus dual-boot
+      toggle; drop fingerprint/UDFPS-specific features that don't apply).
 
 Progress log:
 - (none yet)
@@ -255,3 +282,14 @@ decisions, scope changes) goes here instead of being forced into a phase log.
   verified-boot state on this unit (likely Magisk prop spoofing) — not yet
   independently confirmed via Download mode. Doesn't block bring-up work, but
   don't trust `getprop` alone for security-state questions on this device.
+- 2026-09-11: Found and cloned Samsung's actual GPL kernel source for
+  `gts7l`/`SM-T875` (`references/gts7l`), plus the `sm8250-mainline` org's
+  `linux` and `pmos-pmaports` repos. Extracted confirmed hardware identity for
+  every major component (panel/touch, S Pen, charger/PMIC, Wi-Fi/BT, keyboard
+  cover) — written up in `../docs/hardware-inventory.md`, with Phase 0-4 exit
+  criteria above updated to cite it instead of guessing. Big positive
+  surprise: core PMIC rails are standard Qualcomm silicon (not a
+  Samsung-proprietary PMIC needing a from-scratch driver like the S9 Ultra
+  project needed), and Wi-Fi/BT (QCA6390) has real mainline `ath11k` support.
+  Next up: pick the closest `sm8250-mainline/linux` board file to fork for
+  Phase 1's DTS, and start on toolchain/build-environment setup.
