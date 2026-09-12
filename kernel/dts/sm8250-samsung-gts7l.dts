@@ -43,6 +43,21 @@
 / {
 	model = "Samsung Galaxy Tab S7";
 	/*
+	 * RETRACTED 2026-09-13 (Round 7, docs/kernel-boot-debugging.md): this
+	 * 3-entry structure was believed fixed based on indirect evidence that
+	 * turned out to be a methodology artifact (same class of mistake as
+	 * the "confirmed baseline" retraction elsewhere in this project). A
+	 * correctly-built, freshly-tested artifact using exactly this DTS
+	 * still hits the identical "No match found for Soc Dtb type" failure,
+	 * at a timestamp identical to the microsecond versus every other
+	 * variant tried (single-entry, with/without msm-id, with/without
+	 * `-@`). The structure below is kept because it correctly mirrors
+	 * stock's real appended-DTB layout and isn't known to be wrong - just
+	 * not confirmed to be the fix. Root cause of the ABL rejection is
+	 * unknown again; don't trust the "fix" framing in the comment below
+	 * without re-reading Round 7 first.
+	 */
+	/*
 	 * `qcom,kona` + `qcom,msm-id` fix attempt #2 (2026-09-13), after
 	 * attempt #1 (DTS-property-only, single DTB) made zero observable
 	 * difference to the "No match found for Soc Dtb type" failure - see

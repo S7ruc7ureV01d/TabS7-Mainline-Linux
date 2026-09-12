@@ -417,6 +417,30 @@ Progress log:
   in `../docs/kernel-boot-debugging.md`. New recovery image built and
   flashed to the physical tablet, capture confirmed working end-to-end
   across a real reboot cycle.
+- 2026-09-12/13 (Round 7): Used the new automated capture for real, and it worked -
+  3 clean, marker-anchored captures across 3 tests. **Major correction: retracted
+  Round 5's "No match found for Soc Dtb type is fixed" claim.** Discovered the
+  artifact Round 6 tested was stale (built before both the Round 5 and Round 6
+  fixes, per build-log timestamps), so Round 6's "inconclusive" result was actually
+  silently re-testing the old broken build. Rebuilt a correct, fresh artifact
+  combining both fixes from source and tested it with a verified capture: fails
+  identically to the original pre-fix baseline, down to the exact microsecond
+  timestamp. Isolated `-@`/`__symbols__` by testing the 3-entry DTB without it -
+  also fails identically. **Every DTS/DTB variant tried in this project so far
+  produces the same deterministic ABL rejection at the same microsecond offset** -
+  root cause is genuinely unknown again. Also found and partially worked around a
+  new evidence-capture gotcha: a Download-Mode bounce alone can evict the ring
+  buffer before even one recovery reboot completes if too much time elapses first;
+  attempted a `heimdall`-scripted fast exit to remove human reaction time from the
+  loop but it isn't working yet (PIT partition naming, stuck USB session) - left
+  for a future round. Full evidence and reasoning in
+  `../docs/kernel-boot-debugging.md` (Round 7). Tablet safe throughout: stock
+  `boot.img`/`dtbo.img` reflashed and hash-verified, `param` left forced to
+  recovery, `rp` unaffected. Next: pursue an evidence source independent of
+  `/proc/last_kmsg` (real UART, matching `ramoops` address for TWRP pstore, or
+  direct ABL binary inspection) before any more blind DTS iteration - black-box
+  guessing against this specific failure has now produced two false "fixed"
+  conclusions in a row.
 
 ---
 

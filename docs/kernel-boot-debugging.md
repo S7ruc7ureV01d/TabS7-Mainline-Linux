@@ -432,36 +432,41 @@ even if it existed.
 
 ## Current status / next steps
 
-- **`No match found for Soc Dtb type` appears fixed** (Round 5) by matching
-  stock's real appended-DTB structure: three concatenated FDTs, one per
-  `kona` silicon stepping, each with `compatible = "qcom,kona"` (added
-  alongside our own `samsung,gts7l`/`qcom,sm8250`) and the matching
-  `qcom,msm-id`. Evidence is indirect (a previously 100%-reliable error
-  string going to 0/3 post-fix) but strong.
-- **`/__symbols__` (Round 6) applied preemptively** for the next expected
-  barrier per the S9 Ultra project's precedent, but **not yet confirmed** -
-  three post-fix test attempts all ended in Download Mode per direct
-  observation, and none of the three `/proc/last_kmsg` pulls captured our
-  kernel's own boot-attempt entries before ring-buffer eviction. It is
-  genuinely unknown right now whether Round 6 fixed a real second barrier,
-  didn't matter, or whether something entirely different is now the
-  blocker.
-- **The evidence-capture methodology itself is now the practical
-  bottleneck**, not any specific DTS change. Getting from "just bounced to
-  Download Mode" to "back in TWRP with USB enabled" reliably consumes more
-  of the ~2MB ring buffer than fits before the entry of interest is
-  overwritten, even when done as fast as possible. Needs either a faster
-  recovery-combo path (fewer intervening reboots), a different capture
-  target (see below), or accepting behavioral-only evidence (did it end in
-  Download Mode or not) for some rounds and only chasing detailed log
-  evidence when a capture happens to land cleanly.
+- **The automated `/cache/last_kmsg` capture works and was used successfully this
+  round** (Round 7, below) - 3 clean, marker-anchored boot-attempt captures across 3
+  separate tests, finally giving reliable ground truth after several rounds of
+  methodology failure.
+- **Major correction (Round 7): `No match found for Soc Dtb type` is NOT fixed -
+  Round 5's "fix confirmed" claim is retracted.** The artifact Round 6 tested
+  turned out to predate both the Round 5 and Round 6 fixes (a stale-artifact bug in
+  how Round 6 was tested - see Round 7 for the timestamp evidence). A freshly,
+  correctly rebuilt artifact combining both fixes was tested this round with a
+  verified clean capture: it fails identically, at timestamps identical to the
+  microsecond versus the original Round 4 pre-fix failure. Isolating `-@`/
+  `__symbols__` (rebuilt without it, otherwise identical) also fails identically.
+  **Every DTS/DTB variant tried across this entire project so far (single-entry,
+  3-entry, with/without msm-id, with/without `-@`) produces the exact same
+  deterministic failure at the exact same microsecond offset.** Root cause is back
+  to genuinely unknown.
+- **The evidence-capture methodology has one more confirmed blind spot even with
+  the automated capture** (Round 7): a Download-Mode bounce can by itself generate
+  enough log volume to evict the entry before even a single recovery reboot gets
+  the capture saved. Minimize dwell time in Download Mode - the button combo done
+  immediately after a bounce worked cleanly twice; waiting longer once lost the
+  entry entirely. A scripted fast-exit via `heimdall close-pc-screen` was attempted
+  but isn't working yet (PIT partition-name mismatch for `param`, stuck Odin USB
+  session after `--no-reboot`) - worth finishing since it would remove the human
+  reaction-time variable entirely.
 - Untried alternative evidence sources worth considering before more blind
-  DTS iteration: a real UART console (physically unconfirmed on this
+  DTS iteration - now more valuable than ever, given the "No match" root cause is
+  unknown again: a real UART console (physically unconfirmed on this
   retail unit - see `phase1-boot-testing.md`'s open item) would sidestep
   the ring-buffer problem entirely if one exists; matching our DTS's
   `ramoops` reserved-memory address to what TWRP's own kernel would
   recognize might let `/sys/fs/pstore` surface something even when
-  `last_kmsg` doesn't.
+  `last_kmsg` doesn't; disassembling/inspecting the real Samsung ABL binary's
+  DTB-matching routine directly (extractable from this device's `abl` partition)
+  rather than continuing to infer its behavior from black-box testing alone.
 - Our own busybox initramfs is still untested in any meaningful sense - it
   can't be tested until the ABL will actually hand off to our kernel, which
   is still unconfirmed.
@@ -470,7 +475,11 @@ even if it existed.
   own* `Booting Into Mission Mode` marker in a freshly captured
   `/proc/last_kmsg` - not by searching the whole 2MB buffer for a success
   string, which is exactly the mistake that produced the retracted
-  "confirmed baseline" earlier in this file.
+  "confirmed baseline" earlier in this file. **Also confirmed a related trap
+  in Round 7: verify the actual artifact under test was built *after* the fix
+  it's supposed to contain (check build log timestamps) before trusting any
+  test result, positive or negative** - Round 6's "inconclusive" result was
+  actually a silent stale-artifact bug, not genuine inconclusiveness.
 
 ## Automated boot-history capture in TWRP (2026-09-12)
 
@@ -610,3 +619,81 @@ still `recovery`. **Not fixed at the root** - actually making
 `recovery.fstab` parse under strict `libfs_mgr` would risk breaking
 TWRP's own (differently-lenient) reader of the same file, which is a
 real, separate risk not taken on here without deliberate scoping.
+
+## Round 7 (2026-09-12/13): the automated capture works, and it forces a second major
+retraction - Round 5's "fix confirmed" was never actually verified either
+
+With the automated `/cache/last_kmsg` capture (above) now flashed and working, ran a
+disciplined re-test of the exact artifact Round 6 claimed to have tested
+(`artifacts/gts7l-kernel-test.tar`, timestamped 13:24) - and discovered before even
+flashing anything that **this artifact predates both the Round 5 and Round 6 fixes**
+(`work/build-appended-dtb.log` is 15:55, `work/build-symbols-fix.log` is 16:12, both
+after 13:24). So Round 6's "three consecutive test attempts... all ended in Download
+Mode" was actually re-testing the pre-fix, single-DTB-entry artifact the whole time -
+its "not yet confirmed either way" conclusion was correct by accident, but for the
+wrong reason, and told us nothing about the real fix.
+
+Freshly rebuilt the real combination from source (kernel `Image` + `sm8250-samsung-gts7l.dtb`
+built with `-@`, patched into three `qcom,msm-id` copies via `fdtput`, concatenated
+in stock's v2.1/v2/v1 order, `magiskboot repack`ped onto the stock template) and
+tested it end-to-end using the automated capture as the evidence path (button-combo
+back to TWRP, immediate pull of `/cache/last_kmsg/kmsg.0`, checked directly against
+that capture's own `Booting Into Mission Mode` marker per the methodology rule
+established in Round 4). Result: **bounced to Download Mode**, log shows the identical
+`No match found for Soc Dtb type` / `Error: Appended Soc Device Tree blob not found`
+sequence, at **timestamps identical to the microsecond** (`{ 6527152 }` /
+`{ 6539901 }`) to Round 4's original pre-fix failure.
+
+To isolate whether `-@`/`__symbols__` (Round 6) was the actual regression, rebuilt a
+second artifact with the identical 3-entry `qcom,msm-id` DTB structure but **without**
+`-@` (removed the `DTC_FLAGS_sm8250-samsung-gts7l := -@` line, confirmed the rebuilt
+DTB has no `/__symbols__` node and is back to 115071 bytes per copy). Tested the same
+way. **Also bounced to Download Mode, also the identical microsecond timestamps.**
+
+**Conclusion: neither the 3-entry appended-DTB fix (Round 5) nor the `-@` addition
+(Round 6) has ever actually changed this device's behavior.** All of the following
+configurations, tested and captured this round with a verified, marker-anchored log
+for each, produce the exact same deterministic `No match found for Soc Dtb type` at
+the exact same microsecond timestamp:
+
+- Single-entry DTB, no `msm-id`/`board-id` (original baseline)
+- Single-entry DTB with `msm-id`/`board-id`
+- 3-entry appended DTB, no `-@`
+- 3-entry appended DTB, with `-@`/`__symbols__`
+
+Round 5's "evidence it worked" (the error string absent from 3 post-fix captures) is
+now understood to have been the same class of mistake Round 4 already found and
+retracted once in this file - those 3 captures almost certainly never contained a
+real `Booting Into Mission Mode` session either (this round independently rediscovered,
+the hard way, that even a *single* Download-Mode round-trip is enough to evict the
+entry from the 2MB ring buffer before the automated capture can save it - see the next
+section - so it is entirely plausible none of those 3 "clean" captures ever saw our
+kernel attempt at all). Root cause of the ABL's DTB rejection is **back to unknown**.
+
+### The automated capture has a real blind spot: Download Mode dwell time evicts the ring buffer
+
+Confirmed directly this round, twice: a **single** recovery reboot after landing in
+Download Mode is sometimes, but not reliably, enough on its own to evict the
+`Booting Into Mission Mode` entry before TWRP's `post-fs` capture runs - it worked
+cleanly 2 out of 2 times when the button-combo was done immediately, but failed
+completely (zero `Mission Mode` markers in any of 3 captures) once, earlier the same
+session, when more time/reboots elapsed in Download Mode first. Download Mode itself
+appears to generate meaningful log volume while idling (Odin protocol polling,
+possibly USB re-enumeration retries) - the faster the round-trip back to TWRP, the
+better the odds the entry survives. **Practical guidance: minimize any delay between
+a Download-Mode bounce and starting the recovery button combo.**
+
+Attempted to script this with `heimdall close-pc-screen` (auto-exit Download Mode
+the instant `heimdall detect` sees it, instead of waiting on manual button timing) -
+**did not work, needs more investigation before relying on it**: `heimdall flash`
+doesn't recognize a partition literally named `param` in this device's PIT (needs a
+`heimdall download-pit` dump to find the real name), and a `--no-reboot` session left
+the device's Odin USB protocol in a state where a follow-up `--resume` action failed
+with repeated `libusb error -7` on every retry - needs a fresh, uninterrupted heimdall
+session per action, not a resumed one, or a different approach entirely. Abandoned
+for this round in favor of the manual button-combo, which is slower but was already
+working.
+
+Tablet safe throughout: stock `boot.img`/`dtbo.img` restored and reverified by hash
+after every test, `param` left at `0x02` (forced-recovery) so it lands in TWRP on the
+next power-on, `rp` unaffected.
