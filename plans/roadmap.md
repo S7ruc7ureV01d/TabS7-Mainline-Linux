@@ -67,12 +67,18 @@ Exit criteria:
       Ultra's `sm5440`/`sm5714`), Wi-Fi/BT = Qualcomm QCA6390 (mainline
       `ath11k`, better positioned than the `ath10k`-class chip guessed
       earlier).
-- [x] Current state of SM8250 mainline Linux + postmarketOS support surveyed:
-      `sm8250-mainline` org's `linux` and `pmos-pmaports` repos found and
-      cloned into `references/` (targets other `kona` devices, e.g. Lenovo
-      Xiaoxin Pad Pro 2021 — not Tab-S7-specific, but the best existing
-      mainline-`kona` starting point). Not yet deep-dived to pick the single
-      closest board file to fork — do that at the start of Phase 1.
+- [x] Current state of SM8250 mainline Linux + postmarketOS support surveyed,
+      **and base board file chosen: see `../docs/kernel-baseline.md`.**
+      `sm8250-mainline`'s `linux`/`pmos-pmaports` repos (cloned into
+      `references/`) turned out to be a stale, non-Samsung-focused `v6.2`
+      snapshot — checking current upstream `torvalds/linux` directly instead
+      turned up an existing **Samsung SM8250 family base**
+      (`sm8250-samsung-common.dtsi`, built on `pm8150.dtsi` — matching our
+      confirmed PMIC) plus two Samsung phone boards (`r8q`/`x1q`, Galaxy
+      S20/S20 FE). **Decision: fork `gts7l`'s DTS from
+      `sm8250-samsung-common.dtsi`**, following the same
+      `"samsung,gts7l", "qcom,sm8250"` compatible-string convention, rather
+      than from any OnePlus/Xiaomi-oriented `kona` tree.
 - [x] Confirmed (again, this pass) that no existing mainline/postmarketOS port
       for `gts7`/`gts7l` was found anywhere — remains a from-scratch bring-up.
 - [x] Bootloader unlock state and Knox status confirmed: **unlocked, Knox
@@ -84,12 +90,21 @@ Exit criteria:
       `gts7l`/`SM-T875`, vetted for anti-rollback (`rp`) safety before
       flashing (see the hard constraint at the top of this file), or a plan to
       build one.
-- [x] Bootloader already unlocked on the physical unit. Toolchain/build
-      environment (cross compiler, Linux build host, `mmdebstrap`
-      availability) still needs to be set up/confirmed.
+- [x] Toolchain/build environment checked on the primary dev machine — see
+      `../docs/build-environment.md`. **Already sufficient for an `LLVM=1`
+      clang/lld kernel build**: `clang` 22.1.8, `lld`, `dtc`, `mkbootimg`,
+      `bc`/`bison`/`flex`/`openssl`/`libelf`/`base-devel` all present, no GNU
+      cross-`gcc` needed. 90G free disk space at time of check. `mmdebstrap`
+      availability not yet checked (not needed until Phase 5).
 
 Progress log:
-- (none yet)
+- 2026-09-11: Chose the kernel baseline (upstream `sm8250-samsung-common.dtsi`)
+  and confirmed the local build toolchain is ready — see
+  `../docs/kernel-baseline.md` and `../docs/build-environment.md`. Phase 0 is
+  now essentially complete except for the TWRP/recovery question. Next:
+  actually fetch upstream Linux source at a recent tag and attempt a first
+  `x1q`/`r8q`-equivalent build to prove the toolchain end-to-end before
+  writing any `gts7l`-specific devicetree code (Phase 1).
 
 ---
 
@@ -102,10 +117,10 @@ a serial/USB shell — proof the boot chain, DTB, and minimal platform drivers
 (clocks, RPMh, pinctrl, UFS) work.
 
 Exit criteria:
-- [ ] Devicetree for `gts7l` created (`kernel/dts/sm8250-samsung-gts7l.dts` or
-      similar), derived from the closest `references/linux`
-      (`sm8250-mainline`) `kona` board file for platform topology, cross-
-      checked against `references/gts7l/arch/arm64/boot/dts/samsung/gts7l/
+- [ ] Devicetree for `gts7l` created (`sm8250-samsung-gts7l.dts`), forked from
+      upstream's `sm8250-samsung-common.dtsi` per the decision in
+      `../docs/kernel-baseline.md`, cross-checked against
+      `references/gts7l/arch/arm64/boot/dts/samsung/gts7l/
       kona-sec-gts7l-eur-overlay-r07.dts` (the exact board-revision DTS
       matching our physical unit — see `../docs/hardware-inventory.md`) for
       regulator/pinctrl/GPIO topology.
