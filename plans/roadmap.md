@@ -212,9 +212,28 @@ Exit criteria:
       tablets often don't expose one at all without hardware modification;
       USB console is the more realistic fallback per this exit criterion's
       own wording, not yet set up.
+- [x] **Flashing plan written** — see `../docs/flashing-plan.md`. Covers:
+      pre-flight `rp`/bootloader baseline capture, full raw backups of every
+      partition this plan touches (`boot`/`recovery`/`vbmeta`/
+      `vbmeta_samsung`/`dtbo`, checksummed, bundled into a one-shot
+      `gts7l-STOCK-RESTORE-T875XXU1ATK4.tar` rollback package), the RP-safety
+      whitelist/blacklist reasoning, and a staged procedure (recovery+vbmeta
+      first as a safe/reversible fallback-establishing step, verified
+      working, *then* boot+dtbo as the actual kernel test). **New safety
+      finding while planning this:** the live `/proc/cmdline` shows Samsung's
+      ABL applies a per-revision `dtbo` overlay (`androidboot.dtbo_idx=7`)
+      designed for its *downstream* devicetree on top of whatever base DTB
+      boots — flashing our mainline `boot.img` without addressing this risked
+      Samsung's overlay corrupting our tree. Fixed the same way the S9 Ultra
+      project did: built a genuinely empty "noop" DTBO
+      (`kernel/dtbo/gts7l-noop.dts`, 9 identical entries matching the stock
+      partition's entry count) to flash alongside `boot.img`. All Odin-ready
+      `.tar` packages built and checksummed. **Nothing flashed yet** —
+      execution is the owner's call, physical access to the device is
+      required (Download-mode button combo).
 - [ ] Kernel builds and boots to an initramfs/console (UART or USB) on the
-      physical tablet. **Artifact ready (above); not yet attempted on
-      hardware.**
+      physical tablet. **Artifact + flashing plan ready (above); not yet
+      attempted on hardware.**
 - [ ] UFS storage enumerates and is readable. **Driver forced built-in
       already (`gts7l.fragment`); needs the actual boot attempt to confirm.**
 - [ ] Root filesystem reachable via ADB/serial shell, even without display.
@@ -239,6 +258,18 @@ Progress log:
   honestly rather than assumed. **All remaining Phase 1 exit criteria now
   require an actual boot attempt on the physical tablet** — that's the real
   next step once the owner is ready, not more build-side work.
+- 2026-09-12: Owner's tablet backup complete; asked for the flashing plan
+  with anti-rollback safety as the top priority. Pulled full raw backups of
+  every partition about to be touched (`boot`/`recovery`/`vbmeta`/
+  `vbmeta_samsung`/`dtbo`) straight off the live device and bundled a
+  one-shot restore package, before writing anything else. While planning,
+  found a real gap the earlier boot-test artifact hadn't accounted for:
+  Samsung's ABL merges a downstream-shaped `dtbo` overlay
+  (`androidboot.dtbo_idx=7`) onto the boot DTB — built a noop DTBO to
+  neutralize that (same fix the S9 Ultra project needed for the analogous
+  problem). Full plan, all reasoning, and ready-to-flash `.tar` packages in
+  `../docs/flashing-plan.md`. **Still nothing flashed** — next actual step is
+  the owner physically putting the tablet into Download Mode.
 
 ---
 

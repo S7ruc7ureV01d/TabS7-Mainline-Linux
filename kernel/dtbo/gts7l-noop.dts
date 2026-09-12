@@ -1,0 +1,12 @@
+/dts-v1/;
+/plugin/;
+
+/ {
+	fragment@0 {
+		target-path = "/";
+		__overlay__ {
+			/* Deliberately empty: applies nothing on top of the base DTB.
+			 * See docs/flashing-plan.md for why this exists. */
+		};
+	};
+};
