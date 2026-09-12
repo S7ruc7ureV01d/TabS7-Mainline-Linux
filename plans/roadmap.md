@@ -1,9 +1,11 @@
 # Tab S7 Mainline Linux — Bring-up Roadmap
 
-Target device: the physical unit in hand is a Samsung Galaxy Tab S7 **LTE**
-(`SM-T875`, codename `gts7l`/`gts7leea`) — confirmed via `adb` in
-`../docs/device-state.md`. The Wi-Fi-only `SM-T870` (`gts7wifi`) may or may not
-also be targeted; this needs an explicit decision (see cross-phase notes).
+Target device: **primary target is the physical unit in hand**, a Samsung
+Galaxy Tab S7 **LTE** (`SM-T875`, codename `gts7l`/`gts7leea`) — confirmed via
+`adb` in `../docs/device-state.md`, bootloader unlocked, Knox tripped. The
+Wi-Fi-only `SM-T870` (`gts7wifi`) is a **desired future target, not blocking**
+— design DTS/drivers to be extensible to it where cheap to do so, but don't
+delay `gts7l` bring-up waiting for `gts7wifi` hardware/parity.
 SoC: Qualcomm SM8250 "kona" / Snapdragon 865(+), Adreno 650.
 
 **⚠️ Hard constraint on every phase:** this specific unit must never have its
@@ -62,14 +64,18 @@ Exit criteria:
       already exists anywhere (re-check beyond the initial search in
       `PORTING_ANALYSIS.md` — check postmarketOS wiki/gitlab directly, not just
       web search).
-- [ ] Bootloader/partition recon on physical hardware: ABL log format,
-      `param`/`vbmeta` behavior, Download/TWRP mode USB VID:PID identification,
-      confirmed against `gts7` (do not assume the S9 Ultra project's exact
-      offsets carry over — verify).
+- [x] Bootloader unlock state and Knox status confirmed: **unlocked, Knox
+      `0x1`/tripped** (see `../docs/device-state.md`). ABL log format,
+      `param`/`vbmeta` byte-level behavior, and Download/TWRP mode USB VID:PID
+      identification still need hands-on confirmation against `gts7l` — don't
+      assume the S9 Ultra project's exact offsets carry over.
 - [ ] A working TWRP (or equivalent custom recovery) confirmed available for
-      the target `gts7` model/region, or a plan to build one.
-- [ ] Unlocked bootloader + toolchain/build environment reproduced locally
-      (cross compiler, WSL/Linux build host, `mmdebstrap` availability).
+      `gts7l`/`SM-T875`, vetted for anti-rollback (`rp`) safety before
+      flashing (see the hard constraint at the top of this file), or a plan to
+      build one.
+- [x] Bootloader already unlocked on the physical unit. Toolchain/build
+      environment (cross compiler, Linux build host, `mmdebstrap`
+      availability) still needs to be set up/confirmed.
 
 Progress log:
 - (none yet)
@@ -225,10 +231,18 @@ decisions, scope changes) goes here instead of being forced into a phase log.
 
 - 2026-09-11: Device recon via `adb` on the physical unit (see
   `../docs/device-state.md`) shows it is the **LTE `SM-T875`/`gts7l`**, not the
-  Wi-Fi-only `SM-T870`/`gts7wifi` this roadmap originally assumed. Open
-  decision: target `gts7l` only, or also aim for `gts7wifi` parity? Until
-  decided, treat `gts7l` (this physical unit) as the primary target and modem
-  bring-up (`mdm`/RIL) as in-scope rather than out-of-scope.
+  Wi-Fi-only `SM-T870`/`gts7wifi` this roadmap originally assumed. **Decided:**
+  `gts7l` (this physical unit) is the primary target, modem/RIL bring-up
+  in-scope; `gts7wifi` support is a desired future goal, not a blocker — keep
+  it cheap-to-extend-to where it doesn't cost extra work, but don't gate
+  progress on it.
+- 2026-09-11: Owner confirmed physically: **Knox `0x1` (tripped/void)**,
+  **bootloader unlocked**. This resolves the `getprop`-vs-`/proc/cmdline`
+  discrepancy in `../docs/device-state.md` in favor of the `/proc/cmdline`
+  reading (Magisk was spoofing `getprop`). Practical effect: no separate OEM
+  unlock step needed before Phase 0/1 flashing work — but the anti-rollback
+  (`rp`) constraint below is unaffected by unlock state and still applies in
+  full.
 - 2026-09-11: **Anti-rollback constraint is permanent for this unit** — owner
   wants to keep it on its original `T875XXU1ATK4` first-release firmware as a
   collector's device. `ro.boot.rp`/`androidboot.rp` = `1` currently. Never

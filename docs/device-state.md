@@ -109,15 +109,20 @@ boot, read directly, not through the property service):**
 string `4.19.81-19993249`). Magisk (via resetprop / Zygisk) commonly rewrites
 `ro.boot.warranty_bit` to `0` and `ro.boot.verifiedbootstate` to `green` at
 runtime so that apps querying these properties see a "clean" device — this is
-the most likely explanation for the mismatch, but it is **not independently
-confirmed** here. `/proc/cmdline` is the boot-time value the bootloader itself
-handed the kernel and should be trusted over `getprop` for these two fields.
-**Practical reading: treat Knox/warranty as tripped (`1`) and verified boot
-state as `orange` (modified) — i.e., assume the "clean" `getprop` values are
-cosmetic** — and confirm the real state next time the device is physically in
-Download mode (Samsung shows KNOX/warranty status on that screen, unaffected
-by anything running in Android). `ro.boot.rp = 1` was consistent both ways, so
-the anti-rollback counter reading above is trusted.
+the most likely explanation for the mismatch, and it is now **confirmed by the
+owner physically**: Knox is `0x1` (**tripped/void**) and the **bootloader is
+unlocked**. `/proc/cmdline`'s `orange`/`warranty_bit=1` reading was the
+accurate one; the `getprop` `green`/`0` values are Magisk-spoofed cosmetic
+overrides and should be disregarded for security-state questions on this
+device going forward. `ro.boot.rp = 1` was consistent both ways, so the
+anti-rollback counter reading above is trusted.
+
+**Bootloader-unlocked confirmation matters for the roadmap:** with OEM unlock
+already done, Phase 0/Phase 1 flashing work (custom recovery, test kernels/DTB,
+boot images) does **not** additionally need an unlock step — but the
+anti-rollback (`rp`) constraint above is independent of the unlock state and
+still applies in full: an unlocked bootloader still enforces/advances the RP
+eFuse on any image that requests it.
 
 `ro.oem_unlock_supported` = `1`. Current "OEM unlock" toggle state could not
 be read (`settings get global oem_unlock_supported` returned `null` — that
@@ -185,15 +190,14 @@ devices) — notable ones for bring-up planning:
 
 ## Open questions / follow-ups for Phase 0
 
-- [ ] Confirm true Knox/warranty/verified-boot state by physically checking
-      Download mode, since `getprop` and `/proc/cmdline` disagree.
-- [ ] Confirm current OEM-unlock toggle state in Developer Options.
+- [x] Confirm true Knox/warranty/verified-boot state — **confirmed by owner:
+      Knox `0x1` (tripped/void), bootloader unlocked.**
 - [ ] Confirm whether stock recovery or a custom recovery is actually flashed
       (grep was inconclusive, not authoritative).
 - [ ] Identify the actual FOTA/update-agent package name on this build so it
       can be deliberately disabled (`pm disable-user`) as a safety measure
       against accidental OTA, on top of not signing into Wi-Fi for updates.
 - [ ] Free up `/data` before any on-device build/backup work — only 3.5G free.
-- [ ] Decide whether this project targets `gts7l` (LTE, this physical unit)
-      as the primary/only target, or also aims for `gts7wifi` compatibility —
-      update `plans/roadmap.md` accordingly either way.
+- [x] Decide primary target: **`gts7l` (LTE, this physical unit) is primary
+      for now; `gts7wifi` support is a desired future goal, not blocking.**
+      See `plans/roadmap.md` cross-phase notes.
