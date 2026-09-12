@@ -394,6 +394,29 @@ Progress log:
   experiment (bare USB-C breakout + ~619kΩ resistor on CC1/CC2-to-GND,
   battery power only, probe D+/D− at 115200 baud) written up in
   `../docs/uart-debug-research.md`. Not yet attempted on hardware.
+- 2026-09-13 (later still): Directly addressed the "evidence-capture
+  methodology is the practical bottleneck" problem from the entry above,
+  without needing UART. TWRP's recovery ramdisk now automatically saves
+  `/proc/last_kmsg` into `/cache/last_kmsg/` (rolling 5-boot history) on
+  every boot, early in `init.rc` processing, so a capture survives however
+  many reboots it takes to get back to a working `adb` session - no more
+  racing the ~2MB ring buffer's eviction. Getting this genuinely reliable
+  took three rounds of live hardware debugging (a `by-name/cache` symlink
+  race, `/proc/last_kmsg` not populated as early as expected, and `/cache`
+  turning out to be a symlink to `/data/cache` at that point in boot) -
+  each root-caused by temporarily redirecting the capture script's own
+  output to `/tmp` and inspecting it after boot, not guessed at. Separately
+  found and worked around a real, unrelated bug while iterating on this:
+  `adb reboot recovery`/`bootloader`/`sideload`/`fastboot` silently do
+  nothing on this TWRP build, because real AOSP `libfs_mgr` can't parse
+  our `recovery.fstab`'s TWRP-specific column order when trying to write
+  the bootloader message - confirmed directly from `dmesg`. Plain `adb
+  reboot` (no target) works and lands back in TWRP anyway, since the
+  Samsung `param` partition is currently pinned to force-recovery
+  (`0x02`). Full writeup, all three races, and the `adb reboot` root cause
+  in `../docs/kernel-boot-debugging.md`. New recovery image built and
+  flashed to the physical tablet, capture confirmed working end-to-end
+  across a real reboot cycle.
 
 ---
 

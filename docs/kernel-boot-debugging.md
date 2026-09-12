@@ -471,3 +471,142 @@ even if it existed.
   `/proc/last_kmsg` - not by searching the whole 2MB buffer for a success
   string, which is exactly the mistake that produced the retracted
   "confirmed baseline" earlier in this file.
+
+## Automated boot-history capture in TWRP (2026-09-12)
+
+Directly addresses the "evidence-capture methodology itself is now the
+practical bottleneck" problem noted above. TWRP's recovery ramdisk now
+saves `/proc/last_kmsg` into `/cache` on every boot, automatically, as
+early in boot as it safely can - so evidence from a boot attempt survives
+the next reboot without a live `adb` session having to catch it in the
+ring buffer before it gets evicted or overwritten by a later boot session.
+
+### What it does
+
+Implemented as an `on post-fs` action in
+`recovery/device-samsung-gts7l/recovery/root/init.recovery.qcom.rc` (the
+device tree that builds `../artifacts/twrp-gts7l-unofficial.img` - see
+`twrp-build-notes.md`). On every TWRP boot it:
+
+1. Mounts the real `cache` partition onto `/cache` (see "Real-hardware
+   races" below for why this needs more than a plain `mount`).
+2. Rotates any existing capture history: `kmsg.0` -> `kmsg.1` -> ... ->
+   `kmsg.4` (oldest), dropping anything older than that.
+3. If `/proc/last_kmsg` is non-empty this boot, copies it to the new
+   `/cache/last_kmsg/kmsg.0`.
+
+Keeps a rolling history of the **5 most recent boots**, not just the
+latest one, so a capture isn't lost if the *next* boot after an
+interesting one turns out to be uninteresting (a common shape during this
+kind of iterative bring-up: flash, boot-test, land back in TWRP or
+Download Mode, re-flash, try again).
+
+### Reading it back
+
+```sh
+adb shell ls -la /cache/last_kmsg/
+adb pull /cache/last_kmsg/kmsg.0   # newest; kmsg.1..kmsg.4 = progressively older
+```
+
+No live-capture timing required any more - pull whenever convenient,
+including well after the boot attempt of interest, as long as it's within
+5 boots.
+
+### Real-hardware races found and fixed (all 2026-09-12, live-debugged on the physical unit)
+
+Getting this genuinely reliable took three rounds of live debugging, each
+following the same pattern: the mechanism *looked* right, silently didn't
+capture anything on an automatic boot, and had to be root-caused by
+temporarily redirecting the script's own stdout/stderr to `/tmp` (survives
+until the next reboot, readable over `adb` - `/cache` itself can't be used
+for this diagnostic output, for reasons that become obvious in race #3)
+and inspecting it after boot, rather than guessed at. Full blow-by-blow
+reasoning is in the comments directly above the `on post-fs` block in
+`init.recovery.qcom.rc`; summary:
+
+1. **`by-name/cache` symlink not ready yet.** The `/dev/block/bootdevice`
+   symlink created by the `on fs` block above only proves the *base*
+   bootdevice path exists, not that ueventd has already scanned the
+   partition table and created the `by-name/cache` symlink underneath it.
+   Fixed with an explicit `wait /dev/block/bootdevice/by-name/cache 5`
+   (init's own builtin, same one already used for the bootdevice path
+   itself) before touching it.
+2. **`/proc/last_kmsg` not populated yet.** Even with the wait above, a
+   single point-in-time `[ -s /proc/last_kmsg ]` check still silently
+   skipped the capture - the ABL/XBL log node isn't guaranteed available
+   as early as `post-fs` fires. Fixed with a short bounded poll (up to 10
+   one-second tries) instead of a single check. **Gotcha hit while writing
+   this fix:** a bare (non-`${}`) `$` inside the quoted `exec ... sh -c
+   "..."` string is *not* passed through to the shell - init's own
+   `ExpandProps()` (`system/core/init/util.cpp`) reads it as an init
+   property reference first and, for this codebase's non-brace form,
+   consumes the rest of the string as the property name, which breaks
+   parsing of the entire command. The retry loop is written as a
+   fixed-count `for x in 1 2 ... 10; do ...; done` with no shell variable
+   at all, specifically to avoid this.
+3. **`/cache` is a symlink to `/data/cache` at that point in boot, not a
+   real directory.** Even after fixing both races above, mounting still
+   failed with ENOENT. Root cause: something (most likely TWRP's own
+   PartitionManager, reacting to this device's `recovery.fstab` not being
+   in a format real AOSP `libfs_mgr` recognizes as a first-stage mount -
+   see the `adb reboot` section below for the same format mismatch causing
+   a second, unrelated problem) relinks `/cache` to `/data/cache` before
+   `post-fs` fires, and `/data` isn't mounted yet either, so the symlink's
+   target doesn't exist. This device does have a real, dedicated `cache`
+   partition, and TWRP's own later boot logic proves the conflict is
+   recoverable - by the time the full GUI is up, `/cache` observably *is*
+   the real ext4 partition again. Fixed by doing that same fix earlier:
+   `rm -rf /cache; mkdir -p /cache` before mounting onto it.
+
+### `adb reboot recovery` (and `bootloader`/`sideload`/`fastboot`) silently do nothing on this build
+
+Found while iterating on the capture feature above, and worth documenting
+separately since it affects *any* future remote-driven reboot, not just
+this feature. `adb reboot recovery` sets the property
+`sys.powerctl=reboot,recovery` - confirmed via `getprop` after issuing
+it - but the device just keeps running; no actual reboot happens. Root
+cause confirmed directly from `dmesg` right after issuing the command
+(reproducible every time):
+
+```
+init: Received sys.powerctl='reboot,recovery' from pid: ... (setprop)
+init: Got shutdown_command 'reboot,recovery' Calling HandlePowerctlMessage()
+init: [libfs_mgr]Error parsing mount_flags
+init: [libfs_mgr]ReadFstabFromFile(): failed to load fstab from : '/etc/recovery.fstab'
+init: [libfs_mgr]ReadDefaultFstab(): failed to find device default fstab
+init: Failed to read bootloader message: failed to read default fstab
+init: [libfs_mgr]Error parsing mount_flags
+init: [libfs_mgr]ReadFstabFromFile(): failed to load fstab from : '/etc/recovery.fstab'
+```
+
+Any reboot *target* that needs a bootloader-message (BCB) write -
+`recovery`, `bootloader`, `sideload`, `fastboot` - goes through
+`HandlePowerctlMessage()` in `system/core/init/reboot.cpp`, which tries to
+read/write that message via `/etc/recovery.fstab` (real AOSP `libfs_mgr`'s
+documented fallback for finding `misc` on a recovery image, since there's
+no separate hardware fstab in a stock recovery ramdisk). Our
+`recovery.fstab` is written in **TWRP's own column order**
+(`<mount_point> <fstype> <blk_device> [flags]`), not the strict 4-token
+AOSP order (`<src> <mount_point> <fstype> <mount_flags>`) real
+`libfs_mgr`'s line parser (`fs_mgr_fstab.cpp`) requires - several lines
+(`/boot`, `/misc`, `/recovery`, ...) only have 3 tokens once misread in
+that order, so the strict parser hits `"Error parsing mount_flags"` and
+aborts parsing the *entire file*. With no fstab, `libfs_mgr` can't find
+`misc`, the BCB write fails, and `HandlePowerctlMessage()` **returns
+early, before ever reaching the actual reboot syscall.** TWRP's own
+partition manager reads this same file fine because it has its own,
+separate, lenient parser for its own format - the two are just
+incompatible with each other despite reading the identical file.
+
+**Practical fix, verified working:** use plain `adb reboot` (no target)
+instead. It skips this whole BCB-write code path entirely (empty
+`reboot_target` goes straight to the actual reboot syscall) - and lands
+back in TWRP anyway, because the Samsung `param` partition's boot-mode
+byte is currently `0x02` (`PARAM_BOOT_RECOVERY_ENTER` - see the `param`
+section earlier in this file), which the bootloader honors independently
+of the AOSP BCB mechanism. Confirmed with a live `adb devices -l`
+transport-ID check across a plain `adb reboot`: new transport ID, state
+still `recovery`. **Not fixed at the root** - actually making
+`recovery.fstab` parse under strict `libfs_mgr` would risk breaking
+TWRP's own (differently-lenient) reader of the same file, which is a
+real, separate risk not taken on here without deliberate scoping.
