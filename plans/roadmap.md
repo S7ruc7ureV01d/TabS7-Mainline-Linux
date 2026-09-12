@@ -195,9 +195,28 @@ Exit criteria:
       `../docs/kernel-config-notes.md`. **Builds clean (zero warnings)**
       merged with the `gts7l` DTS against the same `v7.2` tree — config-level
       validation only, not hardware-booted yet.
+- [x] A complete, flashable boot-test artifact is built and package-verified
+      — **see `../docs/phase1-boot-testing.md`.** Self-built a static
+      aarch64 `busybox` (musl cross toolchain, no root/sudo needed), a
+      minimal initramfs (`kernel/initramfs/init`) that mounts
+      proc/sys/dev, prints kernel version and block/partition info, and
+      drops to a shell, embedded directly into the kernel via
+      `CONFIG_INITRAMFS_SOURCE`, and packaged with our
+      `sm8250-samsung-gts7l.dtb` into `../artifacts/boot-test-gts7l.img` via
+      `mkbootimg` (header v2, matching the TWRP device tree's
+      `BOARD_MKBOOTIMG_ARGS` conventions). Verified by round-tripping through
+      `unpack_bootimg` — sizes/offsets check out. **Open item, honestly
+      flagged rather than guessed past:** the console (`console=ttyMSM0` in
+      the cmdline) is a best-effort placeholder — no `serial0` alias/UART
+      instance has been confirmed for this specific board, and retail
+      tablets often don't expose one at all without hardware modification;
+      USB console is the more realistic fallback per this exit criterion's
+      own wording, not yet set up.
 - [ ] Kernel builds and boots to an initramfs/console (UART or USB) on the
-      physical tablet.
-- [ ] UFS storage enumerates and is readable.
+      physical tablet. **Artifact ready (above); not yet attempted on
+      hardware.**
+- [ ] UFS storage enumerates and is readable. **Driver forced built-in
+      already (`gts7l.fragment`); needs the actual boot attempt to confirm.**
 - [ ] Root filesystem reachable via ADB/serial shell, even without display.
 
 Progress log:
@@ -211,10 +230,15 @@ Progress log:
   onto plain `defconfig`. Most of what Phase 1 needs was already on by
   default; only had to force UFS storage built-in for a more reliable first
   boot attempt. Both the devicetree and config now build clean together.
-  **Both remaining Phase 1 exit criteria require an actual boot attempt on
-  the physical tablet**, which is blocked on the still-open recovery/flashing
-  decision in `../docs/recovery-options.md` — that's the real next step, not
-  more build-side work.
+- 2026-09-12 (owner backing up tablet data in parallel, no hardware touched):
+  Built a complete boot-test artifact ahead of any hardware attempt —
+  self-built static busybox + minimal initramfs, embedded into the kernel,
+  packaged into a flashable `boot.img` with our DTB. See
+  `../docs/phase1-boot-testing.md`. Identified (not yet resolved) that the
+  debug console/UART for this specific tablet is unconfirmed - flagged
+  honestly rather than assumed. **All remaining Phase 1 exit criteria now
+  require an actual boot attempt on the physical tablet** — that's the real
+  next step once the owner is ready, not more build-side work.
 
 ---
 

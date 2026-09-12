@@ -1,0 +1,18 @@
+#!/bin/busybox sh
+# Minimal Phase 1 bring-up init for gts7l - not a real rootfs, just enough
+# to prove the kernel boots, gives us a shell, and lets us look at UFS/dmesg.
+# See docs/phase1-boot-testing.md.
+
+/bin/busybox mkdir -p /proc /sys /dev
+/bin/busybox mount -t proc proc /proc
+/bin/busybox mount -t sysfs sysfs /sys
+/bin/busybox mount -t devtmpfs devtmpfs /dev 2>/dev/null
+
+echo "=== gts7l Phase 1 test initramfs ==="
+echo "=== kernel: $(uname -a) ==="
+echo "=== block devices seen by the kernel: ==="
+/bin/busybox ls -la /dev/block/ 2>&1
+/bin/busybox cat /proc/partitions 2>&1
+
+echo "=== dropping to a shell (ash) on the console ==="
+exec /bin/busybox sh
