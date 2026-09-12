@@ -45,7 +45,8 @@ background/feasibility writeup this roadmap is based on, and
 
 ## Phase 0 — Reconnaissance and source acquisition
 
-**Status:** not started
+**Status:** in progress (all research-only exit criteria met; recovery
+choice and actual toolchain fetch/first-build still pending)
 
 Goal: gather every piece of ground truth needed before writing a single line
 of kernel code, and confirm (or correct) the assumptions in
@@ -86,10 +87,20 @@ Exit criteria:
       `param`/`vbmeta` byte-level behavior, and Download/TWRP mode USB VID:PID
       identification still need hands-on confirmation against `gts7l` — don't
       assume the S9 Ultra project's exact offsets carry over.
-- [ ] A working TWRP (or equivalent custom recovery) confirmed available for
-      `gts7l`/`SM-T875`, vetted for anti-rollback (`rp`) safety before
-      flashing (see the hard constraint at the top of this file), or a plan to
-      build one.
+- [x] TWRP/recovery options researched — **see `../docs/recovery-options.md`
+      for the full survey.** Three real paths found: (1) an actively
+      maintained prebuilt TWRP exists but for the wrong variant (T870
+      Wi-Fi, not our T875 LTE — different partition table); (2)
+      TerracottaROM explicitly lists `gts7l` as supported but its actual
+      files weren't inspectable this pass and its generic install guidance
+      ("update to latest stock firmware first") is a **red flag against our
+      RP constraint** that needs checking before trusting it; (3) two stale
+      (2020/2021) source-only device trees named exactly for `gts7l` exist
+      and could be built ourselves. **Not yet flashed or downloaded anything
+      — decision on which path to take is intentionally left open, flagged
+      for the owner rather than auto-decided**, given flashing a recovery is
+      consequential and the anti-rollback risk is unconfirmed for options 1
+      and 2.
 - [x] Toolchain/build environment checked on the primary dev machine — see
       `../docs/build-environment.md`. **Already sufficient for an `LLVM=1`
       clang/lld kernel build**: `clang` 22.1.8, `lld`, `dtc`, `mkbootimg`,
@@ -105,6 +116,16 @@ Progress log:
   actually fetch upstream Linux source at a recent tag and attempt a first
   `x1q`/`r8q`-equivalent build to prove the toolchain end-to-end before
   writing any `gts7l`-specific devicetree code (Phase 1).
+- 2026-09-11: Surveyed TWRP/custom-recovery options for `gts7l` — see
+  `../docs/recovery-options.md`. No option is a risk-free "just flash it":
+  an actively maintained prebuilt TWRP exists but for the wrong model variant
+  (T870, not our T875 — different partition table); a currently-active
+  project (TerracottaROM) explicitly supports `gts7l` but its install
+  guidance says to update to "latest stock firmware" first, which conflicts
+  with the anti-rollback constraint and needs checking rather than trusting;
+  two stale source-only device trees named exactly for `gts7l` could be built
+  from scratch as a fully-audited fallback. Nothing flashed or downloaded to
+  the device — decision on which path deliberately left open for the owner.
 
 ---
 
