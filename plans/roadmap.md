@@ -87,20 +87,20 @@ Exit criteria:
       `param`/`vbmeta` byte-level behavior, and Download/TWRP mode USB VID:PID
       identification still need hands-on confirmation against `gts7l` — don't
       assume the S9 Ultra project's exact offsets carry over.
-- [x] TWRP/recovery options researched — **see `../docs/recovery-options.md`
-      for the full survey.** Three real paths found: (1) an actively
-      maintained prebuilt TWRP exists but for the wrong variant (T870
-      Wi-Fi, not our T875 LTE — different partition table); (2)
-      TerracottaROM explicitly lists `gts7l` as supported but its actual
-      files weren't inspectable this pass and its generic install guidance
-      ("update to latest stock firmware first") is a **red flag against our
-      RP constraint** that needs checking before trusting it; (3) two stale
-      (2020/2021) source-only device trees named exactly for `gts7l` exist
-      and could be built ourselves. **Not yet flashed or downloaded anything
-      — decision on which path to take is intentionally left open, flagged
-      for the owner rather than auto-decided**, given flashing a recovery is
-      consequential and the anti-rollback risk is unconfirmed for options 1
-      and 2.
+- [x] **A working TWRP for `gts7l` has been built from source.** Resolved by
+      building option 3 from `../docs/recovery-options.md` (the two stale
+      source-only device trees named exactly for `gts7l`), rather than
+      trusting either community prebuilt (wrong variant / firmware-update
+      requirement conflicting with the RP constraint). Full build process,
+      two real bugs found and fixed in the 2020-era device tree, and what's
+      still unverified, in `../docs/twrp-build-notes.md`; what's committed
+      vs. not in `../recovery/PROVENANCE.md`. Result:
+      `../artifacts/twrp-gts7l-unofficial.img` (73MB, valid Android bootimg,
+      built clean in 15:22) plus a matching AVB-disabled
+      `../artifacts/vbmeta_disabled.img`. **Not yet flashed to the physical
+      device or boot-tested** — this is a built-and-audited artifact, not a
+      confirmed-working recovery. The flashing decision itself remains the
+      owner's call given the anti-rollback constraint, same as before.
 - [x] Toolchain/build environment checked on the primary dev machine — see
       `../docs/build-environment.md`. **Already sufficient for an `LLVM=1`
       clang/lld kernel build**: `clang` 22.1.8, `lld`, `dtc`, `mkbootimg`,
@@ -137,6 +137,24 @@ Progress log:
   two stale source-only device trees named exactly for `gts7l` could be built
   from scratch as a fully-audited fallback. Nothing flashed or downloaded to
   the device — decision on which path deliberately left open for the owner.
+- 2026-09-11: Owner directed building our own TWRP (option 3) rather than
+  waiting on the murky community-prebuilt options. **Done and successful.**
+  Bootstrapped the `repo` tool, synced the `twrp-12.1` minimal manifest
+  (~33G), and built `ianmacd/twrp_gts7l`'s device tree against it. Found and
+  fixed two real bugs in the 2020-era tree: a missing
+  `TARGET_SUPPORTS_64_BIT_APPS` (new stricter check on modern build/make),
+  and a `PRODUCT_BUILD_RECOVERY_IMAGE` that was both missing *and*, on first
+  attempt, placed in the wrong file (`BoardConfig.mk` instead of the product
+  `.mk` - it's a read-only-by-that-point `PRODUCT_*` variable) which caused
+  the build to silently report success while producing zero output, twice,
+  before the real cause was traced through the build system's own source.
+  Result: a clean 15-minute build producing a real `recovery.img` + a
+  generated AVB-disabled `vbmeta.img`, both in `../artifacts/` (gitignored),
+  with the small patched device tree committed at
+  `../recovery/device-samsung-gts7l/`. Full writeup in
+  `../docs/twrp-build-notes.md`. **Nothing has been flashed to the physical
+  tablet** — this closes the "do we have a recovery" question, not the
+  "should we flash it now" one, which stays the owner's call.
 
 ---
 

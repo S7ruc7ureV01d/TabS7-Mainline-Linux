@@ -4,3 +4,7 @@ references/*/
 
 # Build scratch space (kernel source checkouts, build output, logs) - not versioned
 work/
+
+# Generated release files (built images, etc.) - not versioned, see PROVENANCE
+# docs alongside them for how to regenerate and verify
+artifacts/
