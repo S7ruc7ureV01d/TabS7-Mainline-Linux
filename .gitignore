@@ -1,0 +1,3 @@
+# Local reference clones (prior-art repos) - not part of this project's history
+references/*/
+!references/README.md
