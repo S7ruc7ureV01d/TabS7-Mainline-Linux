@@ -1,8 +1,17 @@
 # Tab S7 Mainline Linux — Bring-up Roadmap
 
-Target device: Samsung Galaxy Tab S7 Wi-Fi (`SM-T870`, codename `gts7wifi`) and,
-if it diverges enough to matter, the LTE variant (`SM-T875`, `gts7`).
-SoC: Qualcomm SM8250 / Snapdragon 865(+), Adreno 650.
+Target device: the physical unit in hand is a Samsung Galaxy Tab S7 **LTE**
+(`SM-T875`, codename `gts7l`/`gts7leea`) — confirmed via `adb` in
+`../docs/device-state.md`. The Wi-Fi-only `SM-T870` (`gts7wifi`) may or may not
+also be targeted; this needs an explicit decision (see cross-phase notes).
+SoC: Qualcomm SM8250 "kona" / Snapdragon 865(+), Adreno 650.
+
+**⚠️ Hard constraint on every phase:** this specific unit must never have its
+anti-rollback (`rp`) counter advanced — no OTA, no Odin flash of any firmware
+newer than the currently-installed `T875XXU1ATK4`. See
+`../docs/device-state.md` for why and what that rules out. Any phase involving
+`abl`/`xbl`/`vbmeta`/bootloader work must be checked against this before
+flashing anything.
 
 This is a living document. **Any agent instance picking up work here must
 update this file** — tick checkboxes, move a phase's `Status` line, and append
@@ -214,4 +223,21 @@ Progress log:
 Anything that doesn't cleanly belong to one phase (recurring blockers, tooling
 decisions, scope changes) goes here instead of being forced into a phase log.
 
-- (none yet)
+- 2026-09-11: Device recon via `adb` on the physical unit (see
+  `../docs/device-state.md`) shows it is the **LTE `SM-T875`/`gts7l`**, not the
+  Wi-Fi-only `SM-T870`/`gts7wifi` this roadmap originally assumed. Open
+  decision: target `gts7l` only, or also aim for `gts7wifi` parity? Until
+  decided, treat `gts7l` (this physical unit) as the primary target and modem
+  bring-up (`mdm`/RIL) as in-scope rather than out-of-scope.
+- 2026-09-11: **Anti-rollback constraint is permanent for this unit** — owner
+  wants to keep it on its original `T875XXU1ATK4` first-release firmware as a
+  collector's device. `ro.boot.rp`/`androidboot.rp` = `1` currently. Never
+  trigger an OTA and never Odin-flash a bootloader/`vbmeta`/AP package with a
+  higher RP requirement than this. This bounds Phase 0 (recovery/TWRP
+  selection) and Phase 5 (installer ZIP flashing) in particular — any
+  candidate TWRP or flashing procedure must be vetted for RP impact before use
+  on this device. Full detail in `../docs/device-state.md`.
+- 2026-09-11: `getprop` and `/proc/cmdline` disagree on Knox warranty bit and
+  verified-boot state on this unit (likely Magisk prop spoofing) — not yet
+  independently confirmed via Download mode. Doesn't block bring-up work, but
+  don't trust `getprop` alone for security-state questions on this device.
