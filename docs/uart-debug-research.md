@@ -50,17 +50,29 @@ resistor-based detection that the CCIC does before/without any PD
 communication. This is a materially different (and much more accessible)
 finding than the initial "must be PD VDM" assumption.
 
-**Important, easy-to-get-wrong detail**: the table entry requires
-`vbvolt = VB_LOW` - i.e. this specific match only fires when **no external
-power is present on the USB-C port at the moment the resistor is read**.
-Several people in the community threads who tried plain resistor-on-CC
-tricks on other USB-C Samsung devices and failed were very likely also
-supplying USB power/charging through the same port while testing, which
-would push the detection into a different (or no) table entry. Also
-relevant: many off-the-shelf "USB-C breakout boards" include their own
-onboard CC pull resistors (for sink/source negotiation), which would
-corrupt a naive external-resistor test - a **bare** breakout (just the
-connector pins broken out, no onboard CC circuitry) is needed.
+**Update (2026-09-13): the VB_LOW requirement is not as strict as first
+read.** `references/gts7l/drivers/muic/max77705-muic.c` actually has *two*
+`MAX77705_UIADC_619K` table entries, not one:
+
+```c
+{ .adc = MAX77705_UIADC_619K, .vbvolt = VB_LOW,  ..., .muic_switch = COM_UART,
+  .vps_name = "JIG UART ON",    .attached_dev = ATTACHED_DEV_JIG_UART_ON_MUIC },
+{ .adc = MAX77705_UIADC_619K, .vbvolt = VB_HIGH, ..., .muic_switch = COM_UART,
+  .vps_name = "JIG UART ON/VB", .attached_dev = ATTACHED_DEV_JIG_UART_ON_VB_MUIC },
+```
+
+Both set `muic_switch = COM_UART` - the thing that actually flips the analog
+switch to route UART to the AP. So VBUS presence on the port at the moment of
+detection does **not** block the JIG-UART match either way; battery-only power
+is no longer believed to be a hard requirement. Still worth avoiding actively
+*charging* through the same port during the experiment for simplicity (one
+less variable), but it's not the blocking constraint originally thought.
+
+Also relevant regardless: many off-the-shelf "USB-C breakout boards" include
+their own onboard CC pull resistors (for sink/source negotiation), which
+would corrupt a naive external-resistor test - a **bare** breakout (just the
+connector pins broken out, no onboard CC circuitry), or a plain sacrificial
+cable with nothing else attached, is needed either way.
 
 ## Confirmed live on the physical unit right now, no new hardware
 

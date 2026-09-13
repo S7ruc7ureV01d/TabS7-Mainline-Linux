@@ -104,9 +104,24 @@
 	 * sibling S9 Ultra project's independently-documented fix for the
 	 * identical ABL error string on the same Samsung-ABL family
 	 * (references/postmarketos-galaxy-tab-s9-ultra/docs/porting-log.md).
+	 *
+	 * qcom,board-id ADDED 2026-09-13 (Round 8, docs/kernel-boot-debugging.md):
+	 * Qualcomm's own official binding doc (referenced kernel source,
+	 * arch/arm64/boot/dts/vendor/bindings/arm/msm/msm-id.txt) states
+	 * explicitly that the 2-field short form of qcom,msm-id used here
+	 * ("chipset_foundry_id, rev_id") REQUIRES qcom,board-id to also be
+	 * defined - a plain documented requirement this DTS was missing
+	 * entirely, independent of and much simpler than every DTB-matching
+	 * theory chased before it. Stock's own kona.dtsi entries confirm this:
+	 * they pair the same 2-field msm-id form with `qcom,board-id = <0x00
+	 * 0x00>` (wildcard, not the specific `<0x8 0x7>` from the separate
+	 * per-board overlay file kona-sec-gts7l-eur-overlay-r07.dts that
+	 * Round 2 mistakenly tried and reverted as a regression - that was
+	 * the wrong VALUE, not evidence board-id itself doesn't belong here).
 	 */
 	compatible = "samsung,gts7l", "qcom,kona", "qcom,sm8250";
 	qcom,msm-id = <0x164 0x10000>;
+	qcom,board-id = <0x00 0x00>;
 	chassis-type = "tablet";
 
 	/*

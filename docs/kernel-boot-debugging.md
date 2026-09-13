@@ -480,6 +480,18 @@ even if it existed.
   it's supposed to contain (check build log timestamps) before trusting any
   test result, positive or negative** - Round 6's "inconclusive" result was
   actually a silent stale-artifact bug, not genuine inconclusiveness.
+- **UART is a closed avenue via passive CC resistor** (Round 8) - confirmed
+  electrically impossible on this hardware (the tablet's mandatory USB-C sink
+  Rd pull-down always dominates any external resistor). A real PD-VDM injection
+  path exists using the owner's own FNB58 tester (contains a FUSB302BMPX, the
+  exact chip `references/vdmtool` targets) but needs either bus-isolation
+  soldering or custom firmware - not started.
+- **`qcom,board-id = <0x00 0x00>` added** (Round 8), sourced directly from
+  Qualcomm's own official binding doc and confirmed against stock's own
+  decompiled DTB - a well-documented, simple fix, but **not yet log-confirmed**;
+  behaviorally still bounces to Download Mode, with circumstantial (not proven)
+  evidence of getting further than before. This is the most promising untested
+  lead right now - resume here before trying anything else DTS-side.
 
 ## Automated boot-history capture in TWRP (2026-09-12)
 
@@ -697,3 +709,125 @@ working.
 Tablet safe throughout: stock `boot.img`/`dtbo.img` restored and reverified by hash
 after every test, `param` left at `0x02` (forced-recovery) so it lands in TWRP on the
 next power-on, `rp` unaffected.
+
+## Round 8 (2026-09-13): UART hardware dead end fully diagnosed; ABL binary
+reverse-engineered directly; a real, documented fix found and applied - not yet
+log-confirmed
+
+### UART: the CC-resistor JIG trick is confirmed electrically impossible on this port, not just untried
+
+Extensive hands-on testing (breakout board with a real labeled CC1/A5 pin, multiple
+resistor values including the textbook 619kΩ, a dead 0Ω short, both cable
+orientations, and a VBUS-powered variant) all produced **zero reaction** from the
+tablet's own MUIC/CCIC driver - confirmed via a live kernel-log watcher
+(`tools/watch_usb.sh`, run from TWRP's on-device Terminal to survive the USB
+disconnect that happens the instant D+/D- are diverted to a TTL adapter). Root
+cause, confirmed by a live voltage check (CC idle ≈0V) and cross-checked against
+the driver's actual runtime behavior: the tablet's mandatory USB-C sink pull-down
+(Rd, ~5.1kΩ) is *always* active per spec and completely dominates any external
+resistor in parallel with it (619kΩ ≫ 5.1kΩ) - the ADC genuinely cannot see the
+external resistor at all, regardless of value, orientation, or VBUS state. This
+matches the microUSB-era ID-pin trick (a dedicated, bias-free pin) not translating
+to USB-C's CC line (which can't be bias-free without violating the spec). Getting a
+real JIG-UART trigger on this hardware requires an actual PD VDM command (what
+Samsung's real "AnyWay" tool does), not a passive resistor - **this class of
+approach is now closed, not just deprioritized.**
+
+A promising new lead for the VDM approach, found later this session: the owner's
+existing FNB58 USB-C power meter contains a genuine **FUSB302BMPX** PD PHY chip
+(confirmed via its QFN14 top-marking "UAAC CEH", cross-referenced to public
+teardown/ID sources) - the exact chip `references/vdmtool` was written for. Two
+routes identified, neither attempted yet: (a) tap the FUSB302's I2C pins directly
+with a separate microcontroller running `vdmtool`'s firmware, which needs the
+FNB58's own onboard MCU isolated from the same I2C bus to avoid master contention;
+or (b) reflash the FNB58's own MCU (Artery AT32F403A, STM32F103-footprint-compatible,
+external SPI flash for firmware) with custom firmware driving its own onboard
+FUSB302 over the existing traces - architecturally cleaner (no bus contention) but
+needs locating/confirming SWD pads (no existing community documentation found) and
+writing real firmware. Left for a future round; noted here so the hardware and the
+plan aren't lost.
+
+### ABL binary extraction and disassembly - a real, working methodology, not just a one-off
+
+Directly pulled the `abl` and `xbl` partitions (`adb pull`, read-only, zero risk)
+and discovered `abl` is a genuine UEFI Firmware Volume (`_FVH` signature at file
+offset `0x24`) containing several embedded PE32 modules, most relevantly one named
+**`LinuxLoader`** - extracted cleanly with the `uefi_firmware` Python package
+(`pip install uefi_firmware`, provides the `uefi-firmware-parser` CLI) after
+confirming plain `strings`/`objdump` don't work directly against the outer
+AVB-signed+UEFI-FV-wrapped partition. Located the exact string literals
+("No match found for Soc Dtb type" etc.) inside the extracted `LinuxLoader` PE32,
+computed their file-offset addresses, then used `capstone` (Python AArch64
+disassembler) to find every `ADRP`+`ADD` instruction pair that materializes each
+string's address - directly locating the real code, not guessing at it. Full
+toolchain: `pip install uefi_firmware pefile capstone` in a local venv
+(`work/abl-venv/`, gitignored) - no system packages, no sudo needed. **This
+methodology is reusable for any future ABL-behavior question** on this device;
+scripts are in `tools/find_string_refs.py` and `tools/dump_func.py`.
+
+Disassembling the function that prints "No match found for Soc Dtb type" confirmed
+it genuinely reads `qcom,msm-id`, `qcom,board-id`, and `qcom,pmic-id`, and has a
+non-trivial pass/fail bit-flag scheme - `qcom,msm-id`'s chip-id half must match
+exactly, its stepping/revision half is lenient (DTB's declared revision must be
+`<=` real fused silicon, 0 = wildcard), and there's a hard gate late in the
+function requiring a specific flag bit that (as far as traced) only gets set by a
+`qcom,pmic-id` array match. **This raised a real, unresolved contradiction**: stock's
+own working `boot.img` DTB entries (pulled and decompiled this session, see Round 7)
+have no `qcom,pmic-id` at all, yet stock never hits this failure - meaning either
+this exact function isn't actually on stock's base-DTB-selection path (most likely
+it's the EDTBO/board-overlay matcher instead, which fails harmlessly for stock via
+a *different* code path/message), or the bit-gate trace has a subtle error. Could
+not resolve by finding the function's caller(s) - it's invoked indirectly through a
+function-pointer/protocol table (standard EDK2 pattern), which plain disassembly
+can't trace without a full decompiler doing real cross-reference analysis (a
+free tool like Ghidra would resolve this cleanly if it comes up again).
+
+### The actual fix applied this round: `qcom,board-id`, sourced from Qualcomm's own binding doc, not from the disassembly dead-end
+
+Redirected from the ambiguous pmic-id lead to checking how a *sibling, real, working*
+SM8250 port handles this - `references/kernel_samsung_sm8250` (the droidian-branch
+GPL source for the sibling Tab S7+ Wi-Fi, same SoC family) ships Qualcomm's own
+official binding document,
+`arch/arm64/boot/dts/vendor/bindings/arm/msm/msm-id.txt`, which states explicitly:
+
+> `qcom,msm-id = <chipset_foundry_id, rev_id>` (the 2-field short form) - **"If the
+> second format is used one must also define the board-id."**
+
+Our DTS has always used exactly this 2-field short form
+(`qcom,msm-id = <0x164 0x10000>;`) and never set `qcom,board-id` at all - a plain,
+documented requirement missed since the DTS was first written, independent of and
+simpler than every DTB-matching theory chased in Rounds 2-8. Confirmed against
+stock's own decompiled DTB (`dtc -I dtb -O dts` on the extracted
+`work/stock_dtb_entry0.dtb`): stock pairs the same 2-field `msm-id` form with
+`qcom,board-id = <0x00 0x00>;` (a wildcard value) in every one of its 3 stepping
+entries. This also retroactively explains Round 2's "Regression 2": that attempt
+added the *board overlay's* specific value (`<0x8 0x7>`, copied from
+`kona-sec-gts7l-eur-overlay-r07.dts`) to the base DTB, which is the wrong value for
+this context - it was never evidence that board-id itself doesn't belong in the
+base DTB, just that the *specific value* tried was wrong.
+
+**Applied**: `kernel/dts/sm8250-samsung-gts7l.dts` now sets
+`qcom,board-id = <0x00 0x00>;` alongside the existing `qcom,msm-id`, in the single
+shared source file patched into all three stepping copies (as before). Rebuilt
+clean, confirmed both properties present in the compiled DTB via `fdtget`, freshly
+repackaged via the same `magiskboot unpack`/patch-3-copies/`magiskboot repack`
+pipeline, and flashed/tested three times.
+
+**Not yet log-confirmed.** All three tests still bounced to Download Mode
+behaviorally, but - notably different from every pre-fix test this project has
+run - **none of the three post-fix `/proc/last_kmsg` captures contain any trace of
+the test boot at all**, not even a partial one, despite reasonably fast
+button-combo round-trips each time (compare to Round 7, which caught a clean,
+complete capture on its first fast attempt with the pre-fix kernel). The most
+likely read: the board-id-fixed boot attempt is generating meaningfully more log
+volume before failing - i.e., getting further than before - enough to evict its
+own start marker before even one recovery reboot completes. This is circumstantial,
+not proof. Tablet restored to stock `boot.img`/`dtbo.img` (hash-verified), `param`
+left forced to recovery, `rp` unaffected.
+
+**Next step, not yet started**: either burn another capture round with an even
+faster round-trip (a scripted `heimdall` fast-exit from Download Mode was attempted
+in Round 7 and didn't work yet - PIT partition naming, stuck USB session; worth
+finishing this since human reaction time is likely now the dominant delay), or
+pursue the FNB58/FUSB302 UART path above to get a live, ring-buffer-independent
+view instead of continuing to fight capture eviction.

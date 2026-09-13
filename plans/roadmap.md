@@ -441,6 +441,31 @@ Progress log:
   direct ABL binary inspection) before any more blind DTS iteration - black-box
   guessing against this specific failure has now produced two false "fixed"
   conclusions in a row.
+- 2026-09-13 (Round 8): Fully closed out the passive-resistor UART approach -
+  confirmed electrically impossible on this hardware via direct testing (proper
+  breakout board, multiple resistor values, both orientations, a dead short, a
+  VBUS-powered variant - all zero reaction, root-caused to the tablet's mandatory
+  USB-C sink pull-down always dominating any external resistor). Found a real
+  path forward for later (the owner's FNB58 tester contains the exact FUSB302
+  PD-PHY chip `references/vdmtool` needs), not yet started. Separately, pulled
+  and reverse-engineered the actual `abl` partition for the first time -
+  it's a genuine UEFI Firmware Volume; extracted the embedded `LinuxLoader`
+  PE32 module with `uefi_firmware`/`pefile`/`capstone` (all local pip installs,
+  no sudo) and disassembled the exact function that prints "No match found for
+  Soc Dtb type". That led to a real, well-documented fix: Qualcomm's own
+  `msm-id.txt` binding doc says the 2-field short form of `qcom,msm-id` (which
+  this DTS has always used) *requires* `qcom,board-id` to also be set - a plain
+  requirement missed since the DTS was first written, confirmed against stock's
+  own decompiled DTB (which sets `qcom,board-id = <0x00 0x00>`). Applied and
+  tested three times - still bounces to Download Mode, but unlike any pre-fix
+  test, none of the three post-fix `/proc/last_kmsg` captures caught any trace
+  of the attempt at all (likely evicted by more log volume than before, i.e.
+  circumstantial evidence of getting further, not proof). Full writeup in
+  `../docs/kernel-boot-debugging.md` Round 8. Tablet safe: stock `boot.img`/
+  `dtbo.img` restored and hash-verified, `param` forced to recovery, `rp`
+  unaffected. Next: resume by getting a real log capture of the board-id-fixed
+  boot attempt (faster round-trip, or the FNB58 UART path) before trying
+  anything else DTS-side - this is currently the most promising open lead.
 
 ---
 
