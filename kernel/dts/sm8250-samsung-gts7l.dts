@@ -133,12 +133,42 @@
 	 * REV0.4 (board-id,7)` dmesg line. `0x8` is the platform-type-id field
 	 * (constant across all stock's per-region entries), `0x7` the
 	 * board-revision field (the value specific to this exact unit's
-	 * region/revision). Testing now; see kernel-boot-debugging.md Round 9
-	 * for whether this actually clears the barrier.
+	 * region/revision). Four independent DTBO content variations (Round 9)
+	 * all failed identically even with this value set, tracing further
+	 * confirmed board-id alone isn't the remaining blocker.
+	 *
+	 * qcom,pmic-id ADDED 2026-09-13 (Round 9, via Ghidra decompilation of
+	 * the actual ABL matching function, LinuxLoader.pe FUN_00025700):
+	 * disassembly revealed ABL treats our appended-DTB match as only
+	 * "good enough", not "exact" - an exact match (a specific 6-bit
+	 * combination in the match-quality flags word) is required to skip
+	 * the strict per-region DTBO search entirely, which is what's
+	 * actually failing ("Unable to find the Board Dtb"). One of those
+	 * required bits (bit 18) comes from qcom,pmic-id's first cell
+	 * matching the live hardware PMIC "model" register exactly - a
+	 * property this DTS never had, so that bit could never be set.
+	 *
+	 * Value: <0x1e 0 0 0> - `0x1e` from the live kernel's own
+	 * /sys/devices/soc0/pmic_model (65566 = 0x1001E, low byte = 0x1E),
+	 * the closest real evidence available without ABL's own verbose
+	 * logging (blocked - needs raw uefivarstore partition writes to set
+	 * the standard EDK2 "EFIDebug" variable, not attempted). Per the
+	 * matcher's own logic, each of the 4 cells packs one PMIC's
+	 * {model: low byte, revision: upper 3 bytes} and this device has 3
+	 * real PMICs (PM8150/PM8150L/PM8009) - only cell 0 (the primary
+	 * PMIC, matching what the Linux sysfs value itself reports) needs to
+	 * be an exact model match for the specific bit we need; a model
+	 * value of 0 in the other cells is treated as a harmless wildcard by
+	 * the same matcher, not an error. **Not yet hardware-tested** - the
+	 * exact correspondence between this Linux-reported value and what
+	 * ABL's own hardware read returns is unproven; see
+	 * kernel-boot-debugging.md Round 9 for the full reasoning and what
+	 * to try next if this specific value doesn't work.
 	 */
 	compatible = "samsung,gts7l", "qcom,kona", "qcom,sm8250";
 	qcom,msm-id = <0x164 0x10000>;
 	qcom,board-id = <0x08 0x07>;
+	qcom,pmic-id = <0x1e 0x00 0x00 0x00>;
 	chassis-type = "tablet";
 
 	/*

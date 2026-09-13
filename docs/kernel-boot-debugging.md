@@ -504,13 +504,23 @@ even if it existed.
   DTB/DTBO content for this specific stage** - none of it is provably read by
   whatever determines this outcome. `qcom,board-id = <0x08 0x07>` (the real
   value) stays applied going forward regardless. Root cause is open;
-  disassembly located the responsible function (`LinuxLoader` PE32, same
-  toolchain as Round 8) but its caller hasn't been traced - it's an indirect
-  call through what's presumably a function-pointer/protocol table, same
-  obstacle as Round 8's pmic-id ambiguity, and searching for both direct `bl`
-  references and literal address values in the binary found neither. A real
-  decompiler (Ghidra) doing proper cross-reference/dataflow analysis is the
-  likely unblock - not more content guessing.
+  installed and used Ghidra (headless, `docs/ghidra-analysis/README.md`) to
+  properly decompile the responsible functions instead of continuing with
+  guesswork - **the full decision mechanism is now genuinely understood**:
+  ABL's base-DTB matcher (already fixed via `qcom,board-id`) additionally
+  checks for an "exact match" quality bar (a specific 6-bit combination,
+  fully decoded) before it will skip the strict DTBO search that's currently
+  failing. One required bit needs `qcom,pmic-id` (never set, tried a
+  sysfs-derived candidate value on hardware - didn't work); another needs a
+  non-zero `qcom,msm-id` foundry byte that's structurally absent from this
+  DTS's current (stock-matching) wildcard convention. **Bigger finding**:
+  stock's own real compiled DTB also lacks `qcom,pmic-id`, meaning stock
+  itself can't be satisfying this same exact-match path either - it likely
+  reaches Linux via a different boot-chain mechanism entirely, which calls
+  into question whether this exact-match path is even the right thing to
+  keep chasing. Real verbose ABL logging would resolve this decisively but
+  needs raw `uefivarstore` partition writes (EDK2 variable-store format) -
+  not attempted, a real side-project of its own.
 
 ## Automated boot-history capture in TWRP (2026-09-12)
 
@@ -1050,3 +1060,72 @@ wildcard now that the real value is known.
 Tablet safe throughout (this second half of Round 9): stock `boot.img`/
 `dtbo.img` restored and hash-verified again, `param` forced to recovery, `rp`
 unaffected.
+
+### Ghidra installed; the real mechanism fully mapped via actual decompilation, not more guessing
+
+Installed Ghidra (`pacman -S ghidra`, Arch `extra` repo) and used it headless
+(`analyzeHeadless`, no GUI in this environment) to properly decompile
+`LinuxLoader.pe` instead of continuing with plain `capstone` disassembly.
+**Full writeup, reusable scripts, and saved decompiled source for every
+function involved: `docs/ghidra-analysis/README.md`.** Summary of what was
+learned (all confirmed from real decompiled C, not inferred from raw asm):
+
+- The function Round 8 manually identified as "the msm-id/board-id/pmic-id
+  checker starting at 0x25700" was correct, but a *different* address
+  (`0x26744`) that Round 8 treated as a separate calling function turned out,
+  under Ghidra's real function-boundary analysis, to just be the tail end of
+  an unrelated function - a genuine correction to Round 8's methodology, kept
+  in the writeup so it isn't repeated.
+- The real chain: `BootLinux()` calls the base-DTB matcher (which Round 8/9
+  already fixed via `qcom,board-id`). That matcher does more than just
+  accept/reject - it also checks whether the match hits a specific 6-bit
+  "**exact match**" quality bar. If so, ABL prints `"Exact DTB match found.
+  DTBO search is not required"` and skips the whole strict per-region DTBO
+  search entirely (going to a harmless, always-fails-safely optional
+  "Override DTB" mechanism instead - which happens to share the same
+  `"Error: Board Dtbo blob not found"` string, a confusing coincidence, not
+  the same code path as our actual failure). If the match is only
+  "acceptable" but not "exact" (our situation), ABL proceeds into the strict
+  DTBO search, which is what's actually printing `"Unable to find the Board
+  Dtb"`.
+- The exact-match bit mask (`0x34150000`) was decoded bit-by-bit against the
+  matcher's real logic - full table in `docs/ghidra-analysis/README.md`. Two
+  concrete, actionable findings: (a) one required bit needs `qcom,pmic-id`'s
+  first cell to exactly match a live hardware "PMIC model" register value we
+  don't know; (b) another required bit needs `qcom,msm-id`'s foundry byte to
+  be a real non-zero exact match - **structurally impossible with this DTS's
+  current wildcard-foundry `qcom,msm-id` value**, matching stock's own
+  kona.dtsi convention.
+- **A real, unresolved puzzle, more important than the above**: stock's own
+  actual compiled appended-DTB (`work/stock_dtb_entry{0,1,2}.dtb`, extracted
+  earlier this project) has **no `qcom,pmic-id` at all** - meaning stock
+  itself cannot be satisfying this exact-match mask either. Stock most likely
+  reaches Linux via a genuinely different boot-chain mechanism than what our
+  magiskboot-repacked `boot.img` triggers on this ABL, not by hitting this
+  same exact-match bypass. This calls into question whether chasing "exact
+  match" here is even the right strategy at all, independent of whether the
+  DTS values can be made correct.
+
+**Tried one concrete, cheap experiment based on this new understanding**: set
+`qcom,pmic-id = <0x1e 0x00 0x00 0x00>` (`0x1e` from the live kernel's own
+`/sys/devices/soc0/pmic_model` sysfs value, `65566` = `0x1001E`, low byte taken
+as a candidate hardware "model" register value - the best real evidence
+available without verbose ABL logging). Tested on hardware: **identical
+failure**, same as every prior attempt.
+
+**Real verbose ABL logging (which would give the literal correct values
+directly, via `"PMIC Model 0x%x: 0x%x\n"`-style debug prints already present in
+the binary) is blocked**: the log-level gate reads the standard EDK2
+`"EFIDebug"` UEFI variable, but this Android kernel doesn't expose `efivarfs`
+userspace access to set it. The device does have a `uefivarstore` partition
+that almost certainly holds the raw variable store - writing to it directly
+would need reverse-engineering EDK2's variable-store binary format, a real
+side-project of its own (not started).
+
+**Status at the end of Round 9**: `qcom,board-id` (Round 8) remains a
+confirmed, real fix and stays applied. The "Board Dtb"/exact-match mechanism is
+now genuinely, thoroughly understood at the code level (not guessed) - but the
+actual values needed either aren't obtainable without more tooling investment,
+or (per the stock-DTB puzzle above) may not be the right thing to chase at all.
+Tablet safe: stock `boot.img`/`dtbo.img` restored and hash-verified, `param`
+forced to recovery, `rp` unaffected.

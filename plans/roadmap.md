@@ -475,10 +475,28 @@ Progress log:
   `qcom,board-id` stays at the real `<0x08 0x07>` value going forward
   regardless. Full detail in `../docs/kernel-boot-debugging.md` Round 9.
   Tablet safe: stock `boot.img`/`dtbo.img` restored and hash-verified again,
-  `param` forced to recovery, `rp` unaffected. Next: get Ghidra for proper
-  cross-reference/dataflow analysis of the Board-Dtb function's caller - plain
-  disassembly (no direct `bl`, no literal address reference found) has hit a
-  real wall, same as Round 8's pmic-id ambiguity.
+  `param` forced to recovery, `rp` unaffected.
+- 2026-09-13 (Round 9, concluded): Installed Ghidra and used it headless to
+  properly decompile the ABL functions involved, instead of continuing to
+  guess at DTS/DTBO content - full writeup and reusable Java scripts in
+  `../docs/ghidra-analysis/`. **The actual decision mechanism is now fully
+  understood**: ABL's base-DTB matcher (fixed in Round 8) additionally
+  checks whether the match hits a specific 6-bit "exact match" quality bar
+  before skipping the strict DTBO search that's currently failing. Decoded
+  every bit - one needs `qcom,pmic-id` (never set; tried a sysfs-derived
+  candidate value on real hardware, didn't work), another needs a non-zero
+  `qcom,msm-id` foundry byte the DTS structurally doesn't have (matching
+  stock's own convention). Bigger finding: **stock's own real compiled DTB
+  also lacks `qcom,pmic-id`**, meaning stock can't be taking this same
+  exact-match path either - it likely reaches Linux via a different
+  mechanism entirely, which questions whether this is even the right path
+  to keep chasing. Real verbose ABL logging (which would give the literal
+  correct values) is blocked behind writing the raw `uefivarstore`
+  partition's UEFI variable-store format - not attempted, a real
+  side-project. Tablet safe: stock `boot.img`/`dtbo.img` restored and
+  hash-verified, `param` forced to recovery, `rp` unaffected. Next: either
+  invest in the `uefivarstore` route, or investigate why stock's boot chain
+  doesn't need this exact-match path at all before any more DTS tuning.
 - 2026-09-13 (Round 8, later): Split the FNB58/FUSB302 VDM-injection idea out into
   its own parked project doc, `../docs/fnb58-vdm-uart-project.md` - decided on the
   reflash-the-FNB58's-own-MCU approach (no permanent hardware mods) over tapping
