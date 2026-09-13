@@ -486,12 +486,25 @@ even if it existed.
   path exists using the owner's own FNB58 tester (contains a FUSB302BMPX, the
   exact chip `references/vdmtool` targets) but needs either bus-isolation
   soldering or custom firmware - not started.
-- **`qcom,board-id = <0x00 0x00>` added** (Round 8), sourced directly from
-  Qualcomm's own official binding doc and confirmed against stock's own
-  decompiled DTB - a well-documented, simple fix, but **not yet log-confirmed**;
-  behaviorally still bounces to Download Mode, with circumstantial (not proven)
-  evidence of getting further than before. This is the most promising untested
-  lead right now - resume here before trying anything else DTS-side.
+- **`qcom,board-id = <0x00 0x00>` added (Round 8) - CONFIRMED WORKING (Round 9).**
+  `No match found for Soc Dtb type` / `Error: Appended Soc Device Tree blob not
+  found` are completely gone from a clean, verified capture - the appended
+  3-entry kona-stepping DTB now matches successfully, for the first time in this
+  entire project. Keep this fix applied; do not revert it.
+- **New blocker found and confirmed real (Round 9): `Unable to find the Board
+  Dtb` / `Error: Board Dtbo blob not found`**, reached much later in boot (past
+  RP/SWREV/FRP/KG/HDM checks, device ID display) than any prior failure. Two
+  well-evidenced fix attempts based on real reference material (a sibling
+  project's own documented approach) both failed identically - see Round 9 for
+  full detail. Critically, **the `dtbo` partition's content has been proven,
+  via byte-identical log diffs across two very different `dtbo` contents, to
+  have no effect on this failure at all** - don't try more `dtbo` content
+  variations without first finding where the code actually reads its data
+  from. Root cause is open; disassembly is in progress (`LinuxLoader` PE32,
+  same toolchain as Round 8) but the function's caller hasn't been traced yet
+  (indirect call via a function-pointer table, same obstacle as Round 8's
+  pmic-id ambiguity) - resuming with a real decompiler (Ghidra) for proper
+  cross-reference analysis is the likely unblock, not more guessing.
 
 ## Automated boot-history capture in TWRP (2026-09-12)
 
@@ -831,3 +844,155 @@ in Round 7 and didn't work yet - PIT partition naming, stuck USB session; worth
 finishing this since human reaction time is likely now the dominant delay), or
 pursue the FNB58/FUSB302 UART path above to get a live, ring-buffer-independent
 view instead of continuing to fight capture eviction.
+
+## Round 9 (2026-09-13, later): `qcom,board-id` fix CONFIRMED working; a real, later,
+different blocker found - our "noop" DTBO's structure
+
+Finished the `heimdall` fast-exit approach from Round 7/8: the PIT partition name
+for `param` is `PARAM` (uppercase - heimdall's `--param` flag failed silently
+against the real PIT entry name, which is case-sensitive). Also confirmed
+**heimdall only tolerates one protocol session per Download Mode boot** - a
+`download-pit` call followed by a separate `flash` call in the same Download Mode
+entry reliably fails the second action with `ERROR: Failed to receive handshake
+response. Result: -7`, even with `--resume`. Do the actual write as the *first and
+only* heimdall action per boot, letting it auto-reboot rather than chaining a
+second `close-pc-screen` call.
+
+That faster round-trip (button-combo issued immediately after the heimdall session
+was exhausted, one single intervening recovery boot) finally caught a clean,
+complete capture of the `qcom,board-id`-fixed boot attempt. Result: **confirmed,
+unambiguous progress**:
+
+```
+Booting Into Mission Mode
+  ↓ (normal AUTHENTICATE fail-but-allow sequence for vbmeta/boot/dtbo, as always)
+Memory Base Address: 0x80000000
+Unable to find the Board Dtb          <-- NEW - "No match found for Soc Dtb type" is GONE
+Error: Board Dtbo blob not found      <-- NEW, different message than before
+init cc mode flag 0x0
+  ↓ (continues normally - RP/SWREV checks, FRP, KG status, HDM status, DID display,
+     all the way to a genuine, deliberate Download Mode UI draw sequence)
+Odin: CmdsInit start / EnumeratePartitions / Odin: CmdsInit Success
+odin: processing commands
+```
+
+**`No match found for Soc Dtb type` / `Error: Appended Soc Device Tree blob not
+found` never appear anywhere in this capture.** The appended 3-entry kona-stepping
+DTB (with `qcom,board-id` added, per Round 8) is now matching successfully - this
+is the first time in the whole project our own kernel/DTB has gotten past ABL's
+DTB-identity check. The boot proceeds much further than ever before (RP/SWREV/FRP/
+KG/HDM checks, device ID display) before *deliberately* entering Download Mode's
+UI over a **new, different, later-stage failure**: `Unable to find the Board Dtb`
+/ `Error: Board Dtbo blob not found` - pointing at the **DTBO** (board overlay)
+partition, not the kernel/DTB.
+
+This is a different failure than stock's own normal `EDTBO check fail` →
+`Apply Overlay total time` → `Final Dtb version = 0` → continues (non-fatal, per
+every earlier round's baseline evidence). "Unable to find the Board Dtb" reads as
+a more fundamental "couldn't locate/parse any valid board-DTB table entry at all"
+- plausibly because our `kernel/dtbo/gts7l-noop.dts` (a deliberately near-empty
+plugin overlay, built early in the project specifically to avoid Samsung's real
+downstream dtbo overlay corrupting our upstream-based DTS) lacks whatever
+identity/table metadata (`id`/`rev`/`custom0-3` fields in the Android DTBO image
+table format) ABL now searches for, now that `qcom,board-id` on the base DTB gives
+it something to search *against*. This stage was never reached before this round,
+since every earlier test died at the DTB-matching stage first.
+
+**Not yet fixed at the time this section was first written.** See Round 9 below
+for what was actually tried and found.
+
+Tablet safe throughout: stock `boot.img`/`dtbo.img` restored and hash-verified,
+`param` forced to recovery, `rp` unaffected.
+
+## Round 9 (2026-09-13, later): two well-evidenced DTBO fix attempts, both
+disproven by identical-log evidence; real root cause still open
+
+### Attempt 1: noop overlay entries with real Samsung "selector" properties, per the S9 Ultra project's own documented approach
+
+Dumped our noop `dtbo.img`'s table (`mkdtboimg dump`) against stock's real
+`dtbo.img` (`work/stock-backup/dtbo.img`, already backed up). Table header
+metadata (`id`/`rev`/`custom0-3`) is identical (all zero) in both - not the
+difference. The real difference: our noop's entries all pointed to the same
+140-byte, completely empty `{ fragment@0 { target-path = "/"; __overlay__ {}; }; }`
+blob, while stock has 9 genuinely distinct entries - entry 0 a tiny 101-byte
+`dtbo-version = <0x01>` marker, entries 1-8 real ~330KB per-region board
+overlays, **each with root-level identity properties**
+(`model`, `compatible = "qcom,kona-mtp", "qcom,kona", "qcom,mtp"`,
+`qcom,board-id = <0x08 N>`) sitting outside the fragment/overlay body itself.
+Entry 7's `qcom,board-id = <0x08 0x07>` matches this exact physical unit (its
+`model` string, `"Samsung GTS7L PROJECT - PV REV0.4 (board-id,7)"`, is the same
+string seen in TWRP's own dmesg `Hardware name:` line earlier this session).
+
+Checked `references/postmarketos-galaxy-tab-s9-ultra`'s own porting log
+(`docs/development-notes.md`) for how a sibling project solved the equivalent
+problem, per the owner's direction - and found they'd tried exactly this:
+*"overlays no-op con los selectores Samsung"* (no-op overlay bodies, but keeping
+Samsung's real selector/identity properties). Built the same thing here: a
+corrected `dtbo.img` with entry 0 = stock's exact 101-byte version marker
+(byte-identical, confirmed) and entries 1-8 = our existing empty overlay
+(unchanged). Flashed and tested. **Identical failure** -
+`Unable to find the Board Dtb` / `Error: Board Dtbo blob not found`, at the exact
+same microsecond timestamps as every prior test.
+
+### Attempt 2: deliberately invalid `dtbo` to force ABL's non-ufdt fallback, per the same sibling project's actual eventual fix
+
+Reading further in that same porting log: the S9 Ultra project found the
+"noop-with-real-selectors" approach (their own version of Attempt 1) was
+*also* insufficient for them - it fixed their equivalent of
+`No match found for Soc Dtb type`, but then hit `ApplyOverlay: ufdt apply
+overlay failed` → `Root Node is not found at BoardDtb` → Odin, the same class of
+failure as our current one. Adding `-@`/`__symbols__` didn't help them either.
+Their actual fix, found by reading Qualcomm's own reference ABL source
+(`BootLinux.c`, `LoadAndValidateDtboImg`): **if `dtbo` is not a valid Android
+DTBO table at all, ABL skips `GetBoardDtb`/`ufdt_apply_overlay` entirely** and
+falls back to `DeviceTreeAppended` - looking for an FDT concatenated directly
+after the kernel image, the same general shape as our own already-working
+appended-DTB mechanism. Their fix: `dtbo` starts with zero bytes (invalid magic)
+to force this fallback, kernel+DTB concatenated directly in `boot`. Their
+physical test got further than ever before - a real Linux framebuffer logo
+appeared, with the eventual failure moving from the bootloader into Linux/
+firmware itself.
+
+Built the same thing: `dtbo.img` as 4096 bytes of all zeros (no `d7b7ab1e`
+magic). Flashed and tested. **Also identical failure**, same messages, same
+microsecond timestamps.
+
+### The two tests' logs are provably byte-identical, not just "similarly worded"
+
+Diffed the full captured logs from both tests directly (not just eyeballing the
+error strings) - **the exact ~150-line ABL sequence from `Booting Into Mission
+Mode` through the Download Mode entry is byte-for-byte identical between the
+real-selectors test and the all-zero-invalid test**, down to every microsecond
+timestamp. (The overall capture files do genuinely differ elsewhere - different
+sizes, different md5, different TWRP-runtime noise from being two separate
+reboot cycles - so this isn't a stale/reused capture; verified directly on
+request rather than assumed.) **This means whatever produces "Unable to find
+the Board Dtb" is not reading from the `dtbo` partition's content at all** -
+neither test's `dtbo` changes moved the needle even slightly, which
+contradicts the working assumption from both attempts above.
+
+### Disassembly in progress, not concluded
+
+Located and disassembled the actual function (`LinuxLoader` PE32, same
+extraction/disassembly method as Round 8 - see `tools/find_string_refs.py` and
+`tools/dump_func.py`) that prints both error strings. Confirmed: it takes a
+pointer (`x1`, checked for NULL) to what is structurally a `dt_table_header`
+(field at offset `0x14`, byte-swapped, matches `dt_entries_offset` exactly) and
+loops over its entries the same way the base-DTB msm-id/board-id/pmic-id
+checker (`0x25700`, from Round 8) does - in fact it *calls* `0x25700` per
+candidate entry. Given the dtbo-content-invariance finding above, the open
+question is where `x1` actually comes from - not yet traced to its caller (the
+`find_callers2.py` search for direct `bl` references to this function's start
+found none, meaning - same as Round 8's experience - it's likely invoked
+indirectly through a function-pointer/protocol table). Worth resuming with a
+real decompiler's cross-reference analysis (Ghidra) rather than continuing to
+guess at DTBO content, since two independent, well-evidenced content changes
+have now both been disproven.
+
+**Status: real fix not found this round.** The `qcom,board-id` fix (Round 8) is
+still confirmed working and should stay applied. The DTBO/"Board Dtb" blocker is
+a genuine, distinct, unsolved problem - not something more blind content-guessing
+is likely to resolve, given two independent attempts already failed identically.
+
+Tablet safe throughout: stock `boot.img`/`dtbo.img` restored and hash-verified,
+`param` forced to recovery, `rp` unaffected.

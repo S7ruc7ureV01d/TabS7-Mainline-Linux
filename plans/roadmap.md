@@ -441,6 +441,29 @@ Progress log:
   direct ABL binary inspection) before any more blind DTS iteration - black-box
   guessing against this specific failure has now produced two false "fixed"
   conclusions in a row.
+- 2026-09-13 (Round 9): **Confirmed `qcom,board-id` (Round 8) actually works** -
+  finished the `heimdall` fast-exit from Download Mode (found the real PIT
+  partition name is `PARAM`, uppercase, and that heimdall only tolerates one
+  protocol session per Download Mode boot - do the write as the only action,
+  auto-reboot, don't chain calls), which got a clean, verified capture at last:
+  `No match found for Soc Dtb type` is completely gone, and the boot proceeds
+  much further than ever before (RP/SWREV/FRP/KG/HDM checks, device ID display)
+  before hitting a new, later, different failure: `Unable to find the Board
+  Dtb` / `Error: Board Dtbo blob not found`. Per the owner's direction, checked
+  how the sibling S9 Ultra project solved the equivalent problem and tried both
+  of their documented approaches (no-op DTBO entries with real Samsung
+  "selector" identity properties; then a deliberately-invalid `dtbo` to force
+  ABL's non-ufdt appended-DTB fallback, their own eventual working fix) -
+  **both failed identically**, and a direct log diff proved the `dtbo`
+  partition's content has no effect on this failure at all, ruling out more
+  guessing at its content as a path forward. Disassembled the responsible
+  function (same `LinuxLoader` PE32/toolchain as Round 8) but couldn't trace
+  its caller - same indirect-call obstacle as Round 8, needs a real decompiler
+  to resolve. Full detail in `../docs/kernel-boot-debugging.md` Round 9.
+  Tablet safe: stock `boot.img`/`dtbo.img` restored and hash-verified, `param`
+  forced to recovery, `rp` unaffected. Next: either get Ghidra for proper
+  cross-reference analysis of the Board-Dtb function, or find another sibling
+  project's documented fix for this specific barrier.
 - 2026-09-13 (Round 8, later): Split the FNB58/FUSB302 VDM-injection idea out into
   its own parked project doc, `../docs/fnb58-vdm-uart-project.md` - decided on the
   reflash-the-FNB58's-own-MCU approach (no permanent hardware mods) over tapping
