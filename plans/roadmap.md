@@ -441,6 +441,12 @@ Progress log:
   direct ABL binary inspection) before any more blind DTS iteration - black-box
   guessing against this specific failure has now produced two false "fixed"
   conclusions in a row.
+- 2026-09-13 (Round 8, later): Split the FNB58/FUSB302 VDM-injection idea out into
+  its own parked project doc, `../docs/fnb58-vdm-uart-project.md` - decided on the
+  reflash-the-FNB58's-own-MCU approach (no permanent hardware mods) over tapping
+  its I2C bus with a separate microcontroller, per the owner's preference. Not
+  started; documented so it isn't lost and doesn't block the main kernel-boot
+  thread. Back to the tablet itself next.
 - 2026-09-13 (Round 8): Fully closed out the passive-resistor UART approach -
   confirmed electrically impossible on this hardware via direct testing (proper
   breakout board, multiple resistor values, both orientations, a dead short, a
