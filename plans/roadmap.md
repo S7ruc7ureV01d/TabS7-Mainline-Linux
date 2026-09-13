@@ -497,6 +497,36 @@ Progress log:
   hash-verified, `param` forced to recovery, `rp` unaffected. Next: either
   invest in the `uefivarstore` route, or investigate why stock's boot chain
   doesn't need this exact-match path at all before any more DTS tuning.
+- 2026-09-13 (Round 10): Directly investigated the "why does stock skip this"
+  question per the owner's request, instead of more DTS tuning. First ruled
+  out one more theory by direct hardware test: built a boot.img with a
+  genuinely single (not triple-concatenated) appended DTB entry - identical
+  failure, identical microsecond timestamps, so entry count isn't the
+  factor. Then did the obvious direct test that hadn't been tried yet:
+  flashed **completely unmodified** stock `boot.img`/`dtbo.img`, did a real
+  (non-recovery) `adb reboot`, and read `/proc/last_kmsg` live from the
+  resulting real, normally-booted Android session (Magisk root was already
+  present from before this project) - zero ring-buffer-eviction risk since
+  no intervening reboot was needed. **Found the real answer**: stock's
+  actual boot sequence is `EDTBO check fail` → `Apply Overlay total time` →
+  `Final Dtb version = 0` → continues normally - none of `No match found`/
+  `Unable to find the Board Dtb`/`Board Dtbo blob not found` appear
+  anywhere. Stock never enters the whole `FUN_00025490`/`FUN_00026748`
+  mechanism Round 8-9 spent so much effort reverse-engineering - that's a
+  fallback path, not what stock uses. Working theory: it's gated by AVB
+  verification actually succeeding, not just DTB/DTBO content - stock's
+  real signed images pass and take this trusted "EDTBO" path, while our
+  `magiskboot`-repacked custom images (footer regenerated automatically,
+  but very likely without matching content hash descriptors) fail AVB and
+  fall back to the legacy mechanism that needs real hardware PMIC/foundry
+  data nobody has access to. **This reframes the whole blocker** - continuing
+  to tune DTS/DTBO values for the fallback path may never fully succeed;
+  getting our custom boot.img to genuinely AVB-verify (via `avbtool` or
+  similar) so ABL takes the same trusted path stock uses is the more
+  promising direction. Not yet attempted. Full detail in
+  `../docs/kernel-boot-debugging.md` Round 10. Device currently booted into
+  real, unmodified stock Android (intentional, safe) - get back to TWRP via
+  the recovery combo before the next round. `rp` unaffected throughout.
 - 2026-09-13 (Round 8, later): Split the FNB58/FUSB302 VDM-injection idea out into
   its own parked project doc, `../docs/fnb58-vdm-uart-project.md` - decided on the
   reflash-the-FNB58's-own-MCU approach (no permanent hardware mods) over tapping

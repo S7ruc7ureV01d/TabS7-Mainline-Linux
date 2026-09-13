@@ -513,14 +513,28 @@ even if it existed.
   failing. One required bit needs `qcom,pmic-id` (never set, tried a
   sysfs-derived candidate value on hardware - didn't work); another needs a
   non-zero `qcom,msm-id` foundry byte that's structurally absent from this
-  DTS's current (stock-matching) wildcard convention. **Bigger finding**:
-  stock's own real compiled DTB also lacks `qcom,pmic-id`, meaning stock
-  itself can't be satisfying this same exact-match path either - it likely
-  reaches Linux via a different boot-chain mechanism entirely, which calls
-  into question whether this exact-match path is even the right thing to
-  keep chasing. Real verbose ABL logging would resolve this decisively but
-  needs raw `uefivarstore` partition writes (EDK2 variable-store format) -
-  not attempted, a real side-project of its own.
+  DTS's current (stock-matching) wildcard convention.
+- **Round 10 - the real answer, found by directly reading stock's own actual
+  boot log**: stock never enters this whole mechanism at all. Flashed
+  completely unmodified stock `boot.img`/`dtbo.img`, did a real (non-recovery)
+  boot, and read `/proc/last_kmsg` live from the resulting real Android
+  session (zero eviction risk). Stock's real sequence is `EDTBO check fail` →
+  `Apply Overlay total time` → `Final Dtb version = 0` → continues - **none**
+  of `No match found`/`Unable to find the Board Dtb`/`Board Dtbo blob not
+  found` appear anywhere. Working theory: ABL's DTB-selection strategy
+  branches on whether AVB verification actually *succeeds*, not just on
+  content - stock's real signed images pass and take the trusted "EDTBO"
+  path, while `magiskboot`-repacked custom images (which regenerate the AVB
+  footer's size/offset automatically but not matching content hash
+  descriptors) almost certainly fail AVB and fall back to the legacy
+  appended-DTB mechanism this project has been fighting since Round 5 - a
+  mechanism that needs real hardware PMIC/foundry data nobody has access to.
+  **This reframes the whole blocker**: tuning DTS/DTBO values for the
+  fallback path may never fully succeed; the more promising direction is
+  getting our custom `boot.img` to genuinely AVB-verify (via `avbtool` or
+  similar, not relying on `magiskboot`'s automatic-but-hash-incorrect footer
+  regen) so ABL takes the same trusted path stock uses. Not yet attempted -
+  this is the clear next step. Full detail in Round 10.
 
 ## Automated boot-history capture in TWRP (2026-09-12)
 
@@ -1129,3 +1143,112 @@ actual values needed either aren't obtainable without more tooling investment,
 or (per the stock-DTB puzzle above) may not be the right thing to chase at all.
 Tablet safe: stock `boot.img`/`dtbo.img` restored and hash-verified, `param`
 forced to recovery, `rp` unaffected.
+
+## Round 10 (2026-09-13, later): the real answer - stock never takes the
+FUN_00025490/FUN_00026748 path at all; it's a fallback for AVB verification
+failure
+
+Per the owner's direction, directly investigated why stock's boot chain skips
+the whole "exact match" mechanism, rather than continuing to guess at DTB/DTBO
+content within it.
+
+### Ruled out by direct hardware test: single vs. multi-entry appended DTB doesn't matter
+
+Before finding the real answer, one more theory was tested and disproven:
+maybe having 3 concatenated stepping DTBs (vs. a genuine single DTB) forces
+entry into the strict matcher instead of a simpler "single appended DTB found"
+fast path that Ghidra's decompilation of `BootLinux()` showed also exists.
+Built a boot.img with a single (not triple-concatenated) DTB entry (the
+v2.1/`0x20001` stepping, matching what's positioned first in stock's own
+appended blob) and tested on hardware. **Identical failure, identical
+microsecond timestamps** to every multi-entry test. This conclusively rules
+out DTB entry-count as a factor - something about `FUN_000325f8`'s gating
+condition (traced but not fully resolved by manual reading - see
+`docs/ghidra-analysis/README.md` for the attempted trace and where the
+reasoning got tangled) makes us take the strict-matcher branch every time,
+independent of appended-DTB structure.
+
+### The actual answer: flash 100% stock and read its own real boot log
+
+Rather than continue inferring from partial traces, did the obvious direct
+test that hadn't been done yet: flashed **completely unmodified** stock
+`boot.img` and `dtbo.img` (already had them backed up and hash-verified) and
+did a **real, normal `adb reboot`** (not a recovery-combo boot) - genuinely
+letting stock's own, properly-signed firmware boot all the way. It booted
+into real Android normally, as expected for unmodified stock firmware. With
+USB debugging already enabled and Magisu root present from before this
+project began, read `/proc/last_kmsg` **live, directly from the running
+Android session** (`su -c 'cat /proc/last_kmsg'`) - zero ring-buffer-eviction
+risk at all, since no intervening reboot was needed. Saved to
+`work/stock-boot-evidence/stock-normal-boot-kmsg-20260913.txt` (gitignored,
+large/device-specific - regenerate the same way if needed again).
+
+**Stock's real, successful boot sequence, checked directly against its own
+`Booting Into Mission Mode` marker:**
+
+```
+Memory Base Address: 0x80000000
+EDTBO check fail
+Apply Overlay total time: 393 ms
+Final Dtb version = 0
+[continues normally into RAM Partitions setup, IDDQ fuses, etc. - exactly the
+ same continuation this project first saw, and mistakenly attributed to our
+ own kernel, all the way back in the now-retracted Round 4 "confirmed
+ baseline" claim]
+```
+
+**None of `No match found for Soc Dtb type`, `Unable to find the Board Dtb`,
+or `Error: Board Dtbo blob not found` appear anywhere in stock's real boot.**
+Stock never enters `FUN_00025490`/`FUN_00023f20`/`FUN_00026748` at all - the
+entire "exact match" mechanism this project spent Round 9 reverse-engineering
+is a **fallback path stock's own real boot never uses**.
+
+### Why: AVB verification success vs. failure almost certainly selects which entire mechanism runs
+
+Working theory, well-supported by everything observed this project but not
+yet directly proven: ABL's DTB-selection strategy branches on whether the
+current boot image's **AVB verification actually succeeds**, not just on
+content. Stock's real `boot.img`/`dtbo.img` are signed with hash descriptors
+in `vbmeta` that genuinely match their content, so AVB verification passes,
+and ABL takes the trusted "EDTBO" (AVB-driven overlay-application) path. Our
+own `magiskboot`-repacked custom images have always relied on this project's
+`orange`/unlocked-bootloader "AUTHENTICATE fail but allow" leniency (confirmed
+early in this project, Round 1/`docs/kernel-boot-debugging.md`'s "ABL fail but
+allow" section) - `magiskboot repack` regenerates the SEANDROID/AVB footer's
+size/offset fields automatically, but very likely does **not** recompute
+matching cryptographic hash descriptors in `vbmeta` for our modified content.
+AVB verification for our images almost certainly genuinely fails every time,
+and ABL falls back to the legacy appended-DTB/DTBO-table mechanism (Round
+5-9's entire investigation) specifically *because* the trusted path isn't
+available - a mechanism that, on this particular retail firmware, needs real
+hardware PMIC/foundry values this project has never been able to obtain.
+
+**This reframes the whole project's current blocker.** Continuing to tune
+DTS/DTBO values for the fallback mechanism may never fully succeed (its
+"exact match" requirement needs data - real PMIC model/revision, real msm-id
+foundry byte - that isn't available from any source found so far, including
+stock's own real DTB/DTBO, which also don't have it). **The more promising
+path: make our custom `boot.img`/`dtbo.img` genuinely AVB-verify
+successfully**, so ABL trusts them and takes the same "EDTBO" path stock
+uses, bypassing the whole `FUN_00025490` mechanism entirely. This would need:
+
+1. Understanding `vbmeta`'s actual descriptor structure for this device (it's
+   currently AVB-disabled/permissive per this project's own
+   `vbmeta_disabled.img` artifacts, but that only affects verification
+   *enforcement* - ABL may still compute and compare hashes even when not
+   enforcing, taking a different success/failure branch based on the
+   comparison result specifically, independent of whether a failure would
+   actually block boot).
+2. Using `avbtool` (or the same signing approach `magiskboot`/AnyKernel3
+   projects use for a "properly AVB-aware" repack, if one exists) to
+   regenerate correct hash descriptors for our modified `boot`/`dtbo` content,
+   rather than relying on `magiskboot repack`'s automatic (but
+   hash-incorrect) footer regeneration.
+
+**Not yet attempted.** This is the clear next step, and a genuinely different
+strategy than everything tried in Rounds 5-9.
+
+Device state at end of this round: currently booted into **real, unmodified
+stock Android** (not TWRP) - this is intentional and safe (completely
+original firmware, nothing modified). Get back to TWRP via the recovery
+button-combo before the next round of testing. `rp` unaffected throughout.
