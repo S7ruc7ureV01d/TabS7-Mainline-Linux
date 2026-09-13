@@ -1297,3 +1297,101 @@ this has now been ruled out with real hardware evidence twice over (Round 9's
 four content variations, and this round's content-matches-or-exceeds-stock
 test). Pursue proper AVB re-signing (`avbtool`) as the concrete next
 direction**, per the theory above - not yet attempted.
+
+## Round 11 (2026-09-13, later): AVB re-signing tried and also disproven -
+neither theory holds up under direct hardware test
+
+Per the owner's direction, started the `avbtool` work. First correction to
+Round 10's own theory: initially checked the wrong images (`vbmeta.img`/
+`vbmeta_samsung.img`, pulled directly from a live, normally-booted stock
+Android session with pre-existing Magisk root - no TWRP round-trip needed,
+zero eviction risk) and found neither carries a hash descriptor for `boot`/
+`dtbo` at all, which looked like it disproved the whole AVB theory. Corrected
+immediately by checking `avbtool info_image` on `boot.img`/`dtbo.img`
+directly instead - **both carry their own embedded, genuinely-signed
+`SHA256_RSA4096` hash descriptor** (same signing key as `vbmeta_samsung.img`,
+the standard Android "chained partition" AVB pattern) - the vbmeta
+partitions don't need their own entries for these because boot/dtbo are
+self-contained.
+
+**Confirmed directly, not just inferred**: our `magiskboot`-repacked
+`boot.img`'s AVB descriptor is completely stale - it still claims `Image
+Size: 53703184 bytes` (stock's original kernel+ramdisk size) while the
+image's actual content is `42323984 bytes`. `magiskboot repack` regenerates
+the Samsung-specific SEANDROID/AVBf footer fields but never touches the real
+AVB hash descriptor at all - it's byte-for-byte copied from stock, describing
+content that no longer exists in the image. Same finding for `dtbo`: our
+noop `dtbo.img` was only ever 4096 bytes written to the front of a 10MB+
+partition - the real AVB footer (fixed at the partition's end, per the AVB
+spec) was always stock's own stale footer for the REST of that partition,
+never touched by any of Round 9's content experiments. This was true for
+every dtbo test in Rounds 9-10 without anyone noticing - a real methodology
+gap now closed.
+
+### The test: self-consistent (but not Samsung-trusted) re-signing
+
+Found a real RSA-4096 test key already available locally
+(`external/avb/test/data/testkey_rsa4096.pem`, from a local AOSP/LineageOS
+checkout) and used `avbtool add_hash_footer` to regenerate a **genuinely
+self-consistent** footer for both `boot.img` (the `qcom,board-id`-fixed
+kernel/DTB build) and `dtbo.img` (the noop overlay, now correctly sized to
+fill the entire partition so no stale stock footer remnant survives) - hash
+and size both now correctly describe the actual modified content, signed
+with a real (if untrusted-by-Samsung) key. `avbtool verify_image` confirmed
+the footer/signature is internally valid.
+
+This can never pass Samsung's actual root-of-trust (no access to Samsung's
+private key) - the point was to test whether having a *structurally correct*
+descriptor, as opposed to a *stale/garbage* one, changes ABL's behavior at
+all at the DTB-matching stage, given "fail but allow" already tolerates
+*some* kind of authentication failure regardless.
+
+Flashed both re-signed images directly from a live, rooted stock Android
+session (no TWRP needed for flashing either - root via Magisk was already
+present). Tested twice; the first capture was evicted (matches the pattern
+already seen with the `qcom,board-id` fix - more boot activity, more log
+volume, harder to catch), the second capture attempt hit an unrelated
+methodology snag (`heimdall`'s automated `PARAM` write reported success but
+lost the session-end handshake, leaving the device in a genuinely
+unresponsive black-screen state - resolved by a forced power-cycle, which
+landed the device in Samsung's RDX crash-dump diagnostic screen, itself
+safely exited via the on-screen `VOL_DOWN + POWER` combo; **RDX mode
+appearing is a normal consequence of any forced/abrupt reset on this
+device, not a new failure mode from the test itself** - worth remembering
+if it comes up again). A third attempt, immediately after landing back in
+TWRP from the RDX detour, finally caught a clean capture.
+
+**Result: identical failure.** `Unable to find the Board Dtb` / `Error:
+Board Dtbo blob not found`, same as every DTB-content variation before it.
+The self-consistent-but-untrusted signature made no observable difference.
+
+### What this actually establishes
+
+Two independent, well-motivated theories have now both been disproven by
+direct hardware test, not just argued away:
+1. DTB/DTBO **content** tuning (Round 9, four variations; Round 10, a
+   content-matches-or-exceeds-stock test).
+2. AVB **verification passing vs. failing in a generic sense** (this round) -
+   "fail but allow" appears to treat a self-consistent-but-wrong-key
+   signature exactly the same as a stale/garbage one; whatever differs about
+   stock isn't simply "does the hash check succeed at all."
+
+If ABL's exact-match/EDTBO path genuinely does require Samsung's own actual
+private key to trust the signature (not just a well-formed one), this path
+may be **fundamentally unreachable** for any custom-signed kernel on this
+retail firmware, independent of anything this project does. That's a real,
+sobering possibility worth taking seriously rather than continuing to invent
+new signing variations to try.
+
+**Status**: both concrete, testable theories from Round 10 are now closed
+out. The remaining path with a realistic chance of a definitive answer is
+still the one identified back in Round 9 and never pursued: unlocking real
+ABL verbose logging (the `"EFIDebug"` UEFI variable, requiring a raw write to
+the `uefivarstore` partition's EDK2 variable-store format) to see the
+*actual* comparison values ABL is using, rather than continuing to guess at
+mechanisms from behavior alone. `qcom,board-id = <0x08 0x07>` stays applied
+(still correct, still real progress from Round 8) regardless of how this
+resolves.
+
+Tablet safe throughout: stock `boot.img`/`dtbo.img` restored and
+hash-verified, `param` forced to recovery, `rp` unaffected.

@@ -527,6 +527,32 @@ Progress log:
   `../docs/kernel-boot-debugging.md` Round 10. Device currently booted into
   real, unmodified stock Android (intentional, safe) - get back to TWRP via
   the recovery combo before the next round. `rp` unaffected throughout.
+- 2026-09-13 (Round 11): Started the `avbtool` work per the owner's
+  direction. Corrected an initial wrong check (the separate `vbmeta`/
+  `vbmeta_samsung` partitions don't carry boot/dtbo hash descriptors - `boot`
+  and `dtbo` each carry their own embedded, genuinely-signed
+  `SHA256_RSA4096` descriptor, the standard "chained partition" AVB
+  pattern). Confirmed directly that `magiskboot repack` never updates this
+  real descriptor - it's byte-for-byte copied from stock, describing content
+  that no longer exists once we swap kernel/DTB. Also found dtbo's AVB
+  footer was always stock's own stale one the entire time (fixed at the
+  partition's end per the AVB spec, never touched by any of Round 9-10's
+  content-only tests, since those only wrote the first 4KB of a 10MB+
+  partition) - a real methodology gap, now closed. Used a real RSA-4096 test
+  key already available locally to give both `boot.img` and `dtbo.img` a
+  genuinely self-consistent (hash matches actual content) though
+  Samsung-untrusted signature via `avbtool add_hash_footer`, and tested on
+  hardware. **Identical failure** - the self-consistent-but-untrusted
+  signature made no difference, disproving this theory too. Two independent,
+  well-motivated theories (DTB content, generic AVB pass/fail) are now both
+  closed out by direct hardware test. Remaining real path: unlock ABL
+  verbose logging via the `uefivarstore` partition (identified in Round 9,
+  never attempted) to see actual comparison values instead of continuing to
+  guess at mechanisms. `qcom,board-id = <0x08 0x07>` stays applied regardless
+  - still correct, still real progress. Full detail in
+  `../docs/kernel-boot-debugging.md` Round 11. Tablet safe: stock
+  `boot.img`/`dtbo.img` restored and hash-verified, `param` forced to
+  recovery, `rp` unaffected.
 - 2026-09-13 (Round 8, later): Split the FNB58/FUSB302 VDM-injection idea out into
   its own parked project doc, `../docs/fnb58-vdm-uart-project.md` - decided on the
   reflash-the-FNB58's-own-MCU approach (no permanent hardware mods) over tapping
