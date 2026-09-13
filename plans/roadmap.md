@@ -461,9 +461,24 @@ Progress log:
   its caller - same indirect-call obstacle as Round 8, needs a real decompiler
   to resolve. Full detail in `../docs/kernel-boot-debugging.md` Round 9.
   Tablet safe: stock `boot.img`/`dtbo.img` restored and hash-verified, `param`
-  forced to recovery, `rp` unaffected. Next: either get Ghidra for proper
-  cross-reference analysis of the Board-Dtb function, or find another sibling
-  project's documented fix for this specific barrier.
+  forced to recovery, `rp` unaffected.
+- 2026-09-13 (Round 9, continued): Tried two more independent fixes for the
+  "Board Dtb" blocker - stock's real, unmodified `dtbo.img` (what the sibling
+  Tab S7+ Droidian project, same SM8250 chip family, actually ships per its
+  README) and the exact real `qcom,board-id = <0x08 0x07>` in the appended DTB
+  itself (this unit's confirmed real value, from stock `dtbo.img`'s own
+  `entry.7` and independently from TWRP's own kernel `Hardware name:` dmesg
+  line). **Both also failed identically** - four independent, well-reasoned
+  content changes now all produce byte-for-byte identical ABL behavior,
+  strong evidence this stage isn't reading identity from anything currently
+  under our control. Stopping blind content-guessing on this specific stage;
+  `qcom,board-id` stays at the real `<0x08 0x07>` value going forward
+  regardless. Full detail in `../docs/kernel-boot-debugging.md` Round 9.
+  Tablet safe: stock `boot.img`/`dtbo.img` restored and hash-verified again,
+  `param` forced to recovery, `rp` unaffected. Next: get Ghidra for proper
+  cross-reference/dataflow analysis of the Board-Dtb function's caller - plain
+  disassembly (no direct `bl`, no literal address reference found) has hit a
+  real wall, same as Round 8's pmic-id ambiguity.
 - 2026-09-13 (Round 8, later): Split the FNB58/FUSB302 VDM-injection idea out into
   its own parked project doc, `../docs/fnb58-vdm-uart-project.md` - decided on the
   reflash-the-FNB58's-own-MCU approach (no permanent hardware mods) over tapping

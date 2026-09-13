@@ -493,18 +493,24 @@ even if it existed.
   entire project. Keep this fix applied; do not revert it.
 - **New blocker found and confirmed real (Round 9): `Unable to find the Board
   Dtb` / `Error: Board Dtbo blob not found`**, reached much later in boot (past
-  RP/SWREV/FRP/KG/HDM checks, device ID display) than any prior failure. Two
-  well-evidenced fix attempts based on real reference material (a sibling
-  project's own documented approach) both failed identically - see Round 9 for
-  full detail. Critically, **the `dtbo` partition's content has been proven,
-  via byte-identical log diffs across two very different `dtbo` contents, to
-  have no effect on this failure at all** - don't try more `dtbo` content
-  variations without first finding where the code actually reads its data
-  from. Root cause is open; disassembly is in progress (`LinuxLoader` PE32,
-  same toolchain as Round 8) but the function's caller hasn't been traced yet
-  (indirect call via a function-pointer table, same obstacle as Round 8's
-  pmic-id ambiguity) - resuming with a real decompiler (Ghidra) for proper
-  cross-reference analysis is the likely unblock, not more guessing.
+  RP/SWREV/FRP/KG/HDM checks, device ID display) than any prior failure.
+  **Four independent, well-reasoned content changes all produced byte-for-byte
+  identical ABL behavior**: noop DTBO with real Samsung selector properties;
+  a deliberately-invalid (all-zero) DTBO to force ABL's non-ufdt fallback (a
+  sibling project's actual documented fix, for a different SoC generation);
+  stock's real unmodified DTBO (what a same-chip-family sibling project
+  actually ships); and the exact real `qcom,board-id = <0x08 0x07>` in the
+  appended DTB itself (this unit's confirmed real value). **Stop guessing at
+  DTB/DTBO content for this specific stage** - none of it is provably read by
+  whatever determines this outcome. `qcom,board-id = <0x08 0x07>` (the real
+  value) stays applied going forward regardless. Root cause is open;
+  disassembly located the responsible function (`LinuxLoader` PE32, same
+  toolchain as Round 8) but its caller hasn't been traced - it's an indirect
+  call through what's presumably a function-pointer/protocol table, same
+  obstacle as Round 8's pmic-id ambiguity, and searching for both direct `bl`
+  references and literal address values in the binary found neither. A real
+  decompiler (Ghidra) doing proper cross-reference/dataflow analysis is the
+  likely unblock - not more content guessing.
 
 ## Automated boot-history capture in TWRP (2026-09-12)
 
@@ -996,3 +1002,51 @@ is likely to resolve, given two independent attempts already failed identically.
 
 Tablet safe throughout: stock `boot.img`/`dtbo.img` restored and hash-verified,
 `param` forced to recovery, `rp` unaffected.
+
+### Two more attempts, same round: stock's real (unmodified) dtbo, and the exact real board-id in the appended DTB - both also disproven
+
+Per the owner's direction, checked how a *same-chip-family* sibling project
+(`references/galaxy-tab-s7-plus-droidian`, a real working Halium/Droidian port
+for the sibling Tab S7+ Wi-Fi, same SM8250 as `gts7l` - unlike the S9 Ultra
+project's different SM8550 checked above) handles this. Their README flashes
+`droidian/data/dtbo.img` - **stock's own real dtbo, essentially unmodified**
+(only patched for one unrelated hardware quirk, trackpad orientation) - no
+noop/invalid trick at all. Tested the same way here: flashed stock's real,
+completely unmodified `dtbo.img` (already backed up) alongside the
+`qcom,board-id`-fixed kernel. **Identical failure, identical microsecond
+timestamps** to both DTBO variants above.
+
+That's three independent `dtbo` content variations (noop-with-selectors,
+all-zero-invalid, stock's real unmodified dtbo) all producing byte-identical
+results. Reconsidered the theory: maybe "Board Dtb" reads identity from the
+*appended DTB itself* (the same blob already fixed for the base-DTB stage),
+requiring an **exact** `qcom,board-id` match rather than tolerating the
+wildcard `<0x00 0x00>` used to fix the earlier stage. This physical unit's real
+board-id is confirmed two independent ways: stock `dtbo.img`'s `entry.7`
+(`qcom,board-id = <0x08 0x07>`, `model = "...PV REV0.4 (board-id,7)"`) and
+TWRP's own kernel `Hardware name:` dmesg line, which shows the identical string.
+Changed `kernel/dts/sm8250-samsung-gts7l.dts`'s `qcom,board-id` from `<0x00
+0x00>` to `<0x08 0x07>`, rebuilt all three stepping copies, repackaged, and
+tested (with the simple noop `dtbo.img`, since dtbo content is now proven
+irrelevant). **Identical failure, identical microsecond timestamps, a fourth
+time.**
+
+**Four independent, well-reasoned content changes now all produce byte-for-byte
+identical ABL behavior.** This is strong evidence that whatever determines
+"Board Dtb" success or failure isn't reading identity from *anything* under our
+control right now - not `dtbo`'s content, not the appended DTB's `qcom,board-id`
+value. It may be checking against a fused hardware value, a different partition
+entirely, or a factory-provisioned value that can't be replicated from a custom
+build. **Blind content-guessing on this specific stage should stop here** - the
+next productive step is tracing the actual code (the `x1` pointer into the
+`0x26744` function, still not traced to its source - see below) with a real
+decompiler, not more DTS/DTBO variations.
+
+`qcom,board-id` is left at `<0x08 0x07>` in the DTS going forward (the real
+value, confirmed correct for this unit two independent ways) even though it
+didn't change this particular outcome - there's no reason to revert to the
+wildcard now that the real value is known.
+
+Tablet safe throughout (this second half of Round 9): stock `boot.img`/
+`dtbo.img` restored and hash-verified again, `param` forced to recovery, `rp`
+unaffected.
