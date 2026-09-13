@@ -1252,3 +1252,48 @@ Device state at end of this round: currently booted into **real, unmodified
 stock Android** (not TWRP) - this is intentional and safe (completely
 original firmware, nothing modified). Get back to TWRP via the recovery
 button-combo before the next round of testing. `rp` unaffected throughout.
+
+### Follow-up (same session): traced "EDTBO check fail" directly; DTB-content explanation ruled out with real evidence, not just theory
+
+Went looking for the actual `"EDTBO check fail"` string's code (never directly
+examined before this point - only inferred its behavior from stock's log).
+Found it's inside `BootLinux()` itself (`FUN_00020590`), reached only after
+`FUN_00023f20()` (the exact-match-flag check) returns `FALSE` - i.e. only
+reachable once the base-DTB matcher has already set `DAT_00255278 = 1`.
+Confirmed by re-reading the surrounding code carefully: **"EDTBO check fail"
+is not fatal** - whether it fails or succeeds, execution falls through to a
+harmless continuation (`Final Dtb version = 0` on failure - exactly what
+stock's own capture shows), not an abort. `"Override DTB"`/`user_dtbo`
+(`FUN_000263c8`) also unconditionally fails for stock too - confirmed
+directly, `"Override DTB: GetBlkIOHandles failed loading user_dtbo!"` appears
+12 times in stock's own real capture. None of that matters; the branch stock
+takes is fundamentally the lenient one, regardless of what happens inside it.
+
+This means reaching `EDTBO` at all requires `DAT_00255278 = 1`, which can only
+be set inside `FUN_00025490`'s "exact match" check (mask `0x34150000`,
+Round 9). The confirming print for that (`"Exact DTB match found..."`) is
+itself gated behind the same `0x400000` verbose-logging level already known
+to be disabled - so it doesn't appear in stock's capture even when the flag
+genuinely gets set, explaining why it wasn't found there without
+contradicting anything.
+
+**The decisive point**: this project has *already* directly tested, on real
+hardware, a DTB with no `qcom,pmic-id` at all (matching stock's own real DTB
+structure exactly) *and* a specific, real `qcom,board-id = <0x08 0x07>`
+(more specific than stock's own wildcard `<0x00 0x00>`) - i.e. identity data
+at least as complete as stock's. **It still failed identically to every other
+attempt.** Since the matcher's code is identical in both cases and the DTB
+content tested is not worse than stock's, whatever actually differs must be
+external to DTB content - most likely the live hardware-comparison functions
+(`FUN_0001fee0`, `FUN_0001ff28`, `FUN_0001ff70`, `FUN_00013de8`,
+`FUN_00020118`, etc.) returning different data depending on the boot image's
+verification/trust state, or a gate not yet located. This is now supported by
+direct empirical elimination of the DTB-content explanation, not just
+inference from stock's log alone - reinforces, rather than weakens, the
+AVB-verification theory from earlier in this round.
+
+**Conclusion for next steps: stop looking for more DTS/DTBO content fixes -
+this has now been ruled out with real hardware evidence twice over (Round 9's
+four content variations, and this round's content-matches-or-exceeds-stock
+test). Pursue proper AVB re-signing (`avbtool`) as the concrete next
+direction**, per the theory above - not yet attempted.
