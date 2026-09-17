@@ -247,12 +247,21 @@ Exit criteria:
       mainline kernel's compiled-in clock drivers (`qcom,gcc-sm8250`,
       `qcom,sm8250-rpmh-clk`) don't match at all - the thing that solved
       the ABL blocker and the devicetree Phase 1 actually needs are in
-      direct tension, not independent problems. Two real paths forward,
-      neither attempted: surgical compatible-string patching of stock's
-      DTB (cheap, unproven), or solving real ABL matching for our own
-      mainline DTS (the Round 4-11 problem, revisited). UART
-      (`../docs/uart-debug-research.md`) remains the only evidence source
-      that could confirm/refute this directly - not yet attempted.**
+      direct tension, not independent problems. **Round 16 tried the
+      compatible-string patch on real hardware - inconclusive, same
+      symptom as Round 14. Round 17 tried the other path** - the S9 Ultra
+      reference project's exact technique (own mainline DTB appended
+      after a gzip-compressed kernel, `dtbo.img` deliberately invalidated
+      to force ABL's `DeviceTreeAppended` fallback) - and got real,
+      further progress: ABL accepts our own mainline DTB cleanly every
+      time (zero DTB/DTBO errors), but the device now auto-resets
+      (`PM: HARD RESET by PS_HOLD`) immediately after kernel handoff
+      instead of hanging silently - closely paralleling the exact next
+      problem S9 Ultra hit at this stage (a TrustZone NoC fault from
+      missing `/reserved-memory` `no-map` carveouts their mainline DTS
+      didn't have). Next: audit `kernel/dts/sm8250-samsung-gts7l.dts`
+      against stock's real carveout list and add the missing entries -
+      not yet attempted.**
 - [ ] UFS storage enumerates and is readable. **Driver forced built-in
       already (`gts7l.fragment`); needs the actual boot attempt to confirm.**
 - [ ] Root filesystem reachable via ADB/serial shell, even without display.
@@ -691,6 +700,45 @@ Progress log:
   4-11 problem, revisited with new understanding). Full detail in
   `../docs/kernel-boot-debugging.md` Round 15. No hardware touched this
   round - pure research.
+- 2026-09-17 (Round 16): Tested Option A on real hardware - patched
+  stock's DTB (all 3 stepping entries) with `qcom,gcc-sm8250`/
+  `qcom,sm8250-rpmh-clk` fallback compatible strings plus the missing
+  `clocks`/`clock-names` mainline's GCC driver needs, flashed `boot` only
+  (via rooted TWRP `dd`, `dtbo` untouched). **Inconclusive - identical
+  symptom to Round 14**: clean ABL pass held (no regression), but no
+  observable change either. Same fundamental limitation as Round 14: no
+  evidence source available to tell "bound but something else missing"
+  from "still hung earlier" from "the clock-ID mismatch Round 15 flagged
+  is real." Tablet restored to stock, `rp` unaffected.
+- 2026-09-17 (Round 17): Per the owner's request, checked whether the S9
+  Ultra reference project hit the same "Board Dtb"/"Board Dtbo" wall this
+  project spent Rounds 4-11 on. **They did, identically** - and their
+  actual fix (v0.4, after v0.2/v0.3 failed the same way ours did,
+  including the same `/__symbols__` fix this project borrowed in Round 8)
+  was to deliberately invalidate `dtbo.img` (all-zero, not a valid Android
+  DT table at all) so ABL's `LoadAndValidateDtboImg` skips
+  `GetBoardDtb`/`ufdt_apply_overlay` entirely and falls back to reading
+  the DTB directly from bytes appended after the kernel's own
+  gzip-compressed payload - a different, simpler mechanism than this
+  project's Round 8-9 *valid-but-empty* noop DTBO, never tried before.
+  Built and flashed this exactly: our own `kernel/dts/sm8250-samsung-
+  gts7l.dts` (already correct per Round 8/9) gzip+DTB-appended onto our
+  kernel, boot.img's own separate DTB field zeroed, `dtbo.img` all-zero.
+  **Result: real, different progress** - `/proc/last_kmsg` shows ABL
+  accepting our own mainline DTB cleanly every time (zero DTB/DTBO
+  errors, `Shutting Down UEFI Boot Services` reached every session) - but
+  the device now auto-resets (`PM: HARD RESET by PS_HOLD`) immediately
+  after handoff instead of hanging silently like Rounds 13-16. This
+  closely parallels the exact next problem S9 Ultra hit at this same
+  stage - a TrustZone NoC fault from `/reserved-memory` carveouts their
+  mainline DTS was missing (not yet confirmed as the same cause here, no
+  direct `TZBSP`/`upload_cause` evidence found this round, but a strong
+  lead). Full detail in `../docs/kernel-boot-debugging.md` Round 17.
+  Tablet restored to stock (`boot` + `dtbo` both `dd`-restored from a
+  rooted TWRP shell, both hash-verified), `rp`/`ro.bootloader`
+  reconfirmed unchanged. **Next**: audit our DTS against stock's real
+  `/reserved-memory` carveout list (already extracted this session) and
+  add the missing `no-map` entries - not yet attempted.
 
 ---
 

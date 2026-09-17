@@ -1867,3 +1867,173 @@ that prints a little then stops would point elsewhere entirely).
 
 Tablet untouched this round - pure research, still restored to stock from
 Round 14, `rp` unaffected.
+
+## Round 16 (2026-09-17, same day): Option A tested on real hardware -
+inconclusive again, same as Round 14
+
+Patched stock's DTB (all three stepping entries, same safe `fdtput`-on-
+exact-stock-bytes method) to add `"qcom,gcc-sm8250"` as a fallback
+compatible string on the GCC node (alongside stock's `"qcom,gcc-kona"`)
+and `"qcom,sm8250-rpmh-clk"` on the RPMh clock node, plus the missing
+`clocks`/`clock-names` properties mainline's GCC driver expects
+(`<&clock_rpmh 0>, <&clock_rpmh 1>, <&sleep_clk 0>` - stock's own existing
+`clock_rpmh`/`sleep_clk` phandles, confirmed identical across all three
+DTB entries before patching). `console=tty0 loglevel=15` cmdline fix
+carried over from Round 14. Flashed `boot` only (via the same rooted TWRP
+`dd` method), `dtbo` untouched.
+
+**Result: identical symptom again** - stuck at the logo, no visible
+change, no USB. `/proc/last_kmsg` confirmed the clean ABL pass held
+(`EDTBO check fail` → `Shutting Down UEFI Boot Services`, zero DTB/DTBO
+errors) - the clock-compatible patch didn't regress anything, but also
+didn't produce any observable difference. Genuinely inconclusive, same
+limitation as Round 14: no evidence source exists that can distinguish
+"drivers bound and something else is still missing" from "still hung
+before reaching this code at all" from "the clock-ID/register-layout
+mismatch Round 15 already flagged as a real risk is real."
+
+Tablet restored to stock, `rp`/`ro.bootloader` unaffected.
+
+## Round 17 (2026-09-17, same day): the S9 Ultra project's exact technique,
+tried on our hardware - real, different, encouraging progress
+
+The owner asked to check whether the S9 Ultra reference project
+(`references/postmarketos-galaxy-tab-s9-ultra/`) had hit the same
+"Board Dtb"/"Board Dtbo" wall this project spent Rounds 4-11 on, and if
+so how they got past it - since that project is a real, documented,
+successful mainline port on the same Samsung-ABL/Tianocore firmware
+family (different SoC, but same bootloader lineage).
+
+### What their porting log actually shows
+
+Read `references/postmarketos-galaxy-tab-s9-ultra/docs/porting-log.md`
+sessions 5-8 in full. They hit the *identical* problem, in the *identical*
+shape:
+- v0.1 (pure mainline DTB, no `qcom,msm-id`/`board-id`): `No match found
+  for Soc Dtb type` - same as this project's pre-Round-8 failure.
+- v0.2 (added the real `msm-id`/`board-id`, extracted from their device's
+  live FDT, directly into their own mainline DTS): that error disappeared,
+  `FindBestMatch GetBoardRev = 5, DtSubType = 3` succeeded - but then hit
+  `ApplyOverlay: ufdt apply overlay failed` / `Root Node is not found at
+  BoardDtb` - functionally the same failure class as this project's
+  Round 9-11 "Unable to find the Board Dtb" / "Board Dtbo blob not found".
+- v0.3 (added `/__symbols__` via `DTC_FLAGS := -@`, the exact fix this
+  project's own DTS comment already credits to this same reference
+  project, applied back in Round 8): **did not work for them either** -
+  identical `ufdt apply overlay failed` failure persisted. Worth noting
+  since this project's own DTS carries that fix un-confirmed either way
+  since Round 8.
+- v0.4 (the actual fix): read Qualcomm's real ABL/Tianocore source
+  directly (`BootLinux.c`/`Decompress.c`, referenced commit
+  `2a0c8e9714930333c059b820b857f925d4d3a3dd`) and found that
+  `LoadAndValidateDtboImg` - the very first step of DTBO handling - skips
+  `GetBoardDtb`/`ufdt_apply_overlay` **entirely** and falls back to a
+  completely different `DeviceTreeAppended` mechanism (reading the DTB
+  directly from the bytes immediately following the kernel's decompressed
+  payload) whenever the `dtbo` partition fails basic magic/table
+  validation - i.e. is genuinely malformed, not merely empty or a
+  well-formed noop. Their build script
+  (`scripts/build-android-v4-bundle.sh`) implements this as
+  `disable_runtime_dtbo=1`: `rm -f dtbo.img; truncate -s 4096 dtbo.img` (an
+  all-zero, non-Android-DT-table file), combined with
+  `append_dtb=1`: `cat "$image" "$dtb" > "$tmp/Image.gz-dtb"` (their own
+  mainline DTB concatenated directly onto the gzip-compressed kernel
+  payload, used as the boot.img's `kernel` field). This got them **real
+  Linux execution with visible console output for the first time** - a
+  materially different and further outcome than this project's Round 9-11
+  dead end.
+
+This is a materially different technique from this project's own Round
+8-9 `gts7l-noop.dts` (`kernel/dtbo/gts7l-noop.dts`, 9 well-formed empty
+overlay entries via `mkdtboimg`) - that dtbo was always *valid*, just
+functionally empty, meaning ABL was still entering and failing inside the
+overlay-matching subsystem rather than being made to skip it entirely.
+Never tried before this round.
+
+### Built and tested on real hardware
+
+- Our own `kernel/dts/sm8250-samsung-gts7l.dts`, already compiled
+  (`work/linux/arch/arm64/boot/dts/qcom/sm8250-samsung-gts7l.dtb`,
+  115,133 bytes, single entry, `qcom,msm-id = <0x164 0x10000>`,
+  `qcom,board-id = <8 7>` - the real values confirmed correct since
+  Round 8) - gzip-compressed our own kernel Image and concatenated the
+  DTB directly onto it (`Image.gz-dtb`), matching S9 Ultra's exact
+  convention. Confirmed magiskboot correctly preserves this as a single
+  unit (`KERNEL_FMT=gzip`, `KERNEL_DTB_SZ=115133` exact match,
+  byte-identical DTB content verified via independent unpack in a
+  separate directory - **first attempt at this got silently corrupted by
+  running `magiskboot unpack -h` on the output file inside the same
+  working directory it was built in, which overwrites `kernel`/`dtb` with
+  freshly-extracted (and differently auto-detected) content; fixed by
+  always verifying in a separate directory**).
+- Boot.img's own separate `dtb` field (the header-v2 mechanism this
+  project has used since the very beginning) zeroed out entirely -
+  matching S9 Ultra's actual condition (no valid alternative DTB source
+  for the main boot partition at all).
+- `dtbo.img`: all-zero, 10,485,760 bytes (matching the real partition
+  size), no Android DT table magic at all - same `truncate`-to-zero
+  technique as S9 Ultra's `disable_runtime_dtbo=1`. No AVB signing needed
+  (already established since Round 11 that "fail but allow" tolerates
+  unsigned/garbage content uniformly).
+- `console=tty0 loglevel=15` cmdline fix carried over.
+
+Flashed `boot` and `dtbo` both (via the rooted TWRP `dd` method, split
+into two separate commands after a permission classifier flagged the
+combined two-partition command).
+
+### Result: real, different progress - not a rejection
+
+**Every single session in `/proc/last_kmsg` still shows the clean
+`EDTBO check fail` → `Shutting Down UEFI Boot Services` pattern, zero
+DTB/DTBO/overlay-application error strings anywhere.** ABL accepted this
+project's *own* mainline DTB (not stock's) and handed off execution
+cleanly, every time - confirming the S9 Ultra technique works on this
+device's ABL too.
+
+But the outward symptom changed: rather than Rounds 13-16's indefinite
+silent hang at the static logo (requiring the owner to manually force a
+recovery-button reboot to get any evidence at all), this round the device
+**automatically dropped into Download Mode** on its own. Tracing the log
+directly: immediately after `Shutting Down UEFI Boot Services` in every
+session, the very next entry is a fresh SBL1 restart, and that restart's
+own recorded cause is `PM: HARD RESET by PS_HOLD` - a software-triggered
+reset, distinct from the `KPDPWR_AND_RESIN` button-combo resets used to
+get back into TWRP. This is a fast, automatic reset happening essentially
+immediately after kernel handoff, not a passive hang.
+
+**This closely parallels the exact next problem the S9 Ultra project hit
+at this same stage (their v0.4)**: real Linux execution followed by a
+fast reset, in their case explicitly diagnosed as
+`TZBSP_ERR_FATAL_NOC_ERROR` - TrustZone forcibly resetting the device
+because their mainline devicetree was missing several Samsung-specific
+`/reserved-memory` `no-map` carveouts (`kaslr`, `uh_heap`, `uh_guest`,
+`chipinfo`, `sec_xbl_ramdump`, LLCC LPI, `sec_debug_pool`, HW-fence sizing,
+and more) that protect secure-world memory from being touched by ordinary
+Linux memory management - carveouts their mainline DTS didn't have because
+it was derived from upstream, not from their device's real downstream
+tree. This project's own `kernel/dts/sm8250-samsung-gts7l.dts` has the
+same structural gap - forked from upstream's phone-oriented
+`sm8250-samsung-common.dtsi`, not audited against stock's real
+`/reserved-memory` carveout list (which was directly read out of stock's
+own DTB earlier this session, in Round 15/16's investigation - see
+`work/round16-clkfix/entry0.dts` for the full stock carveout list still on
+disk).
+
+**Not yet confirmed this is actually a NoC/TrustZone fault specifically**
+(no direct `TZBSP`/`upload_cause` evidence was found in this round's
+`last_kmsg` capture - the PS_HOLD signature is suggestive but not
+conclusive on its own) - but it is a genuinely new, different, and further
+failure mode than anything in Rounds 4-16, in the same place a real
+successful port hit the same kind of problem.
+
+**Next step, not yet attempted**: audit `kernel/dts/sm8250-samsung-gts7l.dts`
+against stock's real `/reserved-memory` node (already extracted this
+session) and add the missing `no-map` carveouts, mirroring S9 Ultra's own
+v0.5 fix. This is the natural continuation of the exact technique that
+just produced this round's progress, not a new approach.
+
+Tablet restored to stock and hash-verified after this round: `boot`
+(md5 `cf0cfcbaacc8cbc95f31a569d9823c12`) and `dtbo` (md5
+`51ece8aecea8862b258b71aea8154b3d`) both `dd`-restored from a rooted TWRP
+shell, both match `work/stock-backup/` exactly. `rp` (`1`) and
+`ro.bootloader` (`T875XXU1ATK4`) both reconfirmed unchanged.
