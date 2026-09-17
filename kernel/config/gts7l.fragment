@@ -26,6 +26,13 @@ CONFIG_PHY_QCOM_QMP_UFS=y
 # splash region were tried on 2026-09-12 to get an on-screen boot console
 # (neither /proc/last_kmsg nor pstore console-ramoops could show our own
 # kernel's output - see kernel/dts/sm8250-samsung-gts7l.dts for why). An
-# isolated test showed this combination regressed a previously-working
-# boot back to Download Mode, so both halves were reverted together.
-# Revisit alongside real panel/display driver work in Phase 2, not alone.
+# isolated test at the time showed this combination regressed a
+# previously-working boot back to Download Mode - but that test predates
+# Round 12/13's finding (docs/kernel-boot-debugging.md) that flashing *any*
+# custom DTB/DTBO at all was the actual cause of every DTB-matching failure
+# in this project, independent of framebuffer content. Retrying 2026-09-17
+# (Round 14) with the framebuffer node patched directly into the *exact*
+# stock DTB bytes that just passed ABL cleanly in Round 13 (fdtput, not a
+# DTS rebuild) - qcom,msm-id/board-id/pmic-id and everything else
+# untouched, so this is a real single-variable test this time.
+CONFIG_FB_SIMPLE=y

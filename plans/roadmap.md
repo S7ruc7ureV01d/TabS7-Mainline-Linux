@@ -239,12 +239,20 @@ Exit criteria:
       cleanly for the first time ever - `/proc/last_kmsg` shows zero
       "Board Dtb"/"Board Dtbo" errors and, for the first time in this
       project, `Shutting Down UEFI Boot Services` (a full handoff to the
-      kernel). Device then hung at the boot logo with no USB - understood
-      as a post-handoff, kernel-level console/earlycon gap (a known
-      unknown since `phase1-boot-testing.md`), not a bootloader blocker.
-      Next: get real evidence of kernel-level execution (UART, per
-      `../docs/uart-debug-research.md`, or an earlycon/simple-framebuffer
-      devicetree addition) - not yet attempted.**
+      kernel). Device then hung at the boot logo with no USB. Round 14's
+      earlycon/`CONFIG_FB_SIMPLE` attempt (twice, including a cmdline fix)
+      made zero difference. **Round 15 found the real structural reason**:
+      stock's DTB (needed byte-identical for ABL to pass) uses downstream
+      compatible strings (`qcom,gcc-kona`, `qcom,kona-rpmh-clk`) that our
+      mainline kernel's compiled-in clock drivers (`qcom,gcc-sm8250`,
+      `qcom,sm8250-rpmh-clk`) don't match at all - the thing that solved
+      the ABL blocker and the devicetree Phase 1 actually needs are in
+      direct tension, not independent problems. Two real paths forward,
+      neither attempted: surgical compatible-string patching of stock's
+      DTB (cheap, unproven), or solving real ABL matching for our own
+      mainline DTS (the Round 4-11 problem, revisited). UART
+      (`../docs/uart-debug-research.md`) remains the only evidence source
+      that could confirm/refute this directly - not yet attempted.**
 - [ ] UFS storage enumerates and is readable. **Driver forced built-in
       already (`gts7l.fragment`); needs the actual boot attempt to confirm.**
 - [ ] Root filesystem reachable via ADB/serial shell, even without display.
@@ -646,6 +654,43 @@ Progress log:
   `ro.bootloader` both reconfirmed unchanged. **Next**: get real
   kernel-level evidence post-handoff - UART (`../docs/uart-debug-research.md`)
   or an earlycon/simple-framebuffer devicetree addition - not yet attempted.
+- 2026-09-17 (Round 14): Attempted the earlycon/simple-framebuffer
+  addition, twice - patched a `simple-framebuffer@9c000000` node directly
+  into the exact stock DTB bytes that passed ABL in Round 13 (not a DTS
+  rebuild, learning from the 2026-09-12 regression), `CONFIG_FB_SIMPLE=y`
+  added to `gts7l.fragment`, flashed and tested (`boot` only, restored via
+  a rooted TWRP `dd` both times - no Download Mode needed). First attempt:
+  no visible change; root cause found before the second attempt - stock's
+  cmdline is `console=null`, disabling all kernel console output
+  regardless of the devicetree/config. Second attempt fixed the cmdline
+  (`console=tty0 fbcon=... loglevel=15` via `magiskboot unpack -h`'s
+  editable `header` file) - still no visible change. Both attempts
+  reconfirmed the clean ABL pass from Round 13 (zero DTB/DTBO errors,
+  `Shutting Down UEFI Boot Services` reached each time) - the DTB-patching
+  method itself is solid. Full detail in
+  `../docs/kernel-boot-debugging.md` Round 14. Tablet restored to stock,
+  `rp` unaffected throughout.
+- 2026-09-17 (Round 15): Before committing to UART hardware work, forked a
+  background audit comparing our mainline DTS/config against itzreesa's
+  real downstream source for early-boot-critical gaps. **Found the real,
+  structural reason for the Round 13/14 hang**: stock's DTB (which the
+  Round 12/13 pivot needs to keep byte-identical for ABL to pass) uses
+  downstream compatible strings on its clock nodes (`qcom,gcc-kona`,
+  `qcom,kona-rpmh-clk`) that our mainline kernel's compiled-in drivers
+  (`qcom,gcc-sm8250`, `qcom,sm8250-rpmh-clk`) don't match at all - so
+  almost nothing past the GIC (which does match) can actually clock up.
+  This is a direct structural tension between what solved the ABL blocker
+  and what Phase 1 actually needs, not an independent gap to patch. Also
+  confirmed along the way that Rounds 13/14 already had stock's real
+  ramdisk in play the whole time (`CONFIG_INITRAMFS_SOURCE=""` in our
+  build), closing off a redundant "try stock ramdisk" test before it
+  would have wasted a flash cycle. Two real paths forward, neither
+  attempted: surgical compatible-string patching of stock's DTB (cheap,
+  unproven whether the drivers actually work correctly even if they bind),
+  or solving real ABL DTB-matching for our own mainline DTS (the Round
+  4-11 problem, revisited with new understanding). Full detail in
+  `../docs/kernel-boot-debugging.md` Round 15. No hardware touched this
+  round - pure research.
 
 ---
 

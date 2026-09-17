@@ -1647,3 +1647,223 @@ partition `dd`-restored directly from a rooted TWRP `adb shell` session
 for the restore, since TWRP already had root block access). `dtbo` was
 never touched this round, so no restore needed for it. `rp` reconfirmed
 `1`, `ro.bootloader` reconfirmed `T875XXU1ATK4`, both unchanged throughout.
+
+## Round 14 (2026-09-17): earlycon/simple-framebuffer attempt - inconclusive,
+but rules out the driver-model-level approach and points hard at real UART
+
+Two sub-attempts, both flashed and tested on real hardware via `boot` only
+(same safe whitelist), both restored via a rooted TWRP `dd` afterward - no
+Download Mode round-trip needed either time, since TWRP was already up
+with root block access from the Round 13 recovery.
+
+**Critical methodology point this round got right that Round 5's original
+2026-09-12 attempt at this same idea didn't**: rather than rebuilding this
+project's own DTS into a fresh appended-DTB blob, patched the framebuffer
+node directly into the *exact stock DTB bytes* that had just passed ABL
+cleanly in Round 13 - split the 3-concatenated-FDT stock `dtb` back into
+its three individual entries (`fdtput -p` on each), added an identical
+`simple-framebuffer@9c000000` node to each (reusing the real
+`cont_splash_region@9c000000` address/size from `kona.dtsi`, geometry from
+Round 13's own log: `Width = 1600, Height = 2560`), re-concatenated, and
+confirmed `qcom,msm-id`/`qcom,board-id` were still byte-identical to stock
+on all three entries before flashing. `CONFIG_FB_SIMPLE=y` added to
+`kernel/config/gts7l.fragment` (was `is not set` in the base `defconfig`;
+`CONFIG_FB`/`CONFIG_FRAMEBUFFER_CONSOLE`/`CONFIG_VT_CONSOLE`/`CONFIG_LOGO`
+were already all `=y`). Format `a8r8g8b8` taken from the sibling S9 Ultra
+project's own documented value for the same ABL-splash-region pattern on
+the same SoC family (`references/postmarketos-galaxy-tab-s9-ultra/docs/
+upstream-audit.md`).
+
+**Real mistake caught and fixed before flashing**: first `fdtput -t x`
+pass on width/height/stride used decimal literals (`1600`/`2560`/`6400`),
+but `-t x` parses its argument as hex - silently stored `0x1600`/`0x2560`/
+`0x6400` (wrong values) instead of the intended pixel counts encoded as
+hex (`0x640`/`0xa00`/`0x1900`). Caught by reading the property back with
+`dtc -I dtb -O dts` before flashing, not after. Also caught, mid-session,
+that `fdtput` without `-p` doesn't preserve multi-FDT concatenation - an
+initial naive `fdtput` directly on the full 3-entry `dtb` file silently
+truncated it down to just the first entry's own resized length, discarding
+the other two steppings entirely. Both mistakes fixed before anything was
+flashed.
+
+### Sub-attempt A: framebuffer node only, stock cmdline unchanged
+
+Flashed `boot` with the new `CONFIG_FB_SIMPLE=y` kernel + the
+framebuffer-patched 3-entry DTB (ramdisk untouched, `dtbo` untouched, same
+as Round 13). **Result: identical symptom to Round 13** - stuck at the
+Samsung logo, no visible change, no USB. `/proc/last_kmsg` confirmed the
+same clean pass as Round 13 (`EDTBO check fail` → `Apply Overlay` →
+`Shutting Down UEFI Boot Services`, zero DTB/DTBO errors) - the framebuffer
+DTB patch didn't regress the pivot at all, good confirmation the patching
+method itself is sound. But no visual change either.
+
+**Root cause identified before the next attempt**: stock's boot cmdline is
+`console=null` - this explicitly disables kernel console output to *any*
+console, including a newly-registered fbcon, independent of whether
+`CONFIG_FB_SIMPLE`/the devicetree node are present or correct. This
+project's cmdline was never touched in Round 13 or this sub-attempt.
+
+### Sub-attempt B: same framebuffer patch + cmdline fixed
+
+`magiskboot unpack -h` writes a plain-text `header` file (documented in the
+tool's own `--help` output as editable before `repack`); edited its
+`cmdline=` line directly: `console=null` → `console=tty0 fbcon=font:VGA8x8
+loglevel=15`, everything else unchanged. Confirmed the edit took via
+`magiskboot unpack -h` on the freshly repacked image before flashing.
+Flashed the same way. **Result: identical again** - stuck at the logo, no
+visible change, no USB. `/proc/last_kmsg` shows the same clean ABL pass a
+third time (this DTB-patching approach is now confirmed solid across three
+separate flashes), but still nothing past `Shutting Down UEFI Boot
+Services` - the very next thing in the ring buffer each time is a fresh
+PBL/SBL1 restart with a `PM: HARD RESET by KPDPWR_AND_RESIN` marker, i.e.
+the manual recovery-button reboot, with no kernel-level line in between
+ever captured.
+
+### What this establishes, and what it doesn't
+
+**Doesn't establish**: whether the kernel crashed immediately, hung during
+early platform init, or got further than that and only failed to display
+anything - `/proc/last_kmsg` is bootloader-only (stops being written the
+moment the kernel takes over) and `console-ramoops-0` only ever reflects
+whichever kernel is *currently* running (confirmed stale/irrelevant again
+this round), so neither evidence source can see anything the kernel itself
+does. This round's negative result is genuinely inconclusive about kernel
+behavior - it only rules out the ABL/DTB layer (already solid) and this
+project's own cmdline/devicetree mistakes (now fixed and confirmed
+correct).
+
+**Does establish**: `simple-framebuffer`/`fbcon` only registers once the
+driver model reaches that point (`device_initcall`-level, i.e. fairly late
+in `start_kernel()` - after core platform bring-up: clocks/GCC, the
+interrupt controller, timers, all still open items per Phase 1's own exit
+criteria). If the kernel is hanging or crashing during that earlier
+platform init - a real, live possibility this project has never had direct
+evidence to rule out - fbcon would never get a chance to register no
+matter how correct the devicetree/cmdline are. This makes the framebuffer
+approach structurally unable to distinguish "crashed immediately" from
+"hung early" from "reached userspace but display never lit", which a real
+UART earlycon *can* do (it prints from almost the first instructions in
+`start_kernel()`, well before any driver-model init).
+
+**Next step**: the UART path researched back in Round 8
+(`docs/uart-debug-research.md`, CC-line resistance-detection JIG mode via
+the `max77705-muic.c` driver, `uart_en`/`uart_sel` sysfs controls
+confirmed present and settable as root) is now the clearly higher-value
+next step over further devicetree/cmdline guessing - it's the only
+evidence source available that doesn't depend on the kernel already having
+gotten far enough along to prove anything on its own.
+
+Tablet restored to stock after both sub-attempts (only the final restore
+needed, since sub-attempt B's flash immediately superseded sub-attempt A's
+on the physical partition): `boot` `dd`-restored from a rooted TWRP shell,
+md5 `cf0cfcbaacc8cbc95f31a569d9823c12` matches `work/stock-backup/boot.img`
+exactly. `dtbo` never touched either sub-attempt. `rp` (`1`) and
+`ro.bootloader` (`T875XXU1ATK4`) both reconfirmed unchanged after every
+flash.
+
+## Round 15 (2026-09-17, same day): The real explanation for the post-
+handoff hang - a structural mainline-vs-downstream incompatibility, not a
+config gap
+
+No hardware touched this round - pure research. Before committing to UART
+hardware work, checked itzreesa's kernel more closely and found it relies
+on the *full* stock Android userspace stack (`CONFIG_SERIAL_MSM_CONSOLE=y`,
+`CONFIG_PANEL_NT36523_PPA957DB1_WQXGA=y` in its base defconfig, and
+`anykernel.sh` only ever replaces the kernel - ramdisk/vendor/system stay
+100% stock). That raised an obvious question worth checking before more
+hardware cycles: does *our* kernel actually have stock's ramdisk available
+to it already?
+
+**Checked and confirmed: yes, it already did, in every Round 13/14 test.**
+`work/linux/.config` has `CONFIG_INITRAMFS_SOURCE=""` (only the default
+512-byte empty stub gets embedded) - `magiskboot unpack` on stock
+`boot.img` always pulled stock's real `ramdisk.cpio` into the repacked
+image's ramdisk section, and it was never replaced in Rounds 13/14, only
+`kernel`/`dtb` were. ABL dynamically patches `/chosen` with the ramdisk's
+address/size at boot time (standard Android boot flow, and consistent with
+the `AVB CMD LINE` dynamic cmdline patching already observed directly in
+Round 13's own log) - a fresh "stock ramdisk" retest would have been
+retesting something already true, not a new variable.
+
+### The actual audit
+
+Forked a background investigation comparing our DTS/kernel config against
+itzreesa's real, hardware-proven downstream source
+(`references/gts7l/arch/arm64/boot/dts/vendor/qcom/kona.dtsi` locally, plus
+targeted `gh api` fetches from the live repo) for early-boot-critical gaps.
+**Finding, high confidence, structural:**
+
+**The compatible strings on the two most fundamental platform blocks -
+clocks - don't match between stock's DTB and mainline's drivers at all:**
+
+- **GCC (Global Clock Controller)**: stock's DTB (`kona.dtsi:2461`) has
+  `compatible = "qcom,gcc-kona", "syscon"`. Mainline's GCC driver
+  (`sm8250.dtsi:954` in the upstream tree this project builds from) binds
+  only to `compatible = "qcom,gcc-sm8250"`. **No overlap at all** - our
+  compiled-in `clk-gcc-sm8250` driver cannot match stock's GCC node.
+- **RPMh clocks**: same pattern one level down - downstream
+  `qcom,kona-rpmh-clk` (`kona.dtsi:3271`) vs mainline's
+  `qcom,sm8250-rpmh-clk`. The parent `rsc@18200000` node itself *does*
+  match (`qcom,rpmh-rsc` on both), but its clock child does not.
+- **Confirmed NOT mismatched**: the GIC interrupt controller
+  (`arm,gic-v3` on both) - so interrupt controller init should succeed
+  regardless of the clock problem.
+
+**Why this plausibly explains the exact symptom seen in Rounds 13/14**:
+almost every other platform driver (UART/GENI, I2C, pinctrl, USB, display)
+depends on GCC-provided clocks just to probe. If `clk-gcc-sm8250` never
+binds against stock's `qcom,gcc-kona` node, the kernel has no way to clock
+a UART or bring up nearly any peripheral - a silent early hang with no
+visible output and no USB enumeration is the *expected* result of this,
+independent of anything cmdline/framebuffer-related. This directly
+explains why Round 14's `CONFIG_FB_SIMPLE` + `console=tty0` changes made
+zero observable difference: `simple-framebuffer`/fbcon registration
+happens at driver-model level, which itself depends on clocks that may
+never come up.
+
+### What this actually means for Phase 1
+
+This isn't a missing devicetree property or a disabled Kconfig symbol -
+it's a direct structural consequence of the Round 12/13 pivot itself.
+Flashing stock's completely unmodified, downstream-shaped DTB is exactly
+what let ABL's matching pass cleanly (Rounds 12-14) - but that same DTB is
+fundamentally incompatible with a mainline kernel's compiled-in drivers at
+the clock-controller level, independent of anything in
+`kernel/dts/sm8250-samsung-gts7l.dts` (which was never even reached - the
+pivot doesn't flash our DTS at all, by design). **The thing that solved
+the ABL blocker and the thing Phase 1 actually needs (a devicetree
+mainline drivers can bind against) are now understood to be in direct
+tension**, not a checklist of independent problems to knock out one at a
+time.
+
+Two real paths forward, not yet chosen between:
+1. **Surgical compatible-string patching of stock's DTB** (same `fdtput`-
+   on-exact-stock-bytes method proven safe across three flashes in Rounds
+   13-14): add `"qcom,gcc-sm8250"` as an *additional* fallback compatible
+   string on the GCC node (Linux's OF matching tries each entry in a
+   `compatible` array in order), same idea for RPMh clocks, leaving every
+   ABL-relevant root-level property (`qcom,msm-id`/`board-id`/`pmic-id`)
+   completely untouched. Cheap to try, but **not guaranteed to actually
+   work even if the driver binds** - downstream and mainline clock
+   drivers can disagree on internal register layout, clock-ID numbering
+   (consumer nodes reference clocks by phandle + cell index, e.g.
+   `<&gcc GCC_QUPV3_WRAP0_S3_CLK>`, which must resolve to the same
+   numbering scheme both sides agree on), and init sequencing even when
+   the compatible string matches - genuinely unproven either way without
+   testing.
+2. **Solve real mainline DTB-matching against ABL** - i.e. actually get
+   *our* `kernel/dts/sm8250-samsung-gts7l.dts` (or something equivalent to
+   it) accepted by ABL's DTB/DTBO matching, the exact problem Rounds 4-11
+   spent so long on before Round 12/13 found the workaround of avoiding it
+   entirely. Slower, but ends with a devicetree mainline drivers are
+   actually designed to consume, not a patched-up downstream one.
+
+Neither attempted yet. UART (Round 8,
+`docs/uart-debug-research.md`) remains valuable regardless of which path
+is chosen - it's the only evidence source that could directly confirm or
+refute the clock-mismatch theory (a UART that never prints anything from
+very early `start_kernel()` would be strong independent confirmation; one
+that prints a little then stops would point elsewhere entirely).
+
+Tablet untouched this round - pure research, still restored to stock from
+Round 14, `rp` unaffected.
