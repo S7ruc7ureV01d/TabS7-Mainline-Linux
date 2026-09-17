@@ -1518,3 +1518,132 @@ most promising next step.
 Tablet untouched this round — pure research, no flash/reboot cycles.
 Stock `boot.img`/`dtbo.img` still restored and hash-verified from Round 11,
 `rp` unaffected.
+
+## Round 13 (2026-09-17): The pivot test — real hardware confirms it. First
+time ever past every DTB/DTBO blocker.
+
+Built the Round 12 pivot directly: `magiskboot unpack -h` on stock
+`boot.img`, replaced only the `kernel` component with our own built
+`work/linux/arch/arm64/boot/Image` (40,925,696 bytes), left `ramdisk.cpio`
+and `dtb` completely untouched (dtb stayed byte-identical to stock,
+1,556,447 bytes both before and after repack, confirmed via
+`magiskboot unpack -h` on the repacked image), `magiskboot repack`. No
+`dtbo.img` built or flashed at all this round - stock's `dtbo` partition
+was left alone, unflashed, for the first time in this project.
+
+Flashed via a Windows VM (native Odin) after `odin4` on Linux hit a real
+USB permissions gap (`ioctl bulk read Fail : Connection timed out` - no
+`/etc/udev/rules.d/51-android.rules` granting the `04e8` vendor ID, and
+interactive `sudo` wasn't available in-session to work around it; not
+resolved this round, worth fixing before the next flash cycle). Only
+`boot` was written - within the established safe whitelist
+(`boot`/`recovery`/`vbmeta`/`dtbo`, never the bootloader chain).
+
+**Result on first boot: stuck at the Samsung Galaxy Tab S7 logo, no USB
+enumeration.** On its own this looks like a hang, but every previous
+DTB-mismatch failure in this project (Rounds 4-11) bounced back to Download
+Mode automatically, fast. A logo hang with no bounce-back was the first
+sign this run was qualitatively different. Forced a reboot to TWRP to
+capture evidence rather than guessing.
+
+### The evidence
+
+Pulled `/proc/last_kmsg` live from the booted TWRP session
+(`work/last_kmsg_pivot_test.txt`). Searched for every DTB/DTBO failure
+string that has appeared in every single prior test since Round 4:
+
+```
+grep -n "Board Dtb\|Board Dtbo\|Soc Dtb\|Unable to find\|No match found" work/last_kmsg_pivot_test.txt
+```
+
+**Zero matches.** For the first time in this project, none of them appear
+anywhere in the capture. Instead, the actual boot-attempt segment shows:
+
+```
+{ 11707852 }[ ABL ] FindBestMatch GetBoardRev = 7, DtSubType = 6
+{ 11709560 }[ ABL ] Override DTB: GetBlkIOHandles failed loading user_dtbo!
+{ 11709895 }[ ABL ] EDTBO check fail
+{ 12103010 }[ ABL ] Apply Overlay total time: 393 ms
+{ 12103040 }[ ABL ] Final Dtb version = 0
+```
+
+This is the exact benign "EDTBO check fail → continue" path this project's
+own Ghidra decompilation (`FUN_00025490`) identified back in Round 9/10 as
+the lenient fallback stock's own boot chain uses - reached cleanly, no
+error. Boot then proceeds through UFS/RAM/fuse initialization and, for the
+first time ever:
+
+```
+{ 12471816 }[ ABL ]
+Shutting Down UEFI Boot Services: 12479 ms
+```
+
+**UEFI Boot Services shutdown and execution handoff, reached for the first
+time in this entire project.** Every prior test (Rounds 4-11) failed and
+bounced to Download Mode *before* this point. AVB status for the same
+session, also clean and exactly as expected: `(Booting) AUTHENTICATE fail
+but allow Kernel binary: boot` (our unsigned custom kernel, tolerated as
+established since Round 8), `(Booting) AUTHENTICATE Succeed Dtbo binary:
+dtbo` (stock's untouched, genuinely-signed dtbo - verifies cleanly because
+nothing touched it), and `[RP] dtbo, RpVerOnFuse = 1, RpVerOnIMG = 1` - RP
+check passed, no advancement.
+
+A second, fresh `SBL1, Start` block with all-new timestamps appears
+immediately after the UEFI handoff - almost certainly the manual
+forced-reboot-to-recovery, not a second independent failure.
+
+Checked `/sys/fs/pstore/console-ramoops-0` for any kernel-level panic/hang
+evidence from the actual attempt - it contains only stale WLAN/PCIe
+driver chatter with `09-17 04:05:xx` timestamps from a prior *normal*
+Android boot session, not this test (our minimal DTS doesn't configure a
+matching `ramoops` region, so nothing from our own kernel attempt could
+land there). Not useful evidence this round, but not a red flag either -
+just an unconfigured mechanism.
+
+### What this establishes
+
+**The Round 12 pivot theory is confirmed by direct, first-time hardware
+evidence.** The entire "Board Dtb"/"Board Dtbo" matching problem this
+project spent Rounds 4-11 on was specific to *flashing a custom DTB/DTBO*,
+not to anything about booting a custom kernel per se. With only the kernel
+binary replaced - stock DTB and stock dtbo left completely alone - ABL's
+DTB/DTBO matching, AVB verification, and RP checks all pass cleanly, and
+UEFI hands off to the kernel. This is the furthest point ever reached in
+this project, and it fully validates Phase 1's kernel/config work
+(Rounds 1-3): the actual kernel binary itself is not the problem either,
+or at minimum isn't failing loudly before earlyconsole would be available
+to show it.
+
+The remaining "stuck at logo, no USB" symptom is now understood to be a
+**post-handoff, kernel-level problem** - not a bootloader blocker. The
+most likely explanation is the one flagged as an open item all the way
+back in `phase1-boot-testing.md`: no confirmed console/earlycon for this
+specific board, so a kernel that boots fine (or even panics) may produce
+zero visible output. This reframes the *next* real unknown for Phase 1 -
+getting any visible evidence of what the kernel itself does after
+handoff - rather than continuing DTB/DTBO work, which is now understood to
+not be required for a first kernel boot at all.
+
+**Next steps, not yet attempted:**
+1. Fix the `odin4`/udev gap (`/etc/udev/rules.d/51-android.rules` for the
+   `04e8` vendor ID) so future flashes don't need the Windows VM detour.
+2. Get real evidence of kernel-level execution post-handoff - the UART
+   path researched in Round 8 (`docs/uart-debug-research.md`) is now the
+   most valuable next step, since it's the only evidence source that
+   doesn't depend on the kernel already being far enough along to write to
+   `last_kmsg`/pstore itself. Alternatively, add `earlycon`/a `simple-
+   framebuffer` devicetree node bound to the boot splash's own framebuffer
+   region (values are now visible in this round's own log:
+   `DestinationX = 0, DestinationY = 0, Width = 1600, Height = 2560`) as a
+   lower-effort way to get *some* visual signal without full UART wiring.
+3. Once any kernel-level output is visible, resume normal Phase 1
+   iteration (initramfs, UFS, console) from a real evidence baseline
+   instead of a blind DTB-matching guess.
+
+Tablet restored to stock and hash-verified after this round: `boot`
+partition `dd`-restored directly from a rooted TWRP `adb shell` session
+(md5 `cf0cfcbaacc8cbc95f31a569d9823c12`, matches
+`work/stock-backup/boot.img` exactly - no Download Mode round-trip needed
+for the restore, since TWRP already had root block access). `dtbo` was
+never touched this round, so no restore needed for it. `rp` reconfirmed
+`1`, `ro.bootloader` reconfirmed `T875XXU1ATK4`, both unchanged throughout.

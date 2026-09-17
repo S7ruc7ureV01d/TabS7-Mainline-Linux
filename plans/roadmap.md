@@ -233,17 +233,18 @@ Exit criteria:
       execution is the owner's call, physical access to the device is
       required (Download-mode button combo).
 - [ ] Kernel builds and boots to an initramfs/console (UART or USB) on the
-      physical tablet. **Artifact + flashing plan ready (above); not yet
-      attempted on hardware. Pivot identified in Round 12
-      (`../docs/kernel-boot-debugging.md`): two independent real,
-      hardware-proven kernels for this SoC family (one for this project's
-      exact device) both sidestep every "Board Dtb"/"Board Dtbo" matching
-      failure from Rounds 4-11 by never flashing a custom DTB or `dtbo.img`
-      at all - only the kernel binary is swapped inside the existing
-      boot.img, via the same `magiskboot`-based repack this project already
-      uses. Next concrete test: repack with only the kernel replaced,
-      stock's own appended DTB left untouched, and `dtbo.img` left
-      unflashed/stock - not yet attempted.**
+      physical tablet. **Round 13 pivot test flashed on real hardware
+      (`../docs/kernel-boot-debugging.md`): kernel-only boot.img (stock DTB/
+      dtbo untouched) passed ABL's DTB/DTBO matching and AVB verification
+      cleanly for the first time ever - `/proc/last_kmsg` shows zero
+      "Board Dtb"/"Board Dtbo" errors and, for the first time in this
+      project, `Shutting Down UEFI Boot Services` (a full handoff to the
+      kernel). Device then hung at the boot logo with no USB - understood
+      as a post-handoff, kernel-level console/earlycon gap (a known
+      unknown since `phase1-boot-testing.md`), not a bootloader blocker.
+      Next: get real evidence of kernel-level execution (UART, per
+      `../docs/uart-debug-research.md`, or an earlycon/simple-framebuffer
+      devicetree addition) - not yet attempted.**
 - [ ] UFS storage enumerates and is readable. **Driver forced built-in
       already (`gts7l.fragment`); needs the actual boot attempt to confirm.**
 - [ ] Root filesystem reachable via ADB/serial shell, even without display.
@@ -619,6 +620,32 @@ Progress log:
   DTBO experiment tried in Rounds 4-11. Not yet attempted on hardware.
   Tablet untouched this round; stock `boot.img`/`dtbo.img` still restored
   and hash-verified from Round 11, `rp` unaffected.
+- 2026-09-17 (Round 13): **Built and flashed the pivot on real hardware -
+  confirmed.** Repacked stock `boot.img` with only the `kernel` component
+  replaced by our own built `Image` (`magiskboot unpack -h` /
+  `magiskboot repack`), leaving `ramdisk.cpio` and `dtb` byte-identical to
+  stock; no `dtbo.img` flashed at all. `odin4` on Linux hit a real USB
+  permissions gap (no udev rule, no interactive `sudo` available - not
+  fixed yet, worth doing before the next flash cycle); flashed via a
+  Windows VM's native Odin instead, `boot` only, within the established
+  safe whitelist. **Result: for the first time in this project, zero
+  "Board Dtb"/"Board Dtbo"/"Soc Dtb" errors anywhere in `/proc/last_kmsg`,
+  and `Shutting Down UEFI Boot Services` is reached** - full ABL→kernel
+  handoff, further than every prior attempt (Rounds 4-11) combined. AVB and
+  RP checks both clean (`RpVerOnFuse = 1, RpVerOnIMG = 1`, unaffected).
+  Device then hung at the boot logo with no USB enumeration - re-framed as
+  a post-handoff kernel/console problem (no confirmed earlycon for this
+  board, a known unknown since Phase 1's own `phase1-boot-testing.md`), not
+  a bootloader blocker; `/sys/fs/pstore/console-ramoops-0` held only stale
+  data from a prior normal boot (our DTS doesn't configure a matching
+  `ramoops` region), not useful evidence this round. Full log excerpts and
+  reasoning in `../docs/kernel-boot-debugging.md` Round 13. Tablet restored
+  safely: `boot` `dd`-restored directly from a rooted TWRP shell (md5
+  matches `work/stock-backup/boot.img` exactly, no Download Mode round-trip
+  needed), `dtbo` was never touched so needed no restore, `rp`/
+  `ro.bootloader` both reconfirmed unchanged. **Next**: get real
+  kernel-level evidence post-handoff - UART (`../docs/uart-debug-research.md`)
+  or an earlycon/simple-framebuffer devicetree addition - not yet attempted.
 
 ---
 
