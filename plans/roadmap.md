@@ -234,7 +234,16 @@ Exit criteria:
       required (Download-mode button combo).
 - [ ] Kernel builds and boots to an initramfs/console (UART or USB) on the
       physical tablet. **Artifact + flashing plan ready (above); not yet
-      attempted on hardware.**
+      attempted on hardware. Pivot identified in Round 12
+      (`../docs/kernel-boot-debugging.md`): two independent real,
+      hardware-proven kernels for this SoC family (one for this project's
+      exact device) both sidestep every "Board Dtb"/"Board Dtbo" matching
+      failure from Rounds 4-11 by never flashing a custom DTB or `dtbo.img`
+      at all - only the kernel binary is swapped inside the existing
+      boot.img, via the same `magiskboot`-based repack this project already
+      uses. Next concrete test: repack with only the kernel replaced,
+      stock's own appended DTB left untouched, and `dtbo.img` left
+      unflashed/stock - not yet attempted.**
 - [ ] UFS storage enumerates and is readable. **Driver forced built-in
       already (`gts7l.fragment`); needs the actual boot attempt to confirm.**
 - [ ] Root filesystem reachable via ADB/serial shell, even without display.
@@ -584,6 +593,32 @@ Progress log:
   unaffected. Next: resume by getting a real log capture of the board-id-fixed
   boot attempt (faster round-trip, or the FNB58 UART path) before trying
   anything else DTS-side - this is currently the most promising open lead.
+- 2026-09-17 (Round 12): No hardware touched - pure research, prompted by the
+  owner surfacing two real, hardware-proven custom kernels for this SoC
+  family (Quantic Kernel for the sibling SM-T870 Wi-Fi model, and
+  itzreesa's KSU-Next kernel for this project's *exact* device, SM-T875
+  LTE). Inspecting itzreesa's actual release zip
+  (`itzreesa/android_kernel_samsung_sm8250`, `lineage-23.2` branch) found
+  the real explanation for Rounds 4-11's "Board Dtb"/"Board Dtbo" matching
+  failures: **it doesn't ship a DTB or a DTBO at all.** Just a raw kernel
+  `Image` (confirmed via a full-file FDT-magic scan: zero matches) packaged
+  via plain AnyKernel3 `dump_boot`/`write_boot`, which repacks whatever
+  boot.img is already on the device with only the kernel swapped - DTB and
+  `dtbo.img` stay 100% stock. Cross-checked its source tree's
+  `qcom,board-id = <8 7>` and 3-entry base-DTB structure
+  (`kona.dtb kona-v2.dtb kona-v2.1.dtb`) against this project's own DTS -
+  **exact match**, confirming this project's devicetree *content* has been
+  correct since Round 8 all along; the blocker was ever giving ABL a custom
+  DTB/DTBO to match in the first place. Full evidence, plus a correction to
+  an initial "board-id wildcard" misreading of the Ghidra-decompiled
+  matcher, in `../docs/kernel-boot-debugging.md` Round 12. **Concrete pivot
+  for the next hardware test**: repack boot.img with only the kernel
+  component replaced, keep stock's own appended DTB untouched (don't
+  substitute this project's DTS output), and don't flash any `dtbo.img` at
+  all (leave stock's in place) - the single-variable inverse of every DTB/
+  DTBO experiment tried in Rounds 4-11. Not yet attempted on hardware.
+  Tablet untouched this round; stock `boot.img`/`dtbo.img` still restored
+  and hash-verified from Round 11, `rp` unaffected.
 
 ---
 
