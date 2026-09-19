@@ -855,7 +855,22 @@
  * QUP I2C instance qupv3_se8_i2c (mainline &i2c8), address 0x29, both
  * confirmed directly from the overlay rather than assumed (see the
  * comment block above).
+ *
+ * Round 48 (2026-09-19, docs/kernel-boot-debugging.md): &i2c8 alone was
+ * never enough - confirmed on real hardware via
+ * `ls /sys/bus/i2c/devices/` coming back completely empty even after
+ * Round 47's CONFIG_QCOM_GPI_DMA fix. i2c8 is a CHILD of the QUP
+ * wrapper node `qupv3_id_1: geniqup@ac0000` in sm8250.dtsi, which
+ * itself defaults to `status = "disabled"` - a disabled parent means
+ * of_platform_populate() never instantiates *any* of its children at
+ * all, regardless of their own status. Confirmed this is the standard
+ * mainline convention (not assumed): every other real i2c8/QUP1 user
+ * enables the wrapper node itself alongside the specific bus.
  */
+&qupv3_id_1 {
+	status = "okay";
+};
+
 &i2c8 {
 	status = "okay";
 

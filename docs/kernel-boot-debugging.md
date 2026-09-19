@@ -3978,3 +3978,35 @@ packaged via the same proven method (byte-exact verification passed),
 flashed. `rp`/`ro.bootloader` reconfirmed unchanged before and after.
 
 **Not yet tested on hardware as of writing this entry.**
+
+### Tested: CONFIG_QCOM_GPI_DMA fix didn't help either -
+/sys/bus/i2c/devices/ still completely empty
+
+Owner reconfirmed via the live shell: still zero devices. Per the
+owner's request, researched online and checked our own vendored
+`sm8250.dtsi` source directly at the same time.
+
+## Round 48 (2026-09-19, same day): the real cause - the parent QUP
+wrapper node itself was never enabled
+
+Found it directly in `sm8250.dtsi`: `i2c8` is a *child* of
+`qupv3_id_1: geniqup@ac0000` (the QUP wrapper node), which itself
+defaults to `status = "disabled"`. A disabled parent means
+`of_platform_populate()` never instantiates *any* of its children at
+all, regardless of the child's own `status = "okay"` - this was the
+actual reason `/sys/bus/i2c/devices/` was completely empty the whole
+time, independent of the `CONFIG_QCOM_GPI_DMA` fix (which was real and
+worth keeping, but wasn't the blocker). Confirmed this is the standard
+mainline convention (not assumed) via a web search - "you set the
+parent qupv3_id_1 node's status to okay" to enable I2C on a QUPv3
+wrapper, matching real patch precedent.
+
+Added `&qupv3_id_1 { status = "okay"; };` alongside the existing
+`&i2c8 { status = "okay"; };` in
+`kernel/dts/sm8250-samsung-gts7l.dts`. DTB-only rebuild (confirmed via
+`fdtget`: both nodes now `okay`), uniLoader rebuild (unchanged size,
+same safe address margins), packaged via the same proven method
+(byte-exact verification passed), flashed. `rp`/`ro.bootloader`
+reconfirmed unchanged before and after.
+
+**Not yet tested on hardware as of writing this entry.**
