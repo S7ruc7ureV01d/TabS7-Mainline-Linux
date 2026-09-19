@@ -3041,3 +3041,50 @@ Tablet state at time of writing: `boot` = this round's PC-check build,
 `dtb`/`dtbo`/`ramdisk.cpio` = stock, untouched throughout. `rp`/
 `ro.bootloader` reconfirmed unchanged before flashing. **Awaiting
 hardware test result.**
+
+### Tested: the bug, found definitively
+
+Owner's readback: `uniLoader runtime PC: 0 9060083c` = `0x9060083c` -
+exactly `CONFIG_TEXT_BASE` (`0x90600000`) plus a small code offset,
+confirming uniLoader loads exactly where the build assumed. **That's
+what exposed the actual bug**: uniLoader's own binary is 42,348,544
+bytes (~40.4MiB), so it occupies physical memory from `0x90600000` to
+`0x92e63000`. `CONFIG_PAYLOAD_ENTRY` (`0x91000000`, chosen in Round 20)
+falls *inside* that range.
+
+`arch_load_kernel()`'s `memcpy()` to `CONFIG_PAYLOAD_ENTRY` was
+overwriting uniLoader's own live code/embedded data while uniLoader
+itself was still executing - a classic overlapping-copy bug. This fully
+explains every symptom seen across Rounds 20-29: `"Booting kernel..."`
+always printed correctly (that happens *before* the memcpy), nothing
+ever survived after it (the destination write corrupts the source
+program's own subsequent instructions/data), neither debug marker was
+ever written (the jump never reaches valid, uncorrupted kernel code),
+and the CPU still visibly warmed up (Round 20) despite no evidence
+anywhere - consistent with continuing to execute *something*, just
+corrupted, undefined code rather than either a clean crash or the real
+kernel. This was never a kernel-config, devicetree, or memory-node
+problem at all - the entire Round 20-29 investigation was chasing
+symptoms of a single address-planning mistake in `configs/
+gts7l_defconfig`, made when picking `PAYLOAD_ENTRY`/`RAMDISK_ENTRY`
+against known devicetree carveouts, without accounting for uniLoader's
+own runtime footprint extending well past where those carveouts ended.
+
+## Round 30 (2026-09-19, same day): the actual fix - non-overlapping
+memory layout
+
+Computed the real, non-overlapping addresses directly:
+uniLoader occupies `0x90600000`-`0x92e63000`. Moved
+`CONFIG_PAYLOAD_ENTRY` to `0x93000000` (comfortably clear of that end,
+the real kernel Image - ~39MiB - ends at `~0x95708a00`) and
+`CONFIG_RAMDISK_ENTRY` to `0x96000000` (clear of the payload, and the
+tiny ~737KiB ramdisk still ends well clear of the `0x9c000000` splash
+carveout). Updated `configs/gts7l_defconfig`, rebuilt uniLoader (kernel/
+DTB unchanged from Round 29), packaged via the same proven method
+(byte-exact verification passed), flashed.
+
+Tablet state at time of writing: `boot` = this round's fixed-address
+build, `dtb`/`dtbo`/`ramdisk.cpio` = stock, untouched throughout. `rp`/
+`ro.bootloader` reconfirmed unchanged before flashing. **Awaiting
+hardware test result** - the real one, this time, on a build with no
+known bugs left in the loading path.
