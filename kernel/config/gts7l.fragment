@@ -42,7 +42,16 @@ CONFIG_FB_SIMPLE=y
 # merging or uniLoader's own patch_dtb() (which only ever adds
 # linux,initrd-start/-end, never bootargs) end up doing. Belt-and-suspenders
 # alongside the DTS's own chosen/bootargs override.
-CONFIG_CMDLINE="console=tty0 loglevel=15 softlockup_panic=1 watchdog_thresh=5"
+#
+# Round 32: dropped softlockup_panic=1/watchdog_thresh=5 - Round 30/31
+# confirmed the kernel now genuinely boots to `Run /init`, and every test
+# since has hit a clean, silent warm reset right after this script's own
+# last line, with no panic text and no new crash-dump entry - not
+# matching a captured lockup-detector panic at all. Removing this
+# alongside simplifying the init script itself
+# (kernel/initramfs/init) to isolate the real cause rather than leaving
+# a config that was never actually explaining the symptom in place.
+CONFIG_CMDLINE="console=tty0 loglevel=15"
 CONFIG_CMDLINE_FORCE=y
 
 # Round 24 (2026-09-19, docs/kernel-boot-debugging.md): the memory-node fix
@@ -64,3 +73,18 @@ CONFIG_HARDLOCKUP_DETECTOR=y
 CONFIG_BOOTPARAM_HARDLOCKUP_PANIC=y
 CONFIG_PANIC_ON_OOPS=y
 CONFIG_PANIC_TIMEOUT=5
+
+# Round 32 (2026-09-19, docs/kernel-boot-debugging.md): USB gadget serial
+# console, now that Round 30/31 got the kernel booting to a real shell -
+# gives live, interactive access instead of the reboot-and-read-last_kmsg
+# cycle this whole debugging effort has depended on, and avoids needing a
+# real display/panel driver (a much bigger Phase 2 undertaking) just to
+# interact with the system. Most of the real infrastructure was already
+# on by default: CONFIG_USB_DWC3/CONFIG_USB_GADGET/
+# CONFIG_USB_CONFIGFS_ACM were already =y, and the devicetree already has
+# a real `usb_1_dwc3`/`qcom,sm8250-dwc3` node with proper PHY references.
+# The one real gap: CONFIG_USB_CONFIGFS defaulted to =m (a module) - no
+# good for a minimal initramfs with no module-loading support at all.
+# Force it built-in; the init script (kernel/initramfs/init) does the
+# actual configfs gadget setup (create gadget, ACM function, bind UDC).
+CONFIG_USB_CONFIGFS=y

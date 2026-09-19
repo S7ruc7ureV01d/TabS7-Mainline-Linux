@@ -2,17 +2,71 @@
 # Minimal Phase 1 bring-up init for gts7l - not a real rootfs, just enough
 # to prove the kernel boots, gives us a shell, and lets us look at UFS/dmesg.
 # See docs/phase1-boot-testing.md.
+#
+# Round 32 (docs/kernel-boot-debugging.md): after Round 30/31 got the
+# kernel booting all the way to "Run /init as init process", every test
+# since has cut off cleanly right after this script's own last printed
+# line, with a warm PS_HOLD reset and *no* crash-dump entry or panic text
+# anywhere - not matching either the (now-removed) uniLoader watchdog or
+# a captured kernel panic. Stripped this down to the bare minimum
+# (dropped the /proc/partitions/block-device listing, the only real
+# device I/O in the earlier version) to isolate whether that was the
+# trigger, rather than guessing blind.
+#
+# Also adds a USB gadget serial console (configfs ACM) - real display
+# needs a proper panel/MDSS driver (Phase 2 scope), but this device's
+# USB controller and most of the gadget infrastructure were already
+# compiled in by default (kernel/config/gts7l.fragment). This gives live,
+# interactive access instead of the reboot-and-read-last_kmsg cycle this
+# whole debugging effort has depended on so far.
 
 /bin/busybox mkdir -p /proc /sys /dev
 /bin/busybox mount -t proc proc /proc
 /bin/busybox mount -t sysfs sysfs /sys
 /bin/busybox mount -t devtmpfs devtmpfs /dev 2>/dev/null
 
-echo "=== gts7l Phase 1 test initramfs ==="
-echo "=== kernel: $(uname -a) ==="
-echo "=== block devices seen by the kernel: ==="
-/bin/busybox ls -la /dev/block/ 2>&1
-/bin/busybox cat /proc/partitions 2>&1
+echo "=== gts7l Phase 1 test initramfs (Round 32) ==="
+
+# USB gadget serial console (configfs ACM) - best-effort, never let a
+# failure here block reaching the fallback shell below.
+/bin/busybox mkdir -p /sys/kernel/config
+/bin/busybox mount -t configfs none /sys/kernel/config 2>/dev/null
+if [ -d /sys/kernel/config/usb_gadget ]; then
+	G=/sys/kernel/config/usb_gadget/g1
+	/bin/busybox mkdir -p "$G"
+	echo 0x1d6b > "$G/idVendor"
+	echo 0x0104 > "$G/idProduct"
+	/bin/busybox mkdir -p "$G/strings/0x409"
+	echo "gts7l-000000" > "$G/strings/0x409/serialnumber"
+	echo "UbuntuTabS7 project" > "$G/strings/0x409/manufacturer"
+	echo "gts7l mainline bring-up console" > "$G/strings/0x409/product"
+	/bin/busybox mkdir -p "$G/configs/c.1/strings/0x409"
+	echo "conf1" > "$G/configs/c.1/strings/0x409/configuration"
+	echo 120 > "$G/configs/c.1/MaxPower"
+	/bin/busybox mkdir -p "$G/functions/acm.usb0"
+	/bin/busybox ln -s "$G/functions/acm.usb0" "$G/configs/c.1/"
+	UDC=$(/bin/busybox ls /sys/class/udc 2>/dev/null | /bin/busybox head -1)
+	if [ -n "$UDC" ]; then
+		echo "$UDC" > "$G/UDC"
+		echo "=== USB gadget bound to $UDC, waiting for /dev/ttyGS0 ==="
+		i=0
+		while [ ! -e /dev/ttyGS0 ] && [ "$i" -lt 50 ]; do
+			/bin/busybox sleep 0.1
+			i=$((i + 1))
+		done
+		if [ -e /dev/ttyGS0 ]; then
+			echo "=== /dev/ttyGS0 present, spawning a shell on it ==="
+			(/bin/busybox setsid /bin/busybox sh -c \
+				'exec /bin/busybox sh </dev/ttyGS0 >/dev/ttyGS0 2>&1') &
+		else
+			echo "=== /dev/ttyGS0 never appeared ==="
+		fi
+	else
+		echo "=== no UDC found under /sys/class/udc ==="
+	fi
+else
+	echo "=== configfs usb_gadget not available ==="
+fi
 
 echo "=== dropping to a shell (ash) on the console ==="
 exec /bin/busybox sh

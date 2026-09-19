@@ -3166,3 +3166,73 @@ build, `dtb`/`dtbo`/`ramdisk.cpio` = stock, untouched throughout. `rp`/
 `ro.bootloader` reconfirmed unchanged before flashing. **Awaiting
 hardware test result** - expecting this project's own busybox initramfs
 `init` script to actually run and reach an interactive shell.
+
+### Tested: still a clean, silent reset right after the init script's own
+last line - a new puzzle, distinct from Round 28's watchdog
+
+Owner's report: black screen, backlight on, no USB detected. Waited a
+full minute and force-reset manually. `/proc/last_kmsg` pulled
+immediately after: **byte-for-byte identical** to a shorter-wait attempt
+pulled earlier - ruling out a timing coincidence. Whatever causes the
+reset happens quickly and deterministically right after the init
+script's own `TERM=linux` line prints, not something that gets further
+given more wall-clock time. Checked `/dev/block/by-name/debug` again -
+still no new entry at all, and no panic text anywhere in the log either -
+ruling out both Round 28's (now-removed) hardware watchdog and a
+captured kernel panic (Round 24's lockup detectors, which should print
+visible panic text via the `sec_log` console specifically because it's
+registered `CON_ANYTIME`).
+
+Owner asked directly whether real display was achievable at this point.
+Answered honestly: `simple-framebuffer` likely won't show anything
+without a real MIPI-DSI panel driver actively refreshing the panel
+(Phase 2 scope, not a quick add-on) - but proposed USB gadget serial
+console instead, since this device's USB controller and most of the
+gadget kernel infrastructure (`CONFIG_USB_DWC3`, `CONFIG_USB_GADGET`,
+`CONFIG_USB_CONFIGFS_ACM`, a real `usb_1_dwc3`/`qcom,sm8250-dwc3`
+devicetree node with proper PHY references) were already compiled in by
+default - a real, live interactive console without needing display
+driver work at all.
+
+## Round 32 (2026-09-19, same day): simplify init to isolate the reset,
+add a USB gadget serial console
+
+Per the owner's direction (fix the reset, then add USB console, then
+flash together): stripped `kernel/initramfs/init` down to the bare
+minimum - dropped the `/proc/partitions`/block-device listing (the only
+real device I/O in the earlier version, and the leading suspect for the
+silent reset) - and removed `softlockup_panic=1 watchdog_thresh=5` from
+the forced cmdline (`kernel/config/gts7l.fragment`), since neither
+config change was ever actually observed explaining the symptom (no
+panic text, no captured crash-dump entry) and leaving them in place
+added uncertainty rather than resolving it.
+
+**Added a USB gadget serial console** in the same pass. Checked the
+working `.config` first: `CONFIG_USB_DWC3`, `CONFIG_USB_DWC3_QCOM`,
+`CONFIG_USB_GADGET`, `CONFIG_PHY_QCOM_QMP_USB`, and
+`CONFIG_USB_CONFIGFS_ACM` were all already `=y` by default - the one
+real gap was `CONFIG_USB_CONFIGFS=m` (a module, no good for a minimal
+initramfs with zero module-loading support). Forced it built-in. Devicetree
+already has a real `usb_1_dwc3`/`qcom,sm8250-dwc3` node with proper PHY
+references (upstream `sm8250.dtsi`), so no devicetree work was needed at
+all.
+
+`kernel/initramfs/init` now does a standard configfs gadget setup
+(`idVendor`/`idProduct`, ACM function, bind to whatever UDC appears under
+`/sys/class/udc`) as a best-effort step that can never block reaching the
+fallback shell, then spawns a second shell directly on `/dev/ttyGS0` if
+it appears within 5 seconds - giving two independent ways to reach an
+interactive prompt (the existing `console=tty0` shell and this new USB
+one) in a single test.
+
+Rebuilt the initramfs cpio from the updated `kernel/initramfs/init`,
+rebuilt the kernel Image (config change triggered a fuller rebuild),
+rebuilt uniLoader with all three fresh blobs (confirmed uniLoader's own
+total size - 42,553,344 bytes - still leaves `CONFIG_PAYLOAD_ENTRY`
+comfortably clear, per Round 30's fix), packaged via the same proven
+method (byte-exact verification passed), flashed.
+
+Tablet state at time of writing: `boot` = this round's simplified-init +
+USB-console build, `dtb`/`dtbo`/`ramdisk.cpio` = stock, untouched
+throughout. `rp`/`ro.bootloader` reconfirmed unchanged before flashing.
+**Awaiting hardware test result.**
