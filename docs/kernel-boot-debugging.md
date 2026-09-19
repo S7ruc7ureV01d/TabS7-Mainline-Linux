@@ -2502,3 +2502,102 @@ rooted TWRP shell, md5 `cf0cfcbaacc8cbc95f31a569d9823c12` matches
 `work/stock-backup/boot.img` exactly - `dtb`/`dtbo`/`ramdisk.cpio` were
 never touched this round). `rp` (`1`) and `ro.bootloader`
 (`T875XXU1ATK4`) both reconfirmed unchanged.
+
+## Round 23 (2026-09-19, same day): found a persistent Samsung crash-history
+partition, and a real Linux kernel panic with a definitive root cause
+
+The owner didn't have working UART hardware (a prior makeshift
+resistor-based attempt, per the Round 8 research, produced nothing) and
+asked to research online whether other Samsung porters had already solved
+"no UART, need early-boot evidence" - a very reasonable bet, since this
+project is very unlikely to be the first to hit this specific wall on
+Samsung hardware.
+
+**Found it directly**: `/dev/block/by-name/debug` is a real, documented
+Samsung debug partition containing a *persistent history* of XBL/TZ
+crash-dump auto-summaries, spanning many prior resets - a fundamentally
+richer evidence source than `/proc/last_kmsg`'s small, easily-evicted
+ring buffer. Confirmed it exists on this device (`sda11`, 10MB) and pulled
+it directly via `dd` from a rooted TWRP shell - no special tooling needed,
+same access level already used throughout this project.
+
+### What it actually contained
+
+A sequence of numbered (`RWC=`) crash summaries. **Nine consecutive
+entries (RWC=72 through RWC=80) match the Round 20-22 uniLoader test
+attempts exactly** - mostly `Upload Cause = Watchdog Reset (CPU HANG)`
+with `OEM_RESET_REASON: [TZBSP_ERR_FATAL_NON_SECURE_WDT]` (a generic
+AP-side hang detector - not a TrustZone security violation, contrary to
+the NoC-fault theory carried since Round 15/17). **One entry (RWC=79) is
+a real software kernel panic**, not just a watchdog timeout:
+
+```
+Upload Cause = 0xc8000000 / KERNEL PANIC ( panic_msg = System is deadlocked on memory
+...
+@ Kernel Crash Infos
+PC is at out_of_memory+0x23c/0x2d0
+LR is at out_of_memory+0x240/0x2d0
+@ Kernel Backtrace
+ __alloc_pages_nodemask+0x60c/0x1190
+ handle_pte_fault+0x730/0xf90
+ __handle_speculative_fault+0x518/0x7c8
+ do_page_fault+0x1f4/0x470
+ do_translation_fault+0x2c/0x40
+ do_mem_abort+0xe0/0x190
+ el0_da+0x20/0x24
+```
+
+This is a coherent, logically-ordered mainline Linux page-fault-handling
+call chain (`el0_da` → `do_mem_abort` → `do_translation_fault` →
+`do_page_fault` → `__handle_speculative_fault`/`handle_pte_fault` →
+`__alloc_pages_nodemask` → `out_of_memory`) - all standard mainline
+function names (not Samsung-specific), appearing in exactly the right
+calling order. A coincidentally-wrong symbol table would be very unlikely
+to produce something this coherent - this is genuine evidence the real
+kernel was running, handling page faults, and hit an actual out-of-memory
+condition.
+
+### Root cause, found directly and confirmed in this project's own build
+
+Checked this project's own compiled DTB immediately: `fdtget -t x
+<dtb> /memory reg` → `0 80000000 0 0`. Checked upstream's
+`sm8250.dtsi` source directly:
+
+```c
+memory@80000000 {
+	device_type = "memory";
+	/* We expect the bootloader to fill in the size */
+	reg = <0x0 0x80000000 0x0 0x0>;
+};
+```
+
+**The size is zero, by design - upstream expects a bootloader to patch it
+at runtime with the real detected DRAM size, exactly like ABL does for
+every other DTB this project has ever booted.** uniLoader's own
+`patch_dtb()` never does this - it only ever adds
+`linux,initrd-start`/`-end` (confirmed directly in Round 22's own on-screen
+capture). Since this project's embedded DTB is uniLoader's private copy,
+never touched by ABL at all, nothing was ever filling in the real size.
+**The real kernel was booting believing it had zero bytes of usable RAM**
+- a complete, sufficient explanation for the observed OOM panic,
+independent of anything display/cmdline-related (Round 21-22's fixes
+never had a chance to matter, since this happens far earlier and for an
+unrelated reason).
+
+**Fixed directly** in `kernel/dts/sm8250-samsung-gts7l.dts`, overriding
+the zero-size placeholder with this device's real, already-known DRAM
+size (`Rank 0 size = 6144 MB`, confirmed in this project's own hardware
+logs since Round 13's era): `&{/memory@80000000} { reg = <0x0 0x80000000
+0x1 0x80000000>; };`. Rebuilt DTB (confirmed via `fdtget`:
+`0 80000000 1 80000000`), rebuilt uniLoader with the fresh blob, packaged
+via the same proven method (byte-exact verification passed), flashed.
+
+**Awaiting hardware test result as of writing this entry** - but this is
+the first root cause found in this entire debugging effort (Rounds 4-22)
+that comes from *direct evidence* of a real kernel crash, rather than
+inference from bootloader-log absence or symptom-matching against a
+different device's porting log.
+
+Tablet state at time of writing: `boot` = this round's memory-node-fixed
+uniLoader build, `dtb`/`dtbo`/`ramdisk.cpio` = stock, untouched
+throughout. `rp`/`ro.bootloader` reconfirmed unchanged before flashing.

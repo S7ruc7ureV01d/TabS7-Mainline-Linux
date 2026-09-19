@@ -197,6 +197,36 @@
 };
 
 /*
+ * Round 23 (2026-09-19, docs/kernel-boot-debugging.md): pulled Samsung's
+ * persistent `/dev/block/by-name/debug` ramdump-summary partition (a
+ * genuine, real crash-history log spanning many prior resets - unlike
+ * `/proc/last_kmsg`'s small ring buffer, found via online research the
+ * owner asked for after confirming no UART hardware was available)
+ * directly off the physical device from TWRP. It captured a real Linux
+ * kernel panic from one of the Round 20-22 uniLoader boot attempts, with
+ * a full backtrace pointing at `out_of_memory` / `__alloc_pages_nodemask`
+ * / `handle_pte_fault` / `do_page_fault` - a real, textbook Linux
+ * page-fault-triggers-allocation-triggers-OOM call chain, panic message
+ * "System is deadlocked on memory". Root cause found directly:
+ * upstream's `sm8250.dtsi` root `memory@80000000` node ships with
+ * `reg = <0x0 0x80000000 0x0 0x0>` (zero size) and an explicit comment,
+ * "We expect the bootloader to fill in the size" - normally patched
+ * dynamically by ABL at boot time, but uniLoader's `patch_dtb()` only
+ * ever adds `linux,initrd-start`/`-end`, never touches memory size. This
+ * project's own compiled DTB confirmed carrying that exact zero-size
+ * placeholder through unmodified. The real kernel was booting believing
+ * it had zero bytes of usable RAM - a complete, sufficient explanation
+ * for the observed OOM panic, independent of anything display/cmdline
+ * related (Round 21-22's fixes never had a chance to matter). Real size
+ * confirmed directly from this device's own hardware log
+ * (`work/last_kmsg_*.txt`, XBL: "Rank 0 size = 6144 MB, Rank 1 size =
+ * 0 MB"), base address matches the placeholder's own existing `0x80000000`.
+ */
+&{/memory@80000000} {
+	reg = <0x0 0x80000000 0x1 0x80000000>;
+};
+
+/*
  * Round 22 (2026-09-19, docs/kernel-boot-debugging.md): uniLoader confirmed
  * working end to end on real hardware (its own splash/console prints
  * correctly, reaches "Booting kernel..." and jumps) - but nothing visible
