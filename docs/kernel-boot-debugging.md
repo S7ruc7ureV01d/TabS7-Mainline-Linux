@@ -3824,3 +3824,41 @@ same proven method (byte-exact verification passed), flashed.
 `rp`/`ro.bootloader` reconfirmed unchanged before and after.
 
 **Not yet tested on hardware as of writing this entry.**
+
+## Round 45 (2026-09-19, same day): confirmed the PLL trim fix worked -
+real PLL locks 5x with no failure; new diagnostics target backlight/bias
+
+Owner's dmesg capture with Round 44's diagnostics was decisive:
+`dsi_7nm_phy_enable` runs for both PHYs (`bitclk_rate=934773000`, matching
+the hand-computed value almost exactly, `tuning_cfg` non-null confirming
+the Round 41 override is active), and `dsi_pll_7nm_vco_prepare` is
+called **five times** with `vco_current_rate=934772900` - **none** of
+which produced a "PLL lock failed" message. The real modeset's PLL
+genuinely locks now; the two early failures at ~0.35s really are the
+benign premature-reparent artifact theorized in Round 41/43 - confirmed,
+not just plausible. `nt36523_prepare()`'s own existing `dev_err()` path
+(logs "failed to initialize panel" on any real failure) has never fired
+either, confirming the 180-command init sequence has been succeeding
+silently every round.
+
+So PLL/clock generation and the panel's own digital init are both
+confirmed working. Every test so far has still consistently reported
+"backlight off, black screen" regardless of which underlying bug was
+being fixed - an angle not yet directly instrumented. Added a probe
+success print to `drivers/misc/isl98608-gts7l.c` (never confirmed this
+bias IC driver actually probes/writes at all - it previously only
+logged on failure) and diagnostics in
+`panel-novatek-nt36523.c`'s `nt36523_bl_update_status()` (brightness
+value and the DCS write's return code) - `devm_backlight_device_register()`
+normally triggers one automatic `update_status()` call, but the exact
+timing (probe-time vs. later, e.g. an fbcon blank/unblank notification
+right as `fb0` binds) hasn't been confirmed, and a DCS write attempted
+while the DSI link isn't fully ready for real HS transfer would be a
+plausible, well-timed match for the still-unexplained
+`dsi_err_worker: status=4` FIFO error.
+
+Kernel + uniLoader rebuild (unchanged sizes), packaged via the same
+proven method (byte-exact verification passed), flashed.
+`rp`/`ro.bootloader` reconfirmed unchanged before and after.
+
+**Not yet tested on hardware as of writing this entry.**
