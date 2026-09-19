@@ -3741,3 +3741,36 @@ yet found.
 **Not yet investigated further as of writing this entry** - paused here
 to document and commit the current state at the owner's request, before
 continuing the FIFO error investigation.
+
+## Round 42 (2026-09-19, same day): missing MIPI_DSI_MODE_VIDEO_BURST -
+a real, confirmed traffic-mode mismatch
+
+Traced `dsi_err_worker: status=4` (`DSI_ERR_STATE_FIFO`) directly to
+`dsi_host.c`'s `dsi_get_traffic_mode()`: without
+`MIPI_DSI_MODE_VIDEO_BURST` set in a panel's `mode_flags`, it silently
+falls back to `NON_BURST_SYNCH_EVENT`. Samsung's own downstream dtsi
+explicitly declares `qcom,mdss-dsi-traffic-mode = "burst_mode";` for
+this exact panel - `gts7l_desc` (copied from elish's own flags, which
+doesn't use burst mode) never set this flag at all, a real, direct
+mismatch from what this panel was actually characterized for. Burst vs.
+non-burst changes exactly how pixel data is packed against blanking
+periods - a textbook cause of the TX FIFO underflow/overflow just
+observed. Confirmed `j606f_boe_desc` (the other panel already in this
+same driver that also uses burst mode downstream) already sets this
+same flag, for the same reason.
+
+Added `MIPI_DSI_MODE_VIDEO_BURST` to `gts7l_desc.mode_flags`
+(`drivers/gpu/drm/msm/dsi/... panel-novatek-nt36523.c` - actually
+`drivers/gpu/drm/panel/panel-novatek-nt36523.c`, project patch, see
+`kernel/patches/0003-...patch`). Also checked BLLP-related downstream
+properties (`qcom,mdss-dsi-bllp-eof-power-mode`/`-power-mode`) against
+`dsi_host.c` - mainline already always sets the equivalent
+`DSI_VID_CFG0_EOF_BLLP_POWER_STOP`/`BLLP_POWER_STOP` bits
+unconditionally, so no discrepancy there.
+
+Driver-only change, kernel rebuild only (unchanged size), uniLoader
+rebuild (same 44,478,464-byte size, same safe address margins),
+packaged via the same proven method (byte-exact verification passed),
+flashed. `rp`/`ro.bootloader` reconfirmed unchanged before and after.
+
+**Not yet tested on hardware as of writing this entry.**

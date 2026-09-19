@@ -1,22 +1,27 @@
 Phase 2 panel bring-up (2026-09-19, docs/kernel-boot-debugging.md
-Rounds 38-41, docs/phase2-panel-scoping.md): a new
+Rounds 38-42, docs/phase2-panel-scoping.md): a new
 "samsung,gts7l-ppa957db1-nt36523" entry in mainline's existing
 drivers/gpu/drm/panel/panel-novatek-nt36523.c (not a new driver from
 scratch - this file already supports the same NT36523 chip family on
 Xiaomi's elish, a directly comparable SM8250 tablet); a small new
 drivers/misc/isl98608-gts7l.c for this device's separate LCD bias IC
 (single fixed register program at probe, matching the downstream
-driver's own behavior exactly); and a board-specific PHY analog trim
+driver's own behavior exactly); a board-specific PHY analog trim
 override added to drivers/gpu/drm/msm/dsi/phy/dsi_phy_7nm.c (mirroring
 dsi_phy_10nm.c's own existing parse_dt_properties/tuning_cfg precedent),
 since mainline's generic hardcoded trim constants for this SoC
 generation's C-PHY path don't match Samsung's own downstream
-calibration for this exact panel/PHY pairing. Also registers this
-project's own DTB in arch/arm64/boot/dts/qcom/Makefile (should have
-been saved earlier, alongside 0001/0002 - the DTS itself lives at
-kernel/dts/sm8250-samsung-gts7l.dts in this repo, synced into a working
-kernel tree before building; this patch covers everything else that
-had to change in the wider kernel source tree).
+calibration for this exact panel/PHY pairing; and (Round 42)
+MIPI_DSI_MODE_VIDEO_BURST on gts7l_desc's mode_flags, matching
+downstream's own qcom,mdss-dsi-traffic-mode = "burst_mode" for this
+exact panel - omitting it silently falls back to
+dsi_host.c's NON_BURST_SYNCH_EVENT default, a real mismatch and the
+likely cause of a DSI TX FIFO error seen on real hardware. Also
+registers this project's own DTB in arch/arm64/boot/dts/qcom/Makefile
+(should have been saved earlier, alongside 0001/0002 - the DTS itself
+lives at kernel/dts/sm8250-samsung-gts7l.dts in this repo, synced into
+a working kernel tree before building; this patch covers everything
+else that had to change in the wider kernel source tree).
 
 Applies on top of Linux 7.2 (work/linux's checked-out commit
 8d3ae59288f1e7d58d76558a6ee96d533bc5019f) with 0001/0002 already
@@ -149,7 +154,7 @@ index 984a66085..78158476e 100644
  	.min_pll_rate = 600000000UL,
  #ifdef CONFIG_64BIT
 diff --git a/drivers/gpu/drm/panel/panel-novatek-nt36523.c b/drivers/gpu/drm/panel/panel-novatek-nt36523.c
-index 226d91daf..9a0ba97dc 100644
+index 226d91daf..5cc9671a5 100644
 --- a/drivers/gpu/drm/panel/panel-novatek-nt36523.c
 +++ b/drivers/gpu/drm/panel/panel-novatek-nt36523.c
 @@ -57,6 +57,395 @@ static inline struct panel_info *to_panel_info(struct drm_panel *panel)
@@ -548,7 +553,7 @@ index 226d91daf..9a0ba97dc 100644
  static int elish_boe_init_sequence(struct panel_info *pinfo)
  {
  	struct mipi_dsi_device *dsi0 = pinfo->dsi[0];
-@@ -886,6 +1275,66 @@ static int j606f_boe_init_sequence(struct panel_info *pinfo)
+@@ -886,6 +1275,80 @@ static int j606f_boe_init_sequence(struct panel_info *pinfo)
  	return dsi_ctx.accum_err;
  }
  
@@ -596,7 +601,21 @@ index 226d91daf..9a0ba97dc 100644
 +	.bpc = 8,
 +	.lanes = 3,
 +	.format = MIPI_DSI_FMT_RGB888,
-+	.mode_flags = MIPI_DSI_MODE_VIDEO | MIPI_DSI_CLOCK_NON_CONTINUOUS | MIPI_DSI_MODE_LPM,
++	/*
++	 * Round 42 (2026-09-19, docs/kernel-boot-debugging.md): downstream
++	 * explicitly declares `qcom,mdss-dsi-traffic-mode = "burst_mode"`
++	 * for this exact panel (same dtsi cited above) - without
++	 * MIPI_DSI_MODE_VIDEO_BURST here, dsi_host.c's dsi_get_traffic_mode()
++	 * silently falls back to NON_BURST_SYNCH_EVENT instead (confirmed by
++	 * reading that function directly), a real mismatch from what this
++	 * panel was actually characterized for. A very plausible direct
++	 * cause of the "dsi_err_worker: status=4" (DSI_ERR_STATE_FIFO)
++	 * error seen on real hardware - burst vs. non-burst changes exactly
++	 * how pixel data is packed against blanking periods, and a mismatch
++	 * there is a textbook cause of TX FIFO underflow/overflow.
++	 */
++	.mode_flags = MIPI_DSI_MODE_VIDEO | MIPI_DSI_MODE_VIDEO_BURST |
++		      MIPI_DSI_CLOCK_NON_CONTINUOUS | MIPI_DSI_MODE_LPM,
 +	.init_sequence = gts7l_init_sequence,
 +	.is_dual_dsi = true,
 +	/*
@@ -615,7 +634,7 @@ index 226d91daf..9a0ba97dc 100644
  static const struct drm_display_mode elish_boe_modes[] = {
  	{
  		.clock = (1600 + 60 + 8 + 60) * (2560 + 26 + 4 + 168) * 120 / 1000,
-@@ -1253,6 +1702,10 @@ static const struct of_device_id nt36523_of_match[] = {
+@@ -1253,6 +1716,10 @@ static const struct of_device_id nt36523_of_match[] = {
  		.compatible = "xiaomi,elish-csot-nt36523",
  		.data = &elish_csot_desc,
  	},
