@@ -3916,3 +3916,65 @@ proven method (byte-exact verification passed), flashed.
 `rp`/`ro.bootloader` reconfirmed unchanged before and after.
 
 **Not yet tested on hardware as of writing this entry.**
+
+### Tested: has_dcs_backlight fix eliminated the backlight callback
+entirely, but the FIFO error persisted identically - the backlight
+race was correlation, not causation
+
+Owner's capture confirmed `nt36523_bl_update_status`/
+`mipi_dsi_dcs_set_display_brightness_large` diagnostics no longer
+appear at all (that code path is genuinely gone), but
+`dsi_err_worker: status=4` and the identical raw
+`REG_DSI_FIFO_STATUS=0x1ddd1011` still fired at almost the exact same
+relative timing (~365ms after the PLL's 5 successful prepares, right
+before `fb0` registers). The backlight race was a coincidental
+correlation, not the actual cause - both were triggered by the same
+underlying event (the first real frame commit), not one causing the
+other.
+
+Checked whether downstream relies on DSC (display stream compression)
+to reduce the very high (~935MHz) bit clock's real bandwidth needs -
+`dsi_panel_parse_topology()` in
+`references/gts7l/techpack/display/msm/dsi/dsi_panel.c` decodes this
+panel's own `qcom,display-topology = <2 0 2>` as `num_lm=2, num_enc=0,
+num_intf=2` - zero compression encoders, ruling DSC out entirely.
+
+Reconsidered whether `fb0` registering successfully every round (despite
+the FIFO error) meant the DRM/DSI pipeline was actually healthy, and the
+real "black screen, backlight off" cause was something else entirely -
+independent of the DSI FIFO issue. Realized the Round 45/46
+`isl98608_gts7l_probe` diagnostic had never appeared in **any** capture
+including this one, despite the grep pattern explicitly matching
+"isl98608". Asked the owner to check directly at the live USB shell:
+`ls /sys/bus/i2c/devices/` came back **completely empty** - not just the
+ISL98608 child device, `&i2c8` itself never registered as a real i2c
+adapter at all.
+
+## Round 47 (2026-09-19, same day): `CONFIG_QCOM_GPI_DMA=m` - the fourth
+instance of the exact same no-module-loading bug
+
+This was flagged as a real risk back in Round 41's notes (`&i2c8`
+declares GPI DMA channels via `dmas = <&gpi_dma1 ...>`) but deliberately
+left alone at the time, reasoning "no i2c8 errors appeared in dmesg."
+That reasoning was backwards - silence is exactly what a permanently
+deferred probe looks like, not evidence of a successful FIFO-mode
+probe that never needed DMA. `i2c-qcom-geni.c`'s `geni_i2c_probe()`
+only needs a working DMA channel if this specific GENI SE instance's
+hardware FIFO is disabled (a real per-instance hardware flag) - if it
+is, `dma_request_chan()` returns `-EPROBE_DEFER` forever when no DMA
+channel provider is registered, and a permanently-deferred probe
+prints nothing by design. Confirmed via the owner's own
+`ls /sys/bus/i2c/devices/` output (empty) that this is exactly what was
+happening - the fourth instance of the identical "driver defaults to
+`=m`, minimal initramfs has no module-loading support" bug pattern
+already hit with `CONFIG_DRM_MSM`/`CONFIG_PHY_QCOM_USB_SNPS_FEMTO_V2`/
+`CONFIG_REGULATOR_QCOM_REFGEN` (Rounds 35/37/40).
+
+Forced `CONFIG_QCOM_GPI_DMA=y` in `kernel/config/gts7l.fragment`. Full
+kernel rebuild (confirmed genuinely different Image content despite an
+identical byte size to Round 46's build - not a no-op), uniLoader
+rebuild (same 44,478,464-byte size, same safe address margins),
+packaged via the same proven method (byte-exact verification passed),
+flashed. `rp`/`ro.bootloader` reconfirmed unchanged before and after.
+
+**Not yet tested on hardware as of writing this entry.**

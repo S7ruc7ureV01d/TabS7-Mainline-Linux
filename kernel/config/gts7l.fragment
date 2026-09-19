@@ -150,6 +150,24 @@ CONFIG_DRM_MSM=y
 CONFIG_I2C_QCOM_GENI=y
 CONFIG_BACKLIGHT_CLASS_DEVICE=y
 
+# Round 47 (2026-09-19, docs/kernel-boot-debugging.md): `&i2c8`
+# (`CONFIG_I2C_QCOM_GENI=y` above) never actually probed at all -
+# confirmed directly by the owner via a live shell,
+# `ls /sys/bus/i2c/devices/` came back completely empty. Flagged this
+# exact risk back in Round 41's notes (`&i2c8` declares GPI DMA
+# channels via `dmas = <&gpi_dma1 ...>`) but decided against fixing it
+# preemptively since "no i2c8 errors appeared in dmesg" - that silence
+# was itself the real signal, not evidence of success: `i2c-qcom-geni.c`
+# only needs a working DMA channel if this specific GENI SE instance's
+# hardware FIFO is disabled, and if it is, `dma_request_chan()`
+# returns -EPROBE_DEFER forever when no DMA channel provider driver
+# is registered - a deferred probe prints nothing by design, matching
+# total silence exactly, not a successful FIFO-mode probe as assumed.
+# Same no-module-loading bug pattern as DRM_MSM/
+# PHY_QCOM_USB_SNPS_FEMTO_V2/REGULATOR_QCOM_REFGEN before it (Rounds
+# 35/37/40) - the fourth instance of it in this project.
+CONFIG_QCOM_GPI_DMA=y
+
 # Round 39 test (2026-09-19, docs/kernel-boot-debugging.md): found via the
 # USB gadget console's own dmesg (finally usable as a live debug tool) -
 # `msm_dsi: Failed to get supply 'refgen'` on both DSI hosts, and
