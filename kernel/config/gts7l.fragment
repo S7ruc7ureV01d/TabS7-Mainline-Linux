@@ -42,5 +42,25 @@ CONFIG_FB_SIMPLE=y
 # merging or uniLoader's own patch_dtb() (which only ever adds
 # linux,initrd-start/-end, never bootargs) end up doing. Belt-and-suspenders
 # alongside the DTS's own chosen/bootargs override.
-CONFIG_CMDLINE="console=tty0 loglevel=15"
+CONFIG_CMDLINE="console=tty0 loglevel=15 softlockup_panic=1 watchdog_thresh=5"
 CONFIG_CMDLINE_FORCE=y
+
+# Round 24 (2026-09-19, docs/kernel-boot-debugging.md): the memory-node fix
+# eliminated the OOM panic/watchdog-reset loop from Round 20-23, but the
+# kernel is now hanging silently instead - no new entry in the
+# /dev/block/by-name/debug crash-dump history at all, meaning nothing is
+# detecting the hang and calling panic(). Confirmed CONFIG_SOFTLOCKUP_DETECTOR
+# and CONFIG_HARDLOCKUP_DETECTOR were both off in the working .config.
+# Enabling both plus CONFIG_BOOTPARAM_SOFTLOCKUP_PANIC and
+# CONFIG_PANIC_ON_OOPS turns a future silent hang back into a captured,
+# analyzable crash automatically (matching how the Round 23 OOM panic was
+# actually found - Samsung's crash-dump capture already works, it just
+# needs the kernel to actually call panic() to trigger it) - no UART
+# needed. watchdog_thresh=5 shortens the default ~20s soft-lockup
+# detection window for faster iteration.
+CONFIG_SOFTLOCKUP_DETECTOR=y
+CONFIG_BOOTPARAM_SOFTLOCKUP_PANIC=y
+CONFIG_HARDLOCKUP_DETECTOR=y
+CONFIG_BOOTPARAM_HARDLOCKUP_PANIC=y
+CONFIG_PANIC_ON_OOPS=y
+CONFIG_PANIC_TIMEOUT=5

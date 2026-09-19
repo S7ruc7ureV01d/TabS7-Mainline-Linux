@@ -2601,3 +2601,53 @@ different device's porting log.
 Tablet state at time of writing: `boot` = this round's memory-node-fixed
 uniLoader build, `dtb`/`dtbo`/`ramdisk.cpio` = stock, untouched
 throughout. `rp`/`ro.bootloader` reconfirmed unchanged before flashing.
+
+### Tested: memory fix confirmed working (OOM panic is gone), but the
+kernel now hangs silently with no new evidence
+
+Owner's report: same visible symptom (stuck on uniLoader's own screen,
+not black) - but this time **no automatic reset loop** at all, just a
+plain hang until manually forced back to TWRP. Pulled
+`/dev/block/by-name/debug` fresh (`work/debug_partition2.bin`) and
+confirmed directly: **the `RWC=` entry list is completely unchanged from
+before this test** (still ending at RWC=81, the prior manual-reset entry)
+- no new crash-dump was recorded at all. This confirms the memory-node
+fix worked (the specific OOM panic from Round 23 is gone) but the kernel
+is now hanging somewhere else in a way that never triggers a hardware
+watchdog reset. `console-ramoops-0` checked again too - still only stock
+Android's own real downstream driver output (`max77705`/`sec_battery`/
+SELinux `avc` denials), confirming it still reflects whichever kernel is
+*currently* running, not this test.
+
+**Root cause of "no new crash-dump": confirmed directly in the working
+`.config`** - `CONFIG_SOFTLOCKUP_DETECTOR` and `CONFIG_HARDLOCKUP_DETECTOR`
+were both off, `CONFIG_PANIC_ON_OOPS` was off, `CONFIG_PANIC_TIMEOUT=0`.
+If the kernel is now stuck in a genuine hang rather than crashing, nothing
+detects it and calls `panic()` - and Samsung's crash-dump capture (proven
+working in Round 23, from the OOM panic) only engages when the kernel
+actually panics. This is a debugging tool gap, not a boot-chain problem -
+turning a future silent hang back into a captured, analyzable crash
+doesn't require UART at all, just getting the kernel to call `panic()`
+reliably.
+
+**Fixed** in `kernel/config/gts7l.fragment`: `CONFIG_SOFTLOCKUP_DETECTOR`,
+`CONFIG_HARDLOCKUP_DETECTOR`, `CONFIG_BOOTPARAM_HARDLOCKUP_PANIC`,
+`CONFIG_PANIC_ON_OOPS` all enabled, `CONFIG_PANIC_TIMEOUT=5` (reboot 5s
+after any panic instead of hanging forever post-panic), plus
+`softlockup_panic=1 watchdog_thresh=5` added to the forced cmdline
+(`CONFIG_BOOTPARAM_SOFTLOCKUP_PANIC` turned out to be an int-valued
+symbol, not bool - the `=y` fragment line silently reverted to its
+default `0` during `olddefconfig`, confirmed via `grep` on the resulting
+`.config`; the cmdline `softlockup_panic=1` achieves the identical
+runtime effect regardless, so no functional loss). `watchdog_thresh=5`
+shortens the default ~20s soft-lockup detection window for faster
+iteration.
+
+Rebuilt kernel Image (full rebuild triggered by the config change, ~9
+minutes), rebuilt uniLoader with the fresh blob, packaged via the same
+proven method (byte-exact verification passed), flashed.
+
+Tablet state at time of writing: `boot` = this round's watchdog-enabled
+uniLoader build, `dtb`/`dtbo`/`ramdisk.cpio` = stock, untouched
+throughout. `rp`/`ro.bootloader` reconfirmed unchanged before flashing.
+**Awaiting hardware test result.**
