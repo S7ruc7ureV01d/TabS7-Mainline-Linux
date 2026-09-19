@@ -3774,3 +3774,26 @@ packaged via the same proven method (byte-exact verification passed),
 flashed. `rp`/`ro.bootloader` reconfirmed unchanged before and after.
 
 **Not yet tested on hardware as of writing this entry.**
+
+## Round 43 (2026-09-19, same day): temporary diagnostic - print the raw
+FIFO status register
+
+Round 42's burst-mode fix produced **zero observable change** - the
+`dsi_err_worker: status=4` timing and value were essentially identical
+to Round 41's test. That's suspicious: two targeted fixes in a row with
+no effect at all suggests either the wrong mechanism is being chased,
+or (more likely here) `status=4` (`DSI_ERR_STATE_FIFO`) is too coarse to
+diagnose further - it's an abstracted bit set whenever *any* of
+`REG_DSI_FIFO_STATUS`'s ~15 real bits fire (video MDP over/underflow,
+cmd DMA underflow, per-lane HS/LP FIFO empty/full/over/underflow for
+4 lanes) - the raw register value was never actually logged anywhere.
+
+Added a temporary `pr_err("gts7l: REG_DSI_FIFO_STATUS raw=0x%08x\n",
+status)` directly in `dsi_fifo_status()`
+(`drivers/gpu/drm/msm/dsi/dsi_host.c`) - diagnostic-only, not a fix,
+purely to see which specific bit(s) are actually set before guessing
+further. Kernel + uniLoader rebuild (unchanged sizes), packaged via the
+same proven method (byte-exact verification passed), flashed.
+`rp`/`ro.bootloader` reconfirmed unchanged before and after.
+
+**Not yet tested on hardware as of writing this entry.**
