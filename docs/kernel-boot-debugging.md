@@ -2465,3 +2465,40 @@ same proven method (byte-exact verification passed again), flashed.
 Tablet state at time of writing: `boot` = this round's uniLoader+console
 build, `dtb`/`dtbo`/`ramdisk.cpio` = stock, untouched throughout. `rp`/
 `ro.bootloader` reconfirmed unchanged before flashing.
+
+### Tested on hardware: same loop, unchanged by the display/cmdline fixes -
+a real, useful negative result
+
+Owner's report: no change from Round 20/21's symptom - stuck on the
+*uniLoader* splash screen (not black, not garbled - exactly uniLoader's
+own last-drawn text, frozen). `/proc/last_kmsg` confirms this is still
+the same boot loop as Round 20: multiple full ABL cycles, each ending in
+`Shutting Down UEFI Boot Services` → `PM: HARD RESET by PS_HOLD`,
+unchanged in shape or timing from before the framebuffer/cmdline fixes.
+
+**This is a genuinely useful negative result, not just "still broken"**:
+since the screen never changes from uniLoader's own last state - never
+clears, never gets overwritten - the real kernel's own `fbcon`/`simplefb`
+driver almost certainly never got far enough to touch the framebuffer at
+all (a working `fbcon` init typically clears/redraws the screen
+immediately). Combined with the loop's shape being completely unchanged
+by adding a real console and forcing a real cmdline, this points away
+from "no display configured" (Round 14/21's theory) and toward the hang
+happening **very early in the real kernel's own boot - before
+driver-model/fbcon could possibly matter**, independent of anything
+display-related. uniLoader itself completes deterministically and
+reaches "Booting kernel..." every single cycle, which points the
+remaining suspicion at the real kernel's own early init, not at uniLoader.
+
+**This project has now tried every low-cost, non-UART way to get evidence
+past this point** (bootloader logs, pstore, uniLoader's own console, a
+real kernel-side framebuffer+forced cmdline) and none of them can see
+into that early-boot window. UART
+(`docs/uart-debug-research.md`) is the clear, necessary next step - not
+a fallback option anymore, the only remaining path to direct evidence.
+
+Tablet restored to stock and hash-verified (`boot` `dd`-restored from a
+rooted TWRP shell, md5 `cf0cfcbaacc8cbc95f31a569d9823c12` matches
+`work/stock-backup/boot.img` exactly - `dtb`/`dtbo`/`ramdisk.cpio` were
+never touched this round). `rp` (`1`) and `ro.bootloader`
+(`T875XXU1ATK4`) both reconfirmed unchanged.

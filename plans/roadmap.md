@@ -284,9 +284,17 @@ Exit criteria:
       the first qualitatively different result yet**: no Download-Mode
       drop, stuck at the logo but the CPU visibly warmed up (real
       execution, not an instant crash) - `/proc/last_kmsg` shows a boot
-      loop of clean ABL passes each ending in a `PS_HOLD` reset. Can't go
-      further without direct evidence of what's actually running during
-      that warm period - UART is the clear next step.**
+      loop of clean ABL passes each ending in a `PS_HOLD` reset. **Rounds
+      21-22 got uniLoader's own on-screen console working and captured a
+      full live boot sequence up to "Booting kernel..." - definitive proof
+      uniLoader itself works end to end.** Added a real framebuffer +
+      forced cmdline to the real kernel's own devicetree (now private to
+      uniLoader, never seen by ABL) hoping to see kernel-level output -
+      **same exact PS_HOLD loop, completely unchanged**, and the screen
+      never clears past uniLoader's own last text, pointing at a hang very
+      early in the real kernel's own boot, before display could matter.
+      **Every low-cost non-UART evidence path has now been tried. UART
+      (`../docs/uart-debug-research.md`) is the necessary next step.**
 - [ ] UFS storage enumerates and is readable. **Driver forced built-in
       already (`gts7l.fragment`); needs the actual boot attempt to confirm.**
 - [ ] Root filesystem reachable via ADB/serial shell, even without display.
@@ -819,6 +827,41 @@ Progress log:
   `../docs/kernel-boot-debugging.md` Round 20. Tablet restored to stock
   (`boot` only - `dtb`/`dtbo`/`ramdisk` were never touched), `rp`/
   `ro.bootloader` reconfirmed unchanged.
+- 2026-09-19 (Round 21): Before going to UART, per the owner's direction,
+  tried getting uniLoader's own `simplefb` console on screen first - much
+  cheaper, and uniLoader already has a driver for it. First attempt: the
+  screen went from the static Samsung logo to solid black after ~2s, then
+  hung - itself informative (`simplefb_probe()`'s first action is exactly
+  to blank the framebuffer, so this proved uniLoader was running). Root
+  cause found: this driver's `stride` field means bytes-per-pixel, not
+  row-pitch (confirmed against every real board's actual values, all use
+  `stride=4`) - the board file used `1600*4=6400`, making
+  `clean_fbmem()`'s memset size ~26GB starting at the framebuffer address,
+  running off the end of physical RAM. Fixed (`stride=4`), rebuilt,
+  reflashed.
+- 2026-09-19 (Round 22): **uniLoader confirmed fully working end to end on
+  real hardware** - the owner captured its actual live splash/boot
+  sequence on screen, reaching `"Booting kernel..."`, the exact line
+  printed right before the jump to the real kernel. The single most
+  concrete piece of evidence this project has produced about post-ABL
+  behavior. Nothing appeared after that line, but not necessarily a
+  failure - the real kernel had no framebuffer/console configured in its
+  own devicetree yet (uniLoader's console is separate from the real
+  kernel's). Fixed at the source: overrode the inherited phone-resolution
+  framebuffer node in `kernel/dts/sm8250-samsung-gts7l.dts` with this
+  tablet's real `1600x2560` (this DTB is now private to uniLoader, never
+  seen by ABL, so unlike every earlier DTS change this carries zero risk
+  to ABL acceptance), set `chosen/bootargs`, and forced the cmdline a
+  second, independent way via `CONFIG_CMDLINE_FORCE` in
+  `kernel/config/gts7l.fragment`. Rebuilt, reflashed. **Result: identical
+  `PS_HOLD` loop, completely unchanged** - and the screen never clears
+  past uniLoader's own last text, which points at the real kernel hanging
+  very early in its own boot, before display could ever matter, rather
+  than a missing-console problem. Every low-cost non-UART evidence path
+  has now been exhausted. Full detail in
+  `../docs/kernel-boot-debugging.md` Round 21-22. Tablet restored to
+  stock, `rp`/`ro.bootloader` reconfirmed unchanged. **Next: UART - no
+  longer optional.**
 
 ---
 
