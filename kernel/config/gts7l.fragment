@@ -105,3 +105,20 @@ CONFIG_PANIC_TIMEOUT=5
 # Force it built-in; the init script (kernel/initramfs/init) does the
 # actual configfs gadget setup (create gadget, ACM function, bind UDC).
 CONFIG_USB_CONFIGFS=y
+
+# Round 36 (2026-09-19, docs/kernel-boot-debugging.md): the real reason
+# /sys/class/udc stayed empty (no USB gadget console) even after Round 32's
+# CONFIG_USB_CONFIGFS fix - found directly from this device's own last_kmsg
+# after adding automatic USB diagnostics to the init script (no working
+# input device to type at that shell interactively - a USB-OTG keyboard
+# doesn't work either, correctly, since dr_mode = "peripheral" disables
+# host mode entirely). The log showed exactly why:
+# `platform a600000.usb: deferred probe pending: dwc3: failed to
+# initialize core` / `platform: supplier 88e3000.phy not ready`. dwc3
+# itself is fine - it's permanently waiting on its USB2 HS PHY
+# (`usb_1_hsphy`, compatible "qcom,usb-snps-hs-7nm-phy"), which is never
+# going to appear: its driver, CONFIG_PHY_QCOM_USB_SNPS_FEMTO_V2, defaults
+# to =m, and this minimal initramfs has no module-loading support at all -
+# the exact same class of bug as CONFIG_DRM_MSM=m never loading. Force it
+# built-in.
+CONFIG_PHY_QCOM_USB_SNPS_FEMTO_V2=y

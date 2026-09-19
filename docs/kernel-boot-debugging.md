@@ -3411,3 +3411,62 @@ worth fixing, but weren't the cause); Round 35 found the actual
 mechanism by reading this project's own vendored driver source directly
 rather than continuing to guess from symptom-matching against other
 projects' porting logs.
+
+## Round 36 (2026-09-19, same day): automatic USB diagnostics, since there's
+no way to type at the shell yet
+
+With display now working (Round 35) but `/sys/class/udc` still empty and
+a USB-OTG keyboard not working either (expected - `dr_mode = "peripheral"`
+correctly disables host mode), there was no way to interactively debug
+the USB gadget issue at the on-screen shell. `CONFIG_DYNAMIC_DEBUG` is
+off in this kernel, so `dwc3`/`dwc3-qcom-legacy`'s `dev_dbg()` calls are
+compiled out entirely - their silence in the earlier `last_kmsg` capture
+proved nothing either way.
+
+Added an automatic diagnostics block to `kernel/initramfs/init`, printed
+before the shell so it's visible without any input device: platform
+devices matching usb/dwc, `/sys/class/udc` listing, the deferred-probe
+list (`/sys/kernel/debug/devices_deferred`), and dwc3/PHY-related dmesg
+lines. Rebuilt just the initramfs cpio + uniLoader (kernel Image
+unchanged), packaged, flashed.
+
+**Tested - found the answer immediately**: `platform a600000.usb:
+deferred probe pending: dwc3: failed to initialize core` /
+`platform: supplier 88e3000.phy not ready`. `dwc3` core itself is fine -
+it's permanently waiting on its USB2 HS PHY (`usb_1_hsphy`, compatible
+`"qcom,usb-snps-hs-7nm-phy"`), which never appears.
+
+## Round 37 (2026-09-19, same day): the real fix - PHY driver built as a
+module, exact same class of bug as `CONFIG_DRM_MSM=m`
+
+Traced the PHY's driver directly: `CONFIG_PHY_QCOM_USB_SNPS_FEMTO_V2`
+(`drivers/phy/qualcomm/phy-qcom-snps-femto-v2.c`) defaults to `=m`, and
+this minimal initramfs has no module-loading support at all - identical
+root cause shape to Round 35's `CONFIG_DRM_MSM=m` never loading. Forced
+it built-in in `kernel/config/gts7l.fragment`. This one actually needs a
+full kernel rebuild (unlike Round 34-36's DTB/ramdisk-only changes) since
+PHY drivers link directly into `vmlinux`. Re-merged the fragment,
+`olddefconfig`, rebuilt `Image`, rebuilt uniLoader with the fresh
+kernel blob, packaged via the same proven method (byte-exact
+verification passed), flashed.
+
+### Tested: this is the fix - USB gadget console works
+
+Owner's report: the tablet's USB gadget strings
+(`"UbuntuTabS7 project"` / `"gts7l mainline bring-up console"`, set in
+`kernel/initramfs/init`) showed up as a real device connection
+notification on the host PC. Opened a serial terminal against the new
+`/dev/ttyACM0`/COM port and landed directly on the tablet's live `ash`
+shell prompt over USB - genuine two-way interactive access, no more
+reboot-and-read-last_kmsg cycle needed for anything short of a kernel
+panic. `whoami: unknown uid 0` is expected (no `/etc/passwd` in this
+bare initramfs); an `ls` error worth double-checking for a possible
+line-ending/echo artifact on the gadget serial link, not investigated
+further yet.
+
+**This is Phase 1's exit criteria fully exceeded**: interactive shell
+access now works over both the physical display and USB serial,
+independent of each other. `boot` = this round's PHY-fixed build,
+`dtbo`/stock `dtb`/`ramdisk.cpio` untouched throughout every round since
+Round 13's pivot. `rp`/`ro.bootloader` reconfirmed unchanged before and
+after flashing.

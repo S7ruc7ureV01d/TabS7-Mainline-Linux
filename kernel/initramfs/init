@@ -27,6 +27,26 @@
 
 echo "=== gts7l Phase 1 test initramfs (Round 32) ==="
 
+# Round 36 (docs/kernel-boot-debugging.md): debugging why /sys/class/udc
+# stays empty (no USB gadget console). CONFIG_DYNAMIC_DEBUG is off in
+# this kernel, so dwc3/dwc3-qcom-legacy's dev_dbg() calls are compiled
+# out entirely - their silence in dmesg proves nothing either way. No
+# USB-OTG keyboard works either (host mode is correctly disabled,
+# dr_mode = "peripheral"), so there's no way to type at this shell -
+# printing everything needed automatically, before the shell, so it's
+# on screen without needing any input.
+/bin/busybox mkdir -p /sys/kernel/debug
+/bin/busybox mount -t debugfs none /sys/kernel/debug 2>/dev/null
+echo "--- platform devices matching usb/dwc ---"
+/bin/busybox ls /sys/bus/platform/devices/ 2>&1 | /bin/busybox grep -i "usb\|dwc\|a600000\|a6f8800"
+echo "--- /sys/class/udc ---"
+/bin/busybox ls -l /sys/class/udc/ 2>&1
+echo "--- deferred probe list ---"
+/bin/busybox cat /sys/kernel/debug/devices_deferred 2>&1
+echo "--- dwc3/usb related dmesg lines ---"
+/bin/busybox dmesg 2>&1 | /bin/busybox grep -i "usb\|dwc\|phy\|extcon\|role"
+echo "--- end Round 36 USB diagnostics ---"
+
 # USB gadget serial console (configfs ACM) - best-effort, never let a
 # failure here block reaching the fallback shell below.
 /bin/busybox mkdir -p /sys/kernel/config
