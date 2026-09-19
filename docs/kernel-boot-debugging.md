@@ -2895,3 +2895,109 @@ Tablet state at time of writing: `boot` = this round's watchdog-arm
 build, `dtb`/`dtbo`/`ramdisk.cpio` = stock, untouched throughout. `rp`/
 `ro.bootloader` reconfirmed unchanged before flashing. **Awaiting
 hardware test result.**
+
+### Tested: no auto-reset, no new crash-dump entry either
+
+Owner's report: still no self-reset, forced a manual reboot after ~1
+minute. Confirmed via a pre/post snapshot of `/dev/block/by-name/debug`
+(`work/debug_partition_pre_round28.bin` vs
+`work/debug_partition_post_round28.bin`) - completely unchanged, `RWC=81`
+still the newest entry. The directly-armed hardware watchdog didn't fire
+either, even though arming it happens in uniLoader's *own* code, before
+the jump - a stronger negative result than a kernel-side detector not
+arming, since this doesn't depend on the kernel reaching any particular
+point at all.
+
+Four independent techniques in a row have now produced no usable
+evidence: a guessed DRAM address, a ramoops-region address (contested,
+not actually exclusive), kernel-side lockup detection, and a directly
+armed hardware watchdog. Discussed this honestly with the owner rather
+than trying a fifth blind guess - real options laid out: get actual UART
+hardware, fall back to Round 13's proven state and pursue the known,
+scoped clock-driver problem instead of an unknown one, or reconsider
+whether the project's real goal (a working mainline-adjacent Linux
+system) is better served by a proven downstream-kernel path (matching
+every other real success story found for this device family) than by
+continuing to chase genuine upstream mainline blind.
+
+## Round 29 (2026-09-19, same day): a real answer found via research - a
+byte-compatible sec_log_buf console, adapted from a working mainline
+Samsung/Qualcomm port
+
+The owner asked directly what kernel the S9 Ultra reference project
+actually used, given the downstream-kernel pivot felt like it defeated
+this project's actual goal. Checked directly rather than from memory:
+their kernel source tree is literally named `linux-mainline`
+(`references/postmarketos-galaxy-tab-s9-ultra/scripts/
+build-android-v4-bundle.sh` line 216, `git -C "$base/linux-mainline"`)
+and their package is `linux-samsung-gts9uwifi-mainline` - genuinely
+upstream-based, not a downstream fork, confirming their whole project is
+the same kind of effort as this one, not a different category.
+
+**Found the actual answer in their own patch set**:
+`pmaports/device/testing/linux-samsung-gts9uwifi-mainline/
+add-samsung-sec-log-console.patch` adds a small, real mainline printk
+console driver (`drivers/soc/qcom/samsung-gts9uwifi-sec-log.c`) that
+writes directly into Samsung's own persistent `sec_log_buf` ring - the
+*exact* mechanism `/proc/last_kmsg` reads from, and the one this project
+has used successfully, over and over, all session. A companion patch,
+`ignore-console-null.patch`, makes ABL's appended `console=null` a
+no-op (not directly needed here, since this project already forces the
+cmdline via `CONFIG_CMDLINE_FORCE`, but kept as a reference/precedent).
+
+**Confirmed the exact on-disk format matches this device's own real
+downstream source exactly** -
+`references/gts7l/include/linux/samsung/debug/sec_log_buf.h`:
+`struct sec_log_buf { u32 boot_cnt; u32 magic; u32 idx; u32 prev_idx;
+char buf[]; }`, `SEC_LOG_MAGIC = 0x4d474f4c` ("LOGM") - byte-identical
+field names/order/types and magic value to the S9 Ultra patch's own
+`struct sec_log_header`, because Samsung uses this exact mechanism across
+its whole device lineup. This project's version is actually simpler than
+the reference: since TWRP's own kernel *already* reads this format
+correctly via its own `sec_log_buf.c` driver (confirmed directly in this
+device's real source), no new reader needs to be written at all - only a
+byte-compatible writer.
+
+**Found the real, live address directly** - not guessed, not
+reverse-engineered from a devicetree node (there isn't one; downstream
+passes it via a cmdline parameter instead): `adb shell "cat /proc/cmdline
+| grep sec_log"` on the currently-booted stock/TWRP kernel returned
+`sec_log=0x200000@0x9F200000` directly - the real, confirmed-live
+physical address and size of this exact buffer on this exact device.
+
+**Implemented directly in `init/main.c`** (not as a separate driver -
+this project's kernel needs it registered far earlier than the reference
+patch's `core_initcall_sync` timing, since Round 24 already showed this
+kernel's hang happens before even `lockup_detector_init()` can arm,
+which is itself earlier than any initcall level). Added
+`early_sec_log_init()`, called immediately after `setup_arch(&command_line)`
+returns - the earliest point on arm64 where the kernel's real linear
+map is established and a plain `phys_to_virt()` access to ordinary RAM
+is safe, confirmed by checking `start_kernel()`'s own first `pr_notice()`
+call (right before `setup_arch()`) proves the printk log-buffer
+infrastructure itself needs no special init at all. Registers a
+`struct console` with `CON_ENABLED | CON_PRINTBUFFER | CON_ANYTIME`
+(`CON_PRINTBUFFER` replays everything already buffered since boot, same
+as the reference patch's own flag choice) and a `write` callback matching
+the real downstream driver's own ring-buffer wraparound logic exactly
+(`references/gts7l/drivers/samsung/debug/sec_log_buf.c`,
+`__sec_log_buf_write()`).
+
+**Also reserved the region in the devicetree**
+(`kernel/dts/sm8250-samsung-gts7l.dts`, `&{/reserved-memory} {
+sec_log_region@9f200000 { reg = <0x0 0x9f200000 0x0 0x200000>; }; };`) -
+deliberately without `no-map`, matching this file's own splash-region
+convention, since `early_sec_log_write()` needs this region to stay part
+of the kernel's ordinary linear map for `phys_to_virt()` to work, while
+still preventing the kernel's own allocator from handing this physical
+range out to anything else.
+
+Rebuilt kernel Image + DTB (both confirmed correct - `fdtget` on the new
+DTB shows the reserved-memory node present at the right address),
+rebuilt uniLoader with the fresh blobs, packaged via the same proven
+method (byte-exact verification passed), flashed.
+
+Tablet state at time of writing: `boot` = this round's sec_log-console
+build, `dtb`/`dtbo`/`ramdisk.cpio` = stock, untouched throughout. `rp`/
+`ro.bootloader` reconfirmed unchanged before flashing. **Awaiting
+hardware test result.**
