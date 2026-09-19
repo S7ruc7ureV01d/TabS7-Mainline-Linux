@@ -76,6 +76,36 @@ static void print_marker(const char *label, unsigned long long addr)
 static int gts7l_late_init(void)
 {
 	/*
+	 * Round 29b (docs/kernel-boot-debugging.md) - the sec_log early
+	 * console (init/main.c) never wrote anything either, same as
+	 * Round 25/26's head.S marker at the kernel's literal first
+	 * instruction. Two independent write points, at two different
+	 * stages, both silent - pointing at the jump from uniLoader to the
+	 * kernel itself, not anything kernel-side. uniLoader is
+	 * position-independent and could be running from a different
+	 * physical address than TEXT_BASE (0x90600000) assumes; if ABL
+	 * actually loads it somewhere overlapping CONFIG_PAYLOAD_ENTRY
+	 * (0x91000000) or CONFIG_RAMDISK_ENTRY (0x94000000), the memcpy()
+	 * in arch_load_kernel() - which runs while uniLoader's own code is
+	 * still executing - could be overwriting uniLoader's own live
+	 * code/stack, corrupting everything from that point on, including
+	 * the jump itself. Print uniLoader's own real runtime execution
+	 * address (via a PC-relative `adr`, not a plain C symbol reference,
+	 * since this build isn't real ELF PIE - a plain `&symbol` would
+	 * just embed the link-time constant) to check directly, cheaply,
+	 * before assuming and fixing blind.
+	 */
+	{
+		unsigned long pc;
+		unsigned int hi, lo;
+
+		asm volatile("adr %0, ." : "=r"(pc));
+		hi = (unsigned int)((unsigned long long)pc >> 32);
+		lo = (unsigned int)((unsigned long long)pc & 0xffffffffU);
+		printk(KERN_INFO, "uniLoader runtime PC:\n");
+		printk(KERN_INFO, "%x %x\n", hi, lo);
+	}
+	/*
 	 * Round 27: moved both markers into unused padding inside the real
 	 * ramoops@9fa00000 carveout - proven, by direct repeated evidence
 	 * throughout this project, to survive the owner's hard-reboot

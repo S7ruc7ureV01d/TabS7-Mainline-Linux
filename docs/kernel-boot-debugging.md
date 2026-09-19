@@ -3001,3 +3001,43 @@ Tablet state at time of writing: `boot` = this round's sec_log-console
 build, `dtb`/`dtbo`/`ramdisk.cpio` = stock, untouched throughout. `rp`/
 `ro.bootloader` reconfirmed unchanged before flashing. **Awaiting
 hardware test result.**
+
+### Tested: still pure ABL/XBL text, zero kernel-level content - the
+early sec_log console never wrote anything either
+
+`/proc/last_kmsg` after this test: identical shape to every prior round -
+multiple full `EDTBO check fail` → `Shutting Down UEFI Boot Services`
+sessions, nothing whatsoever from the kernel (`early_sec_log_init()`,
+registered right after `setup_arch()` returns - about as early as
+architecturally possible - never wrote anything). Combined with Round
+25/26's head.S marker (at the kernel's literal first instruction) also
+never writing anything, this is now **two independent write points, at
+two different very-early stages, both silent** - strong evidence the
+problem isn't happening deep inside the kernel's own boot sequence at
+all, but at or before the kernel's actual first instruction.
+
+**New working theory**: uniLoader is built `CONFIG_POSITION_INDEPENDENT`
+and could be loaded by ABL at a different physical address than
+`CONFIG_TEXT_BASE` (0x90600000) assumes - genuinely unknown, since this
+project has no way to directly observe where ABL places the `kernel`
+partition's payload. If uniLoader's own ~42MiB actually gets loaded
+somewhere overlapping `CONFIG_PAYLOAD_ENTRY` (0x91000000) or
+`CONFIG_RAMDISK_ENTRY` (0x94000000), the `memcpy()` in
+`arch_load_kernel()` - which runs *while uniLoader's own code is still
+executing* - could be silently overwriting uniLoader's own live
+code/stack mid-flight, corrupting everything downstream including the
+jump itself. This would explain the silence at *both* write points
+without needing anything to be wrong kernel-side at all.
+
+**Cheap, direct check added** rather than guessing a fix blind:
+`board-gts7l.c`'s `late_init` now prints uniLoader's own real runtime
+execution address, computed via a PC-relative `adr` instruction (not a
+plain C symbol reference - this build isn't real ELF PIE, so `&symbol`
+would just embed the link-time constant, not the true runtime address).
+Rebuilt uniLoader only (kernel/DTB unchanged from Round 29), packaged via
+the same proven method (byte-exact verification passed), flashed.
+
+Tablet state at time of writing: `boot` = this round's PC-check build,
+`dtb`/`dtbo`/`ramdisk.cpio` = stock, untouched throughout. `rp`/
+`ro.bootloader` reconfirmed unchanged before flashing. **Awaiting
+hardware test result.**
