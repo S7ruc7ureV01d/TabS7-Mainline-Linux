@@ -1,26 +1,43 @@
 diff --git a/arch/arm64/kernel/head.S b/arch/arm64/kernel/head.S
-index 87a822e5c..dc4bb4c38 100644
+index 87a822e5c..12ae9ea13 100644
 --- a/arch/arm64/kernel/head.S
 +++ b/arch/arm64/kernel/head.S
-@@ -83,6 +83,29 @@
+@@ -83,6 +83,46 @@
  	 *  x21        primary_entry() .. start_kernel()        FDT pointer passed at boot in x0
  	 */
  SYM_CODE_START(primary_entry)
 +	/*
-+	 * Round 25 debug marker (docs/kernel-boot-debugging.md,
++	 * Round 27 debug marker (docs/kernel-boot-debugging.md,
 +	 * UbuntuTabS7 project) - write a known, otherwise-impossible-by-
-+	 * coincidence 64-bit pattern to a fixed physical address in this
-+	 * device's known-free memory gap, before anything else runs. MMU is
-+	 * guaranteed off here per the mandatory arm64 boot protocol
-+	 * precondition, so this plain physical write is always safe
-+	 * regardless of how we were entered. Explicit cache-clean + barrier
-+	 * so the write reaches real DRAM (not just a cache line, which does
-+	 * not survive a reset) before any later crash/hang/reset - the same
-+	 * warm-reset DRAM-persistence principle pstore/ramoops already
-+	 * relies on. Read back from TWRP after a hang to tell whether the
-+	 * kernel's very first instructions ever actually executed.
++	 * coincidence 64-bit pattern to a fixed physical address, before
++	 * anything else runs. MMU is guaranteed off here per the mandatory
++	 * arm64 boot protocol precondition, so this plain physical write is
++	 * always safe regardless of how we were entered.
++	 *
++	 * Address moved from Round 25's own guess at "free" DRAM
++	 * (0x95000000) to 0x9fac4000 - unused padding *inside* the real
++	 * `ramoops@9fa00000` carveout this device's own DTB already
++	 * declares (sub-buffers only use the first 0xc4000 of its 0x100000
++	 * window). Round 26 proved the guessed address doesn't survive the
++	 * owner's hard-reboot recovery combo (KPDPWR_AND_RESIN) even though
++	 * uniLoader's own canary write - which definitely executes every
++	 * single cycle - didn't persist there either. But this project has
++	 * directly, repeatedly read back real, accurate `/proc/last_kmsg`/
++	 * `console-ramoops` content after that *exact* same combo throughout
++	 * this entire debugging effort - real, proven evidence DRAM survives
++	 * it, specifically inside Samsung's own protected buffer regions.
++	 * The likely explanation: a full cold boot re-trains/recalibrates
++	 * the DDR PHY, scrambling most of DRAM - except the specific small
++	 * regions the SoC's own boot firmware is deliberately designed to
++	 * preserve across that retrain, like this one. An arbitrary "free"
++	 * address has no such guarantee; this one does, by direct evidence.
++	 *
++	 * Explicit cache-clean + barrier so the write reaches real DRAM (not
++	 * just a cache line, which never survives a reset) before any later
++	 * crash/hang/reset.
 +	 */
-+	movz	x9, #0x9500, lsl #16
++	movz	x9, #0x4000
++	movk	x9, #0x9fac, lsl #16
 +	movz	x10, #0xc0de
 +	movk	x10, #0xcafe, lsl #16
 +	movk	x10, #0xbeef, lsl #32

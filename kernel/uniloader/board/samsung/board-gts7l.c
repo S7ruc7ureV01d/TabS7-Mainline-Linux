@@ -76,10 +76,15 @@ static void print_marker(const char *label, unsigned long long addr)
 static int gts7l_late_init(void)
 {
 	/*
+	 * Round 27: moved both markers into unused padding inside the real
+	 * ramoops@9fa00000 carveout - proven, by direct repeated evidence
+	 * throughout this project, to survive the owner's hard-reboot
+	 * recovery combo, unlike Round 25/26's guessed "free" address.
+	 *
 	 * Kernel-written marker (arch/arm64/kernel/head.S primary_entry) -
 	 * deadbeef cafec0de means the kernel's first instructions ran.
 	 */
-	print_marker("kernel marker @ 0x95000000", 0x95000000ULL);
+	print_marker("kernel marker @ 0x9fac4000", 0x9fac4000ULL);
 	/*
 	 * uniLoader-written canary (arch/aarch64/load-kernel.c,
 	 * arch_load_kernel(), written right before the jump on the
@@ -87,7 +92,7 @@ static int gts7l_late_init(void)
 	 * marker proves this memory region is genuinely accessible/writable
 	 * DRAM and isolates the problem to the jump/kernel-entry itself.
 	 */
-	print_marker("uniLoader canary @ 0x95001000", 0x95001000ULL);
+	print_marker("uniLoader canary @ 0x9fac5000", 0x9fac5000ULL);
 	return 0;
 }
 

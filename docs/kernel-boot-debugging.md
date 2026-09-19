@@ -2757,3 +2757,60 @@ Tablet state at time of writing: `boot` = this round's canary build,
 `dtb`/`dtbo`/`ramdisk.cpio` = stock, untouched throughout. `rp`/
 `ro.bootloader` reconfirmed unchanged before flashing. **Awaiting
 hardware test result.**
+
+### Tested: both markers came back `ffffffff` even after a confirmed
+second cycle - the real cause was the chosen address, not the technique
+
+Confirmed directly with the owner this was a genuine second-cycle read
+(flash → boot → hang → hard-reboot via `KPDPWR_AND_RESIN` → this
+screen), and confirmed via `md5sum /dev/block/by-name/boot` that Round 26
+really was what got tested. Both markers still `ffffffff ffffffff` -
+including uniLoader's own canary, which definitely executes every single
+cycle (uniLoader reliably reaches "Booting kernel..." every time). Also
+confirmed with the owner: **no software `PS_HOLD` reset has happened at
+any point in this whole line of testing** - every recovery back to TWRP
+has been the owner's manual hard-reboot combo.
+
+**Reconsidered against this project's own accumulated evidence rather
+than guessing again**: `/proc/last_kmsg` and `console-ramoops` have been
+read back successfully, with real, accurate, sequential content, after
+*this exact same reset combo* dozens of times throughout this entire
+debugging effort (every single round's evidence-gathering has depended on
+it). That's real, repeated, direct proof DRAM survives this combo -
+contradicting a first-pass "hard reboot destroys DRAM" theory. The better
+explanation: a full cold boot likely re-trains/recalibrates the DDR PHY,
+which can scramble most of DRAM - *except* the specific small regions the
+SoC's own boot firmware is deliberately designed to preserve across that
+retrain, like Samsung's own `ramoops`/`last_kmsg` buffer. Round 25/26's
+guessed "free" address (`0x95000000`, chosen only because it fell outside
+the devicetree's reserved-memory list) never had any such guarantee.
+
+## Round 27 (2026-09-19, same day): moved both markers into the real,
+proven-persistent `ramoops` carveout
+
+Moved both the kernel-side marker (`arch/arm64/kernel/head.S`) and
+uniLoader's own canary (`arch/aarch64/load-kernel.c`) out of the guessed
+address and into unused padding *inside* this device's real, DTB-declared
+`ramoops@9fa00000` carveout (size `0x100000`; its own sub-buffers -
+record/console/ftrace/pmsg - only use the first `0xc4000`, leaving
+`0x3c000` of genuinely free padding at the end): `0x9fac4000` for the
+kernel marker, `0x9fac5000` for uniLoader's canary - the same region
+this project has directly, repeatedly read real content back from after
+the owner's exact reset combo, throughout this whole debugging effort.
+
+**Caught and fixed a real bug while doing this**: the new address
+(`0x9fac4000`) has non-zero low 16 bits, unlike Round 25/26's
+`0x95000000` (whose low half is all zero) - a single `movz x9, #0x9fac,
+lsl #16` would have silently built the *wrong* address (`0x9fac0000`,
+missing the `0x4000` low half entirely). Caught before flashing by
+computing the low/high 16-bit split explicitly; fixed with the correct
+`movz`+`movk` pair.
+
+Rebuilt kernel Image (`head.S` changed) and uniLoader with the fresh
+blob, packaged via the same proven method (byte-exact verification
+passed), flashed. Same two-cycle procedure as Rounds 25-26.
+
+Tablet state at time of writing: `boot` = this round's ramoops-marker
+build, `dtb`/`dtbo`/`ramdisk.cpio` = stock, untouched throughout. `rp`/
+`ro.bootloader` reconfirmed unchanged before flashing. **Awaiting
+hardware test result.**

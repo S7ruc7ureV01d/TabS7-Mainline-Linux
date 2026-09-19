@@ -15,19 +15,23 @@ void arch_load_kernel(void* kernel, void* dt, void* ramdisk)
 #endif
 
 	/*
-	 * Round 25 debug canary (docs/kernel-boot-debugging.md,
+	 * Round 27 debug canary (docs/kernel-boot-debugging.md,
 	 * UbuntuTabS7 project) - written by uniLoader itself, immediately
 	 * before the jump, at a different address than the kernel's own
-	 * primary_entry marker (0x95000000). If this canary reads back
-	 * correctly on the next boot but the kernel's marker doesn't, that
-	 * proves the 0x9500xxxx region is genuinely accessible/writable DRAM
-	 * (ruling out a hardware-protected-region explanation for the
-	 * kernel marker's absence) and isolates the problem to the jump/
-	 * kernel-entry itself, not this memory region.
+	 * primary_entry marker. Moved from Round 25/26's guessed "free" DRAM
+	 * address (0x95001000, which didn't survive the owner's hard-reboot
+	 * recovery combo even though this exact write definitely executes
+	 * every cycle) to unused padding *inside* this device's real,
+	 * DTB-declared `ramoops@9fa00000` carveout - the same region this
+	 * project has directly, repeatedly read real content back from after
+	 * that exact reset combo throughout this whole debugging effort. If
+	 * this canary reads back correctly on the next boot but the kernel's
+	 * marker doesn't, that isolates the problem to the jump/kernel-entry
+	 * itself, not DRAM retention.
 	 */
 	{
 		volatile unsigned long long *canary =
-			(volatile unsigned long long *)0x95001000ULL;
+			(volatile unsigned long long *)0x9fac5000ULL;
 		*canary = 0xc001babeb00b1e55ULL;
 		asm volatile("dc cvac, %0\n dsb sy" :: "r"(canary) : "memory");
 	}
