@@ -3236,3 +3236,68 @@ Tablet state at time of writing: `boot` = this round's simplified-init +
 USB-console build, `dtb`/`dtbo`/`ramdisk.cpio` = stock, untouched
 throughout. `rp`/`ro.bootloader` reconfirmed unchanged before flashing.
 **Awaiting hardware test result.**
+
+### Tested: no USB device, but real proof the display genuinely works -
+caught on slow-motion video
+
+No USB device enumerated. But the owner noticed something far more
+valuable: for a split second during boot, the physical LCD panel showed
+real content - the tux logo and real kernel boot text, caught on a
+phone's slow-motion camera (the whole visible window is under a second,
+matching the timestamps: `Booting Linux` to `Run /init` takes under
+0.75s per `/proc/last_kmsg`). Transcribed text included genuine kernel
+messages (`KVM: HYP mode not available`, `SquashFS: version 4.0`, key
+type registrations, `ledtrig-cpu`) and, critically:
+
+```
+simple-framebuffer 9c000000.framebuffer: framebuffer at 0x9c000000
+simple-framebuffer 9c000000.framebuffer: format=a8r8g8b8, mode=1600x2560x32, linelength=6400
+Console: switching to colour frame buffer device 200x160
+Freeing initrd memory: 720k
+simple-framebuffer 9c000000.framebuffer: fb0: simplefb registered!
+```
+
+**This directly confirms `simple-framebuffer` genuinely works on this
+device's real LCD panel** - correct geometry, correct format, `fbcon`
+successfully switches over (`200x160` character cells = `1600x2560`
+pixels at an 8x16 font, exactly right). The screen goes black
+immediately after `simplefb registered!` prints, though - and per the
+owner's follow-up capture, nothing else ever becomes visible again, even
+though `/proc/last_kmsg` confirms the kernel keeps running completely
+normally afterward, still reaching `Run /init` in every capture.
+
+**Realized mid-investigation**: `/proc/last_kmsg` can only ever show
+kernel `printk()` output (this project's own `sec_log` console, Round 29)
+- it has no visibility into userspace at all, so it can never show this
+project's own init script's `echo` output, the USB gadget setup, or a
+shell prompt. The framebuffer (when it works) is the *only* evidence
+source that can see anything past `exec /bin/busybox sh`.
+
+## Round 33 (2026-09-19, same day): `clk_ignore_unused` - the real
+explanation for the black screen, found via research
+
+Per the owner's suggestion to check online again, found the likely
+explanation directly: mainline Linux automatically disables ("gates")
+any clock with no driver holding it as in-use, fairly late in boot
+(`clk_disable_unused()`). If ABL left the display controller's own
+clocks running to actively drive the panel, and this minimal kernel has
+no MDSS/display driver to claim them (Phase 2 scope, not yet added), the
+kernel would gate those clocks right around the same late-boot window
+this project has been observing the screen go black in. `clk_ignore_unused`
+is the standard, well-known mainline kernel command-line parameter for
+exactly this class of bootloader-handoff problem - tells the clock
+framework to leave whatever the bootloader left running alone, rather
+than assuming "no driver claims it" means "safe to turn off".
+
+Added `clk_ignore_unused` to the forced cmdline in
+`kernel/config/gts7l.fragment`. Rebuilt kernel Image (cmdline-only
+change), rebuilt uniLoader with the fresh blob (confirmed uniLoader's own
+size unchanged, `CONFIG_PAYLOAD_ENTRY` still clear), packaged via the
+same proven method (byte-exact verification passed), flashed.
+
+Tablet state at time of writing: `boot` = this round's
+`clk_ignore_unused` build, `dtb`/`dtbo`/`ramdisk.cpio` = stock, untouched
+throughout. `rp`/`ro.bootloader` reconfirmed unchanged before flashing.
+**Awaiting hardware test result** - hoping the display now stays alive
+long enough to see this project's own init script and, ideally, an
+actual interactive shell prompt.
