@@ -26,6 +26,7 @@
 
 #include <dt-bindings/gpio/gpio.h>
 #include <dt-bindings/input/input.h>
+#include <dt-bindings/phy/phy.h>
 #include "sm8250-samsung-common.dtsi"
 
 /*
@@ -379,6 +380,25 @@
 	width = <1600>;
 	height = <2560>;
 	stride = <(1600 * 4)>;
+	/*
+	 * Round 38 test (2026-09-19, docs/kernel-boot-debugging.md): disabled
+	 * now that a real panel driver exists (samsung,gts7l-ppa957db1-nt36523
+	 * above). simple-framebuffer registers early and unconditionally, with
+	 * no dependency chain at all - it almost certainly wins the race to
+	 * become fbcon's console (/dev/fb0) before the real DRM/MSM device
+	 * even finishes probing (it has a long dependency chain: dispcc,
+	 * i2c8, several regulators). If fbcon never switches over to the real
+	 * DRM device, the panel driver's own .prepare()/backlight path is
+	 * never actually invoked by anything, while dispcc's probe() still
+	 * unconditionally reprograms the display PLLs (same as Round 33) -
+	 * this would produce exactly the "kernel boot text blinks via
+	 * simplefb, then blanks" symptom the owner saw, indistinguishable
+	 * from Round 33's old bug, while the new panel work never even
+	 * engages. Disabling this node removes the competing early fbdev
+	 * device entirely so the real DRM/MSM generic fbdev-emulation
+	 * (CONFIG_DRM_MSM_KMS_FBDEV) is the only console candidate.
+	 */
+	status = "disabled";
 };
 
 &{/chosen} {
@@ -653,6 +673,194 @@
  * dispcc probing properly alongside a real MDSS/DPU/panel driver that
  * redoes the full re-init sequence, not avoiding it.
  */
-&dispcc {
-	status = "disabled";
+/*
+ * Phase 2 (2026-09-19, docs/phase2-panel-scoping.md): re-enabling dispcc -
+ * Round 35's disable was explicitly a Phase 1 stopgap (see the comment
+ * above this one), needed only because nothing existed to redo the
+ * power-sequenced re-init dispcc's own probe requires. Now that a real
+ * panel driver exists (below), dispcc probing and reprogramming the
+ * display PLLs is exactly the correct, needed behavior - the panel
+ * driver's own prepare()/init_sequence does the actual re-init
+ * afterward. No override needed - dispcc's default status in
+ * sm8250.dtsi is already "okay" once this block is removed. This is
+ * left in place as a comment purely as a pointer for anyone diffing
+ * against the Round 35 state - there was no actual disable to reverse
+ * by the time this file compiles, it's the absence of that override.
+ */
+
+/*
+ * Phase 2 (2026-09-19, docs/phase2-panel-scoping.md): display bring-up -
+ * Novatek NT36523 driving a CST PPA957DB1 WQXGA LCD panel, dual-DSI,
+ * C-PHY, video mode. Every value below is sourced directly from
+ * Samsung's own GPL kernel source and cross-checked, not assumed - see
+ * docs/phase2-panel-scoping.md for the full recon writeup:
+ *
+ *  - Panel timings/DSI mode/lane count/physical size:
+ *    references/gts7l/techpack/display/msm/samsung/NT36523_PPA957DB1/
+ *    dsi_panel_NT36523_PPA957DB1_wqxga_video.dtsi
+ *  - reset-gpio (tlmm 82), the two fixed regulators (tlmm 135 "lcd-vdd",
+ *    tlmm 93 "lcd-buck"), and the ISL98608 bias IC's real bus
+ *    (qupv3_se8_i2c, i.e. mainline's &i2c8 - NOT an i2c-gpio bus, that
+ *    would have been a wrong assumption; confirmed via this overlay's
+ *    own symbol table, `qupv3_se8_i2c = "/fragment@156:target:0"`):
+ *    references/gts7l/arch/arm64/boot/dts/samsung/gts7l/
+ *    kona-sec-gts7l-eur-overlay-r07.dts, fragments 152/155/156.
+ *  - DSI controller/PHY analog supplies (vreg_l9a_1p2 / vreg_l5a_0p88,
+ *    both PM8150 LDOs already declared by sm8250-samsung-common.dtsi's
+ *    PMIC regulator nodes): cross-checked against this device's OWN
+ *    downstream SoC-level file (not the panel-specific overlay),
+ *    references/gts7l/arch/arm64/boot/dts/vendor/qcom/kona-sde.dtsi -
+ *    `vdda-1p2-supply = <&pm8150_l9>;` on both mdss_dsi0/1,
+ *    `vdda-0p9-supply = <&pm8150_l5>;` on both DSI PHYs. Independently
+ *    matches Xiaomi's elish (a comparable mainline SM8250 tablet, see
+ *    the scoping doc) using the exact same LDO numbers for the exact
+ *    same rails - two different OEMs landing on the same PMIC LDO
+ *    assignment strongly suggests this is Qualcomm's own SM8250
+ *    reference-design wiring for these particular rails, not a
+ *    coincidence.
+ *  - The panel driver itself is a new compatible entry
+ *    ("samsung,gts7l-ppa957db1-nt36523") added to mainline's existing
+ *    drivers/gpu/drm/panel/panel-novatek-nt36523.c (not a new driver
+ *    from scratch - that file already supports this exact chip family
+ *    on Xiaomi's elish). Its on-command sequence was transcribed
+ *    mechanically (a Python script, not hand-retyped) from the same
+ *    downstream dtsi referenced above.
+ */
+&mdss {
+	status = "okay";
+};
+
+&mdss_dsi0 {
+	vdda-supply = <&vreg_l9a_1p2>;
+	qcom,dual-dsi-mode;
+	qcom,sync-dual-dsi;
+	qcom,master-dsi;
+	status = "okay";
+
+	display_panel: panel@0 {
+		compatible = "samsung,gts7l-ppa957db1-nt36523";
+		reg = <0>;
+		vddio-supply = <&fixed_reg_lcd_1p8>;
+		reset-gpios = <&tlmm 82 GPIO_ACTIVE_LOW>;
+
+		ports {
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			port@0 {
+				reg = <0>;
+
+				panel_in_0: endpoint {
+					remote-endpoint = <&mdss_dsi0_out>;
+				};
+			};
+
+			port@1 {
+				reg = <1>;
+
+				panel_in_1: endpoint {
+					remote-endpoint = <&mdss_dsi1_out>;
+				};
+			};
+		};
+	};
+};
+
+&mdss_dsi0_out {
+	data-lanes = <0 1 2>;
+	remote-endpoint = <&panel_in_0>;
+};
+
+&mdss_dsi0_phy {
+	vdds-supply = <&vreg_l5a_0p88>;
+	phy-type = <PHY_TYPE_CPHY>;
+	status = "okay";
+
+	/*
+	 * Round 40 test (2026-09-19, docs/kernel-boot-debugging.md): real
+	 * hardware showed "DSI PLL(0) lock failed, status=0x00000000" even
+	 * with refgen fixed. Mainline's dsi_phy_7nm.c hardcodes generic
+	 * PHY analog trim constants with no override mechanism upstream -
+	 * added one (a project patch, mirroring dsi_phy_10nm.c's own
+	 * existing `parse_dt_properties`/tuning_cfg precedent) and wired in
+	 * Samsung's own board-specific calibration values from
+	 * references/gts7l/techpack/display/msm/samsung/NT36523_PPA957DB1/
+	 * dsi_panel_NT36523_PPA957DB1_wqxga_video.dtsi - see
+	 * docs/phase2-panel-scoping.md for the full comparison against
+	 * mainline's real (no-quirk-cphy) defaults.
+	 */
+	qcom,phy-vreg-ctrl-0 = <0x50>;
+	qcom,phy-str-swi-cal-sel-ctrl = <0x04>;
+	qcom,phy-rescode-offset-top-ctrl = <0x1f>;
+	qcom,phy-rescode-offset-bot-ctrl = <0x1f>;
+};
+
+&mdss_dsi1 {
+	vdda-supply = <&vreg_l9a_1p2>;
+	qcom,dual-dsi-mode;
+	qcom,sync-dual-dsi;
+	/* DSI1 is slave, so use DSI0 clocks - same convention as elish. */
+	assigned-clock-parents = <&mdss_dsi0_phy DSI_BYTE_PLL_CLK>,
+				 <&mdss_dsi0_phy DSI_PIXEL_PLL_CLK>;
+	status = "okay";
+};
+
+&mdss_dsi1_out {
+	data-lanes = <0 1 2>;
+	remote-endpoint = <&panel_in_1>;
+};
+
+&mdss_dsi1_phy {
+	vdds-supply = <&vreg_l5a_0p88>;
+	phy-type = <PHY_TYPE_CPHY>;
+	status = "okay";
+
+	/* Same PHY trim override as &mdss_dsi0_phy above - both PHYs on
+	 * this board are the same silicon instance, same panel/trim.
+	 */
+	qcom,phy-vreg-ctrl-0 = <0x50>;
+	qcom,phy-str-swi-cal-sel-ctrl = <0x04>;
+	qcom,phy-rescode-offset-top-ctrl = <0x1f>;
+	qcom,phy-rescode-offset-bot-ctrl = <0x1f>;
+};
+
+/*
+ * Two GPIO-controlled fixed regulators, matching Samsung's own
+ * "fixed_reg_lcd_1p8"/"fixed_reg_buck_en" declarations exactly
+ * (kona-sec-gts7l-eur-overlay-r07.dts fragment@155) - both
+ * `regulator-boot-on` there too, so no explicit driver-side enable call
+ * is needed for either; the regulator core turns them on during boot
+ * before any consumer probes.
+ */
+/ {
+	fixed_reg_lcd_1p8: regulator-lcd-vdd {
+		compatible = "regulator-fixed";
+		regulator-name = "lcd-vdd";
+		gpio = <&tlmm 135 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+		regulator-boot-on;
+	};
+
+	fixed_reg_buck_en: regulator-lcd-buck {
+		compatible = "regulator-fixed";
+		regulator-name = "lcd-buck";
+		gpio = <&tlmm 93 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+		regulator-boot-on;
+	};
+};
+
+/*
+ * ISL98608 LCD bias IC (drivers/misc/isl98608-gts7l.c) - real hardware
+ * QUP I2C instance qupv3_se8_i2c (mainline &i2c8), address 0x29, both
+ * confirmed directly from the overlay rather than assumed (see the
+ * comment block above).
+ */
+&i2c8 {
+	status = "okay";
+
+	display_buck@29 {
+		compatible = "isl98608,display_buck";
+		reg = <0x29>;
+	};
 };

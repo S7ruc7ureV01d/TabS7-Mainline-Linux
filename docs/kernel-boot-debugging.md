@@ -3470,3 +3470,274 @@ independent of each other. `boot` = this round's PHY-fixed build,
 `dtbo`/stock `dtb`/`ramdisk.cpio` untouched throughout every round since
 Round 13's pivot. `rp`/`ro.bootloader` reconfirmed unchanged before and
 after flashing.
+
+## Round 38 (2026-09-19, same day): Phase 2 first attempt - real NT36523
+panel driver, DPU, dual-DSI
+
+First real Phase 2 hardware test, per `docs/phase2-panel-scoping.md`'s
+recon. Added a new `samsung,gts7l-ppa957db1-nt36523` entry to mainline's
+existing `drivers/gpu/drm/panel/panel-novatek-nt36523.c` (not a new
+driver - that file already supports this chip family via Xiaomi's
+elish), transcribing the on-command sequence mechanically (a Python
+script parsing the raw byte array, not hand-retyped) from
+`references/gts7l/techpack/display/msm/samsung/NT36523_PPA957DB1/
+dsi_panel_NT36523_PPA957DB1_wqxga_video.dtsi`. Wrote a small new
+`drivers/misc/isl98608-gts7l.c` for the panel's separate bias IC
+(single fixed register program at probe, matching the downstream
+driver's own behavior exactly - no dynamic control either there).
+
+Devicetree (`kernel/dts/sm8250-samsung-gts7l.dts`): enabled `&mdss`,
+both DSI hosts + PHYs (dual-DSI, C-PHY, 3 lanes each), the panel node
+with `reset-gpios = <&tlmm 82 GPIO_ACTIVE_LOW>`, two `regulator-fixed`
+nodes matching Samsung's own "lcd-vdd"/"lcd-buck" GPIO-controlled rails
+exactly, and the ISL98608 bias IC on `&i2c8` (confirmed via the board
+overlay's own symbol table to be a real QUP hardware I2C bus,
+`qupv3_se8_i2c` - deliberately checked rather than assumed, since the
+touchscreen on the same overlay uses an unrelated bitbang i2c-gpio bus
+that would have been the wrong reference to copy). DSI controller/PHY
+analog supplies (`vreg_l9a_1p2`/`vreg_l5a_0p88`, both PM8150 LDOs
+already declared by the shared common.dtsi) cross-checked against this
+device's own downstream SoC-level file
+(`references/gts7l/arch/arm64/boot/dts/vendor/qcom/kona-sde.dtsi`) -
+independently matches Xiaomi elish's own choice for the same rails,
+strong cross-OEM confirmation this is Qualcomm's SM8250 reference
+wiring, not assumed from a different board. Removed Round 35's
+`&dispcc { status = "disabled"; };` override - a real panel driver now
+exists to redo dispcc's PLL re-init properly.
+
+Kernel config: `CONFIG_DRM`/`CONFIG_DRM_MSM` both default to `=m` - same
+no-module-loading problem as Rounds 35/37. Forcing `CONFIG_DRM_MSM=y`
+alone wasn't enough - it silently stayed capped at `=m` because two of
+its own dependencies (`CONFIG_QCOM_LLCC`, `CONFIG_QCOM_OCMEM`) were also
+`=m` (`depends on QCOM_LLCC || QCOM_LLCC=n` - a built-in driver can't
+depend on a loadable module). Found by checking the actual post-merge
+`.config`, not assuming the first fragment change was sufficient. Also
+force-enabled `CONFIG_DRM_KMS_HELPER`/`CONFIG_DRM_DISPLAY_HELPER`,
+`CONFIG_I2C_QCOM_GENI` (for the real `&i2c8` hardware bus),
+`CONFIG_BACKLIGHT_CLASS_DEVICE`, and the two new driver symbols
+themselves.
+
+**Caught before flashing**: the kernel Image grew from ~41MB to ~43MB
+with the new DRM/DPU/DSI stack, which pushed uniLoader's own total
+built size (44,478,464 bytes, since it embeds the Image/DTB/ramdisk as
+data) past the old `CONFIG_PAYLOAD_ENTRY=0x93000000` - the exact same
+class of bug as Round 20/30, caught this time by directly computing
+`TEXT_BASE + built size` before flashing rather than assuming the old
+addresses were still safe. Moved to `CONFIG_PAYLOAD_ENTRY=0x94000000`,
+`CONFIG_RAMDISK_ENTRY=0x98000000` (`kernel/uniloader/configs/
+gts7l_defconfig`) - confirmed via computation to leave 15.6 MiB and
+22.9 MiB margins respectively, both still clear of every real
+reserved-memory carveout (checked against Round 34's live-hardware
+audit).
+
+Full clean kernel + DTB + uniLoader rebuild, packaged via the same
+proven method (byte-exact verification passed on kernel/dtb/ramdisk
+sections all independently). Flashed. `rp`/`ro.bootloader` reconfirmed
+unchanged before and after.
+
+**Not yet tested on hardware as of writing this entry.** This is a
+substantially bigger, riskier change than any Phase 1 round (real
+analog panel power sequencing, an undocumented vendor DCS command
+dump, a bias IC on a real i2c bus) - unlike Phase 1's clean successes,
+multiple test/adjust cycles should be expected here, not a first-try
+success.
+
+### Tested: kernel definitely boots (real gadget strings + same simplefb
+blink seen), but zero sec_log content and screen still went blank
+
+Owner's report: USB gadget enumerated with our own descriptor strings
+("UbuntuTabS7 project" / "gts7l mainline bring-up console") - proof
+`/init` ran, same as every successful round since 37. Screen showed the
+same split-second kernel-log blink as every prior round, then went
+blank; the backlight itself turned off some time later. `/proc/last_kmsg`
+pulled afterward showed **zero** kernel-tagged content at all - purely
+`[ XBL ]`/`[ ABL ]` bootloader text (including ABL's own splash
+panel-power-up routine, which independently cross-confirmed
+`RESET_GPIO: 82` and `VDDI_GPIO: 135` - exactly matching the values
+this round derived from the downstream Linux driver, from a completely
+different source). No `/dev/mem` available on this TWRP to pull the raw
+sec_log carveout directly; the empty last_kmsg is most likely this
+round's kernel simply running far longer than any prior round (all of
+which crashed/hung within ~1s) and wrapping the 2MB ring buffer past
+the point of overwriting its own early boot banner - not proof the
+kernel didn't run, given the other direct evidence that it did.
+
+## Round 39 (2026-09-19, same day): removed the still-present Round 22
+`simple-framebuffer` node - it was still competing with the new panel
+
+Realized the devicetree still had Round 22's `simple-framebuffer` node
+enabled *alongside* the new real DRM/DPU/panel driver from Round 38.
+`simple-framebuffer` registers early with no dependency chain at all,
+almost certainly winning the race to become `fbcon`'s console (`/dev/fb0`)
+before the real DRM/MSM device - which has a long dependency chain
+(`dispcc`, `&i2c8`, several regulators) - ever finishes probing. If
+`fbcon` never switches to the real DRM device, the new panel driver's
+own `.prepare()`/backlight path is never actually invoked by anything,
+while `dispcc`'s probe() still unconditionally reprograms the display
+PLLs (the exact Round 33 mechanism) - this would produce precisely the
+"blink via simplefb, then blank" symptom just observed, with the new
+Phase 2 work never actually engaging at all.
+
+Disabled the `framebuffer@9c000000` devicetree node
+(`status = "disabled"`) so the real DRM/MSM generic fbdev-emulation
+(`CONFIG_DRM_MSM_KMS_FBDEV`) is the only console candidate left.
+DTB/uniLoader-only rebuild (kernel Image unchanged), packaged via the
+same proven method (byte-exact verification passed), flashed.
+`rp`/`ro.bootloader` reconfirmed unchanged before and after.
+
+**Not yet tested on hardware as of writing this entry.**
+
+### Tested: real dmesg finally captured over the USB gadget console (not
+last_kmsg) - two concrete DSI probe failures found
+
+Owner ran `dmesg | grep -iE "drm|panel|dsi|dispcc|nt36523|isl98608|mdss|
+dpu|i2c8|a80000"` directly at the live USB shell - the console genuinely
+works as a debug tool now, no more reboot-and-pull-last_kmsg cycle
+needed for this class of problem. Found two things:
+
+1. `DSI PLL(0) lock failed, status=0x00000000` in `dsi_phy_driver_probe()`.
+2. `platform ae94000.dsi: deferred probe pending: msm_dsi: Failed to get
+   supply 'refgen'` (both DSI hosts).
+
+The `refgen` devicetree node itself (`sm8250.dtsi`'s
+`qcom,sm8250-refgen-regulator`) needs no status override - already
+enabled by default. Its actual driver,
+`CONFIG_REGULATOR_QCOM_REFGEN`, defaults to `=m` - the same
+no-module-loading bug as `CONFIG_DRM_MSM`/
+`CONFIG_PHY_QCOM_USB_SNPS_FEMTO_V2` before it (Rounds 35/37/38), just a
+third instance of the identical pattern. A real driver exists
+(`drivers/regulator/qcom-refgen-regulator.c`), it just never got to
+register. Likely also the direct cause of the PLL lock failure, since
+refgen plausibly supplies the bias/reference voltage the DSI PHY's
+analog PLL needs to lock at all - a testable hypothesis, not yet
+separately confirmed.
+
+Proactively checked the rest of the new dependency chain for the same
+`=m` pattern before another round-trip: `CONFIG_QCOM_GPI_DMA=m` is the
+one other candidate (`&i2c8` declares GPI DMA channels), but
+`i2c-qcom-geni.c` only requires a working DMA channel if this specific
+GENI SE instance's hardware FIFO is disabled (a real per-instance
+hardware capability flag, not a devicetree choice) - and the dmesg
+capture showed zero i2c8/geni-i2c/isl98608-related errors at all,
+meaning that bus already probed fine as-is. Left it alone rather than
+forcing every `=m` symbol found.
+
+## Round 40 (2026-09-19, same day): force `CONFIG_REGULATOR_QCOM_REFGEN`
+built-in
+
+Kernel config only change. Re-merged the fragment, `olddefconfig`,
+rebuilt `Image` (unchanged size - the refgen driver is tiny), rebuilt
+uniLoader with the fresh kernel blob (same 44,478,464-byte size, same
+safe `PAYLOAD_ENTRY`/`RAMDISK_ENTRY` margins as Round 38), packaged via
+the same proven method (byte-exact verification passed on kernel/dtb/
+ramdisk sections independently), flashed. `rp`/`ro.bootloader`
+reconfirmed unchanged before and after.
+
+**Not yet tested on hardware as of writing this entry.**
+
+## Round 41 (2026-09-19, same day): patched dsi_phy_7nm.c for a real
+board-specific PHY analog trim override
+
+`refgen` (Round 40) fixed one real bug but the PLL still failed to lock.
+Traced `dsi_7nm_phy_enable()`'s own bias/calibration register writes
+(`REG_DSI_7nm_PHY_CMN_VREG_CTRL_0`, `GLBL_STR_SWI_CAL_SEL_CTRL`,
+`GLBL_RESCODE_OFFSET_TOP_CTRL`/`_BOT_CTRL`) directly: mainline hardcodes
+these per SoC-generation "quirk" bits with no devicetree override at
+all. For our actual quirk (`DSI_PHY_7NM_QUIRK_V4_1`, confirmed by
+reading `dsi_phy_7nm_cfgs` itself rather than assuming no-quirk), the
+real generic values end up `vreg_ctrl_0=0x51`,
+`str_swi_cal_sel_ctrl=0x00`, `rescode_top_ctrl=0x00`,
+`rescode_bot_ctrl=0x3c` for C-PHY - versus Samsung's own downstream
+values for this exact panel/PHY pairing (`samsung,phy_vreg_ctrl_0=0x50`,
+`phy_str_swi_cal_sel_ctrl=0x04`, `phy_offset_top_ctrl=0x1F`,
+`phy_offset_bot_ctrl=0x1F`) - a real, substantial mismatch in exactly
+the class of register (analog bias/resistor-calibration) that a PLL's
+lock behavior is sensitive to.
+
+Found a direct precedent already in this same driver family -
+`dsi_phy_10nm.c` already has a `parse_dt_properties` hook + a
+`tuning_cfg` struct for exactly this kind of per-board override (its
+own `qcom,phy-rescode-offset-top/bot` + `qcom,phy-drive-ldo-level`,
+per-lane arrays since 10nm's registers are per-lane). Mirrored the same
+pattern for `dsi_phy_7nm.c` (whose equivalent registers are single
+global values, not per-lane, so plain scalars): added a
+`dsi_phy_7nm_tuning_cfg` struct, a `dsi_7nm_phy_parse_dt()` function
+reading four new scalar properties (`qcom,phy-vreg-ctrl-0`,
+`qcom,phy-str-swi-cal-sel-ctrl`, `qcom,phy-rescode-offset-top-ctrl`,
+`qcom,phy-rescode-offset-bot-ctrl`), wired via
+`.parse_dt_properties = dsi_7nm_phy_parse_dt` into `dsi_phy_7nm_cfgs`
+specifically (confirmed this is the exact cfg our `qcom,dsi-phy-7nm`
+compatible maps to, not a different SM8250-adjacent variant), and
+applied as an override in `dsi_7nm_phy_enable()` right after the
+existing quirk-based default computation - only takes effect if the
+devicetree property is actually present, so every other board using
+this shared driver keeps its exact existing behavior untouched.
+
+Set the four properties on both `&mdss_dsi0_phy`/`&mdss_dsi1_phy` in
+`kernel/dts/sm8250-samsung-gts7l.dts` with Samsung's own downstream
+values. Full kernel rebuild (driver source changed, not just
+config/devicetree this time) + DTB rebuild (both clean, zero
+warnings), copied into uniLoader's blob, rebuilt uniLoader (same
+44,478,464-byte size, same safe address margins as every round since
+38), packaged via the same proven method (byte-exact verification
+passed on kernel/dtb/ramdisk sections independently), flashed.
+`rp`/`ro.bootloader` reconfirmed unchanged before and after.
+
+**Not yet tested on hardware as of writing this entry.**
+
+### Tested: PHY trim fix applied, likely worked for the real enable path,
+but a new failure surfaced further along - DSI FIFO error
+
+Owner's report: same symptom as before (backlight off, black screen),
+but the `dmesg` capture tells a more nuanced story than "no change".
+
+The two `DSI PLL(0) lock failed, status=0x00000000` messages still
+appear, at almost the identical timestamp (~0.35s) as Round 40's test -
+but tracing the call path directly (`dsi_phy_driver_probe`'s own
+`devm_of_clk_add_hw_provider()` call, right after `.pll_init`
+registers the PLL's `clk_hw` with the framework) shows this is most
+likely a premature, essentially harmless clock reparent -
+`assigned-clock-parents` on `mdss_dsi0`/`mdss_dsi1` pointing at the
+PHY's newly-registered clock outputs gets reprocessed the moment the
+provider becomes available, which can force an eager prepare/lock
+attempt on the raw VCO clock *before* `dsi_7nm_phy_enable()` (where the
+new trim override actually lives) has ever run. Consistent with this:
+probe continues successfully afterward regardless in every test so far
+- `msm_dpu` binds both DSI hosts, `dpu hardware revision:0x60000000`
+reads correctly, and `fb0: msmdrmfb frame buffer device` registers.
+Confirmed the property-to-register mapping is correct by reading
+Samsung's own downstream PHY glue code directly (not just trusting the
+panel dtsi's property names): `references/gts7l/techpack/display/msm/
+samsung/ss_dsi_panel_common.c` maps `samsung,phy_vreg_ctrl_0` /
+`phy_str_swi_cal_sel_ctrl` / `phy_offset_top_ctrl` / `phy_offset_bot_ctrl`
+to `SS_PHY_CMN_VREG_CTRL_0` / `SS_PHY_CMN_GLBL_STR_SWI_CAL_SEL_CTRL` /
+`SS_PHY_CMN_GLBL_RESCODE_OFFSET_TOP_CTRL` / `_BOT_CTRL` - an exact
+match to the mainline register names this patch overrides.
+
+**New evidence the trim fix may actually be working**: no *second*
+"DSI PLL lock failed" message appears later, when the real enable path
+(`dsi_7nm_phy_enable()`, called from a genuine modeset attempt) would
+actually run - PLL lock is normally silent on success, so this absence
+is a plausible (not yet fully confirmed) sign the real lock now
+succeeds.
+
+**The new, different problem**: `dsi_err_worker: status=4` appears
+twice at ~1.09s, shortly before `fb0` registers at 1.15s.
+`drivers/gpu/drm/msm/dsi/dsi_host.c` decodes status bit `0x0004` as
+`DSI_ERR_STATE_FIFO` - a DSI controller TX FIFO underflow/overflow,
+raised by `dsi_fifo_status()` reading `REG_DSI_FIFO_STATUS`. This is a
+genuinely different failure class than the PLL lock issue - it happens
+during actual data transfer, not PLL startup - and represents real
+forward progress (further into the real enable sequence than any
+previous round reached) even though the screen is still blank.
+Checked whether Samsung's own downstream declares a relevant
+`frame-threshold-time-us` DSI controller property
+(`references/gts7l/arch/arm64/boot/dts/vendor/qcom/kona-sde.dtsi`) that
+mainline might also need - confirmed mainline's
+`dsi-controller-main.yaml` binding and `dsi_host.c` have no such
+concept at all, so that's not the cause; the real explanation is not
+yet found.
+
+**Not yet investigated further as of writing this entry** - paused here
+to document and commit the current state at the owner's request, before
+continuing the FIFO error investigation.

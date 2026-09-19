@@ -122,3 +122,55 @@ CONFIG_USB_CONFIGFS=y
 # the exact same class of bug as CONFIG_DRM_MSM=m never loading. Force it
 # built-in.
 CONFIG_PHY_QCOM_USB_SNPS_FEMTO_V2=y
+
+# Phase 2 (2026-09-19, docs/phase2-panel-scoping.md): display bring-up.
+# CONFIG_DRM/CONFIG_DRM_MSM both default to =m - the exact same
+# no-module-loading problem as CONFIG_DRM_PANEL_NOVATEK_NT36523/
+# CONFIG_PHY_QCOM_USB_SNPS_FEMTO_V2 before it (Rounds 35/37). Everything
+# under DRM_MSM's own umbrella (DPU, DSI, the 7nm PHY) was already =y in
+# defconfig, capped at =m by the parent - same parent/child tristate
+# ceiling gotcha already documented in docs/kernel-config-notes.md from
+# the Phase 1 UFS PHY work. CONFIG_I2C_QCOM_GENI needs the same fix,
+# since the ISL98608 bias IC lives on a real hardware QUP I2C bus
+# (&i2c8), and CONFIG_BACKLIGHT_CLASS_DEVICE because
+# nt36523_create_backlight() (this panel uses DCS backlight, no
+# external chip) needs that subsystem built in to register at all.
+CONFIG_DRM=y
+CONFIG_DRM_KMS_HELPER=y
+CONFIG_DRM_DISPLAY_HELPER=y
+# DRM_MSM's own Kconfig has `depends on QCOM_LLCC || QCOM_LLCC=n` (and
+# the same for QCOM_OCMEM) - a built-in driver can't depend on a
+# loadable module, so leaving these at defconfig's =m silently capped
+# DRM_MSM back down to =m even with the line below - found by checking
+# the actual post-olddefconfig .config rather than assuming the fragment
+# alone was enough.
+CONFIG_QCOM_LLCC=y
+CONFIG_QCOM_OCMEM=y
+CONFIG_DRM_MSM=y
+CONFIG_I2C_QCOM_GENI=y
+CONFIG_BACKLIGHT_CLASS_DEVICE=y
+
+# Round 39 test (2026-09-19, docs/kernel-boot-debugging.md): found via the
+# USB gadget console's own dmesg (finally usable as a live debug tool) -
+# `msm_dsi: Failed to get supply 'refgen'` on both DSI hosts, and
+# `DSI PLL(0) lock failed, status=0x00000000` right alongside it. The
+# `refgen` devicetree node itself (sm8250.dtsi's `qcom,sm8250-refgen-
+# regulator`) has no status override needed, already enabled by default -
+# but its actual driver, CONFIG_REGULATOR_QCOM_REFGEN, defaults to =m,
+# the exact same no-module-loading bug as CONFIG_DRM_MSM and
+# CONFIG_PHY_QCOM_USB_SNPS_FEMTO_V2 before it (Rounds 35/37/38) - a real
+# driver exists (drivers/regulator/qcom-refgen-regulator.c), it just
+# never gets to register. Likely also the direct cause of the PLL lock
+# failure, since refgen ("reference generator") plausibly supplies the
+# bias/reference voltage the DSI PHY's analog PLL needs to lock at all -
+# not yet confirmed, but a strong, testable hypothesis given both
+# symptoms appeared together and trace to the same missing driver.
+CONFIG_REGULATOR_QCOM_REFGEN=y
+
+# The actual new panel driver entry (drivers/gpu/drm/panel/
+# panel-novatek-nt36523.c, compatible "samsung,gts7l-ppa957db1-nt36523")
+# and this device's own ISL98608 bias IC driver
+# (drivers/misc/isl98608-gts7l.c) - neither exists in defconfig at all
+# since both are new additions for this device.
+CONFIG_DRM_PANEL_NOVATEK_NT36523=y
+CONFIG_ISL98608_GTS7L=y
