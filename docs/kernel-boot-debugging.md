@@ -2371,3 +2371,97 @@ rooted TWRP shell, md5 `cf0cfcbaacc8cbc95f31a569d9823c12` matches
 `work/stock-backup/boot.img` exactly - `dtb`/`dtbo`/`ramdisk.cpio` were
 never touched this round, so needed no restore). `rp` (`1`) and
 `ro.bootloader` (`T875XXU1ATK4`) both reconfirmed unchanged.
+
+## Round 21-22 (2026-09-19, same day): uniLoader proven fully working end to
+end on real hardware - a real breakthrough
+
+Per the owner's direction, before going to UART, tried getting uniLoader's
+own `simplefb` console showing on screen first - much cheaper, and
+uniLoader has its own driver for exactly this (`lib/simplefb/simplefb.c`,
+registers as a `printk` console via `console_register()`).
+
+### Round 21: real progress, then a self-inflicted bug
+
+Added a `simplefb` device to `board/samsung/board-gts7l.c`, reusing the
+exact physical framebuffer region and geometry ABL's own splash draws to
+(`0x9c000000`, `1600x2560`, confirmed real via this device's own stock
+devicetree and Round 13's own log). Rebuilt, repackaged (same proven
+method), flashed. **Result: the screen changed from the static Samsung
+logo to solid black after ~2 seconds, then hung** - genuinely new
+behavior, and itself informative: `simplefb_probe()`'s first action is
+exactly to blank the framebuffer to black, so this already proved
+uniLoader was getting control and running.
+
+**Root cause found and it's a real mistake, not an upstream bug**: this
+driver's `video_info.stride` field means *bytes-per-pixel*, not the
+traditional row-pitch-in-bytes - confirmed by checking every other
+board's actual values (`board-r0q.c` and every `*_defconfig` with a
+framebuffer all use `stride = 4`). The first board file used
+`.stride = 1600 * 4 = 6400` (1600x too large). `clean_fbmem()` computes
+its `memset` size as `width * height * stride`, so with the wrong stride
+that came out to `1600*2560*6400` - about 26GB, starting at `0x9c000000`,
+run from a script/board file that genuinely has only ~6GB of real DRAM
+behind it. The black screen was the *correct* part of that memset
+(zeroing the real framebuffer) followed by the write running straight off
+the end of physical memory and hanging. Fixed: `.stride = 4`.
+
+### Round 22: uniLoader confirmed fully working, real kernel handoff reached
+
+Rebuilt with the fix, reflashed. **Owner's live capture of the actual
+screen output**:
+
+```
+[INFO] simplefb: ready (1600x2560)
+[INFO] passed board initialization
+[INFO] welcome to uniLoader (eef7bf9) 09-19 13:38:24 on samsung-gts7l
+[INFO] trying to open fdt...
+[INFO] adding linux,initrd-start...
+[INFO] adding linux,initrd-end...
+[INFO] Booting kernel...
+```
+
+**This is a complete, direct, on-screen confirmation that uniLoader works
+end to end on this device**: board init, driver probe, devicetree
+patching (`patch_dtb()` adding the initrd location), and the final
+`boot_kernel()` call all ran correctly, reaching the exact last `printk`
+before `arch_load_kernel()`'s `memcpy`+jump. This is the single most
+concrete piece of evidence this entire project has produced about what
+happens after ABL handoff - previously always a total blank.
+
+Nothing appeared after "Booting kernel..." - **not necessarily a
+failure**: uniLoader's own console is entirely separate from the real
+kernel's. Once the jump happens, control passes to the real mainline
+kernel, which (at the time of this test) had no framebuffer/console
+configured in its own devicetree at all - so even a perfectly-booting
+kernel would produce zero visible output. This is the same "no display
+configured" gap Round 14 hit, now sitting on top of a *proven-working*
+handoff instead of an unconfirmed one.
+
+**Fixed immediately, since this DTB is now entirely private to this
+project** (a key structural difference from every DTS change attempted
+in Rounds 4-18: this devicetree is embedded directly in uniLoader's own
+binary and never seen by ABL at all, since ABL only ever validates stock's
+completely separate, untouched DTB/DTBO - so nothing here can affect ABL
+acceptance, unlike every earlier DTS experiment):
+
+- `kernel/dts/sm8250-samsung-gts7l.dts`: overrode the inherited
+  `framebuffer` node from `sm8250-samsung-common.dtsi` (phone-resolution
+  `1080x2400` default) with this tablet's real `1600x2560` - the node's
+  `reg`/`format` were already correct (same `cont_splash_region@9c000000`
+  physical region, already `no-map`'d in `/reserved-memory` by the same
+  shared base file). Also set `chosen/bootargs` directly
+  (`console=tty0 loglevel=15`) - uniLoader's `patch_dtb()` only ever adds
+  `linux,initrd-start`/`-end`, never bootargs.
+- `kernel/config/gts7l.fragment`: added `CONFIG_CMDLINE="console=tty0
+  loglevel=15"` + `CONFIG_CMDLINE_FORCE=y` as a second, independent way to
+  guarantee the cmdline reaches the kernel regardless of what devicetree
+  merging does.
+
+Rebuilt kernel Image + DTB (both confirmed correct via `fdtget` before
+using them), rebuilt uniLoader with the fresh blobs, repackaged via the
+same proven method (byte-exact verification passed again), flashed.
+**Awaiting hardware test result as of writing this entry.**
+
+Tablet state at time of writing: `boot` = this round's uniLoader+console
+build, `dtb`/`dtbo`/`ramdisk.cpio` = stock, untouched throughout. `rp`/
+`ro.bootloader` reconfirmed unchanged before flashing.

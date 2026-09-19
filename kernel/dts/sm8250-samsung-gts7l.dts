@@ -172,30 +172,56 @@
 	chassis-type = "tablet";
 
 	/*
-	 * TODO(phase2/debugging): a `chosen`/`simple-framebuffer` node reusing
-	 * the ABL's real splash region (address/size confirmed correct via
-	 * Samsung's own GPL source, kona.dtsi's `cont_splash_region@9c000000`)
-	 * was tried here on 2026-09-12 to get an on-screen boot console, since
-	 * neither of this device's two persistent log mechanisms
-	 * (`/proc/last_kmsg` - bootloader-only; `console-ramoops-0` - only
-	 * ever reflects whichever kernel is *currently* running, never a
-	 * prior failed boot) could show what our kernel does after the ABL
-	 * hands off.
+	 * RETRACTED 2026-09-19 (Round 22, docs/kernel-boot-debugging.md): the
+	 * "regression" described below was real but the context has changed
+	 * completely - back then this whole DTB was what ABL itself had to
+	 * accept (Rounds 4-11's entire fight), so any content change could
+	 * plausibly affect ABL's own matching. Since Round 20/22's uniLoader
+	 * pivot, this DTB is never seen by ABL at all - it's embedded
+	 * directly in uniLoader's own binary and only reaches the real
+	 * mainline kernel after uniLoader has already gotten full CPU control
+	 * from a completely unrelated, unmodified stock DTB/DTBO. There is no
+	 * remaining mechanism by which content here could affect ABL
+	 * acceptance. Re-adding the framebuffer override below on that basis.
 	 *
-	 * Reverted: a controlled isolation test (stock ramdisk + this
-	 * framebuffer-enabled kernel, vs. the earlier stock-ramdisk build
-	 * without it) showed a real regression - the earlier build reliably
-	 * got past the ABL into genuine Android `init` (confirmed via the
-	 * automatic `fs_mgr`-triggered recovery-boot request when `/data`
-	 * failed to mount), but adding this framebuffer node made the same
-	 * stock-ramdisk kernel fail before that point, going straight to
-	 * Download Mode instead. The reserved-memory region *does* look
-	 * correctly `no-map`'d at the matching address, so the actual failure
-	 * mode isn't understood yet - not worth chasing further right now
-	 * since this feature only existed to help debugging, not because
-	 * Phase 1 needs it. Revisit alongside the real panel/display driver
-	 * work in Phase 2 instead of in isolation.
+	 * Original note (2026-09-12, Round 5-era): a `chosen`/
+	 * `simple-framebuffer` node reusing the ABL's real splash region was
+	 * tried to get an on-screen boot console, since neither
+	 * `/proc/last_kmsg` (bootloader-only) nor `console-ramoops-0` (only
+	 * ever reflects whichever kernel is *currently* running) can show
+	 * what our kernel does after handoff. Reverted at the time after an
+	 * isolation test showed a regression - not revisited until now,
+	 * because at the time it wasn't understood *why*, and the DTB itself
+	 * was still the thing ABL had to accept.
 	 */
+};
+
+/*
+ * Round 22 (2026-09-19, docs/kernel-boot-debugging.md): uniLoader confirmed
+ * working end to end on real hardware (its own splash/console prints
+ * correctly, reaches "Booting kernel..." and jumps) - but nothing visible
+ * happens after that, and there's no way yet to tell whether the real
+ * kernel is silently working fine (just genuinely has no configured
+ * console) or has crashed. Overriding the inherited phone-resolution
+ * `framebuffer` node from `sm8250-samsung-common.dtsi` (1080x2400,
+ * upstream's Galaxy S20 default) with this tablet's real panel geometry -
+ * the node's `reg`/`format` are already correct (same physical splash
+ * region ABL itself draws to, `cont_splash_region@9c000000`, already
+ * `no-map`'d in `/reserved-memory` by the same shared base file). Also
+ * forcing a real cmdline via `chosen/bootargs` here (uniLoader's own
+ * `patch_dtb()` only adds `linux,initrd-start`/`-end`, never touches
+ * `bootargs`) - `CONFIG_CMDLINE_FORCE` in `kernel/config/gts7l.fragment`
+ * is a second, independent way to guarantee this reaches the kernel
+ * regardless of what devicetree merging does.
+ */
+&framebuffer {
+	width = <1600>;
+	height = <2560>;
+	stride = <(1600 * 4)>;
+};
+
+&{/chosen} {
+	bootargs = "console=tty0 loglevel=15";
 };
 
 /*
@@ -378,4 +404,49 @@
 &slpi {
 	firmware-name = "qcom/sm8250/Samsung/gts7l/slpi.mbn";
 	status = "okay";
+};
+
+/*
+ * Round 17/18 (2026-09-17, docs/kernel-boot-debugging.md): after getting
+ * ABL to accept this project's own mainline DTB cleanly (the S9 Ultra
+ * project's invalidated-dtbo/DeviceTreeAppended technique), the device
+ * started auto-resetting (`PM: HARD RESET by PS_HOLD`) immediately after
+ * kernel handoff - closely paralleling a TrustZone NoC fault the S9 Ultra
+ * project hit at this exact stage, caused by their mainline DTS missing
+ * `/reserved-memory` carveouts their device's real firmware actually
+ * protects.
+ *
+ * Audited this project's own compiled DTB against stock's real
+ * `/reserved-memory` node (extracted directly from stock's boot.img `dtb`
+ * section) address-by-address, not just by presence/absence. Found one
+ * concrete, high-confidence mismatch: upstream's `sm8250.dtsi` reserves
+ * `xbl_aop_mem` (Always-On Processor firmware memory - queried very early
+ * in boot, during RPMh/power-domain setup) at `0x80700000`, size
+ * `0x160000`. Stock's real firmware reserves `0x80603000`, size
+ * `0x25d000` - same end address (`0x80860000`), but starting ~1MiB
+ * *earlier*. That ~1MiB gap (`0x80603000`-`0x80700000`) is real,
+ * secure-world-owned AOP firmware memory on this actual hardware that
+ * upstream's generic reservation doesn't cover at all - our kernel's
+ * buddy allocator could legitimately hand that range out to any driver,
+ * which is exactly the kind of access that trips a NoC/TrustZone security
+ * fault. This is the leading suspect for the Round 17 auto-reset.
+ *
+ * Also found `dfps_data_region@9e300000` (size 0x100000, dynamic
+ * frame-rate tracking data) present in stock's reserved-memory list with
+ * no upstream equivalent at all - added here too, matching stock's own
+ * `no-map`-less (normal cached-accessible carveout, not excluded from the
+ * linear map) treatment rather than guessing.
+ *
+ * Not yet re-tested on hardware as of writing this comment - see
+ * kernel-boot-debugging.md for whichever Round actually confirms or
+ * refutes this fixes the auto-reset.
+ */
+&xbl_aop_mem {
+	reg = <0x0 0x80603000 0x0 0x25d000>;
+};
+
+&{/reserved-memory} {
+	dfps_data_mem: dfps_data_region@9e300000 {
+		reg = <0x0 0x9e300000 0x0 0x100000>;
+	};
 };
