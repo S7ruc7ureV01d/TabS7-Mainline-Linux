@@ -3301,3 +3301,113 @@ throughout. `rp`/`ro.bootloader` reconfirmed unchanged before flashing.
 **Awaiting hardware test result** - hoping the display now stays alive
 long enough to see this project's own init script and, ideally, an
 actual interactive shell prompt.
+
+**Tested: `clk_ignore_unused` did NOT fix it.** Owner's report: "still
+cuts right after simplefb registered!, only can see the _ one line under
+it and then goes blank" - only a marginal, one-character change from
+before. Clock-gating was the wrong theory.
+
+## Round 34 (2026-09-19, same day): live `/reserved-memory` audit against
+this device's real hardware
+
+Per the S9 Ultra mainline porting project's own porting log (checked
+directly, `references/postmarketos-galaxy-tab-s9-ultra/docs/porting-log.md`)
+- they hit a superficially similar symptom (Linux boots, console/logo
+visible, then dies with zero pstore/panic evidence) early in their
+project and traced it to `TZBSP_ERR_FATAL_NOC_ERROR`: Linux touching a
+physical range their minimal upstream DTB didn't reserve but Samsung's
+stock DTBO does. The owner correctly pushed back that this doesn't fully
+transfer - their failure mode is TrustZone *automatically* resetting the
+board, ours is a hang the owner has to manually reset, a materially
+different signature - so this was treated as a hypothesis to check, not
+a confirmed diagnosis.
+
+Pulled this device's own *live* `/reserved-memory` node directly
+(`adb shell` against a TWRP boot, which uses the same ABL-merged stock
+DTB/DTBO as normal boot) and diffed it address-by-address against what
+upstream's `sm8250.dtsi` + `sm8250-samsung-common.dtsi` already declare.
+Found several real gaps: `sec_debug_region@0x9f000000` (8 MiB, actually
+encloses our own Round 29 `sec_log_region`), `ss_plog_region`,
+`hdm_region`, `kaslr_region`, `tima_region`/`rkp_region`/`uh_heap_region`
+(a contiguous 23 MiB block), and a 173 MiB `sec_debug_rdx_bootdev` with
+no upstream equivalent at all - plus two upstream nodes that undershoot
+what this device's real firmware protects (`xbl_aop_mem`, `removed_mem`).
+Added `no-map` reservations for all of them in
+`kernel/dts/sm8250-samsung-gts7l.dts`. (The `pil_*` remoteproc regions
+were also checked and found shifted vs. upstream, but deliberately left
+alone - those are only ever touched by an active PIL/remoteproc driver,
+none of which this Phase 1 kernel enables, and Round 30+ already proved
+code executing from uniLoader's own `PAYLOAD_ENTRY` - which happens to
+overlap the live `cdsp_secure_heap` range - runs correctly for many
+seconds, so that overlap isn't hardware-enforced against us.)
+
+Rebuilt DTB, rebuilt uniLoader with the fresh blob (kernel Image
+unchanged), packaged via the same proven method (byte-exact verification
+passed), flashed. **Tested: no change** - same immediate black screen
+right after `fb0: simplefb registered!`. The reserved-memory gaps were
+real and worth fixing regardless, but weren't the cause of this symptom.
+
+## Round 35 (2026-09-19, same day): the actual fix - `dispcc` reprograms
+the display PLLs on every probe, with no driver left to restore them
+
+Went looking directly in this project's own vendored kernel source
+rather than guessing further. `CONFIG_SM_DISPCC_8250=y` is a *built-in*
+driver (unlike `CONFIG_DRM_MSM=m`, which never loads - this minimal
+initramfs has no module-loading support at all) - so it auto-probes
+during every boot, unconditionally. Read `disp_cc_sm8250_probe()`
+directly in `drivers/clk/qcom/dispcc-sm8250.c`: for this device's exact
+compatible string (`qcom,sm8250-dispcc`), it unconditionally calls
+`clk_lucid_pll_configure()` on both display PLLs (pll0/pll1) - no check
+for "already locked and actively clocking something". That's completely
+normal on mainline *if* a real MDSS/DPU/panel driver immediately runs
+after to redo the full power-sequenced re-init (GDSC, reset, PLL
+relock, panel commands) - but we don't have one loaded, so dispcc tears
+down whatever PLL state ABL left actively driving the LCD panel's
+video-mode DSI link, and nothing ever restores it. A video-mode LCD
+(confirmed by the owner correcting an earlier "AMOLED" assumption -
+this tablet is genuinely LCD) has no internal frame memory like a
+command-mode/self-refreshing AMOLED panel would - it blanks the instant
+the DSI host stops actively streaming, which lines up exactly with the
+"immediately after simplefb registers" timing observed since Round 32.
+
+Confirmed every consumer of `&dispcc`'s clocks/power-domain/resets in
+`sm8250.dtsi` is an MDSS/MDP/DSI/DP child node, all only ever bound by
+the same never-loaded `CONFIG_DRM_MSM` module - nothing built into this
+kernel actually needs dispcc's clocks at boot, so disabling its
+devicetree node (`status = "disabled"`) is safe for Phase 1 and keeps
+its driver from probing at all.
+
+Rebuilt DTB (confirmed via `fdtget`: dispcc status is `disabled`),
+rebuilt uniLoader with the fresh blob (kernel Image unchanged), packaged
+via the same proven method (byte-exact verification passed), flashed.
+
+### Tested: this is the fix - the display stays on
+
+Owner's report: **"it stays!!!!! this is the end of the printed log"** -
+the kernel boots completely, all the way through UFS enumeration
+(`sda`-`sdd`, every real partition on this device), `Run /init as init
+process`, this project's own init script, and drops to a live,
+interactive `ash` shell prompt - all visible directly on the physical
+LCD panel, staying on rather than going black. The owner interacted
+with it directly (`ls -l /sys/class/udc`, confirming no UDC is bound -
+expected, since `CONFIG_USB_CONFIGFS`'s gadget setup needs a working UDC
+driver that isn't relevant now that a real display works) via a USB
+keyboard in host mode (`usbhid: USB HID core driver` in the log,
+consistent with DWC3's dual-role controller enumerating a keyboard
+rather than acting as a gadget).
+
+**This is Phase 1's actual goal, achieved on real hardware**: genuine
+mainline Linux, booting via uniLoader on this Galaxy Tab S7's real ABL,
+reaching a fully interactive shell with live display and keyboard input,
+UFS storage enumerated. `boot` = this round's `dispcc`-disabled build,
+`dtbo`/stock `dtb`/`ramdisk.cpio` untouched throughout every round since
+Round 13's pivot. `rp`/`ro.bootloader` reconfirmed unchanged before and
+after flashing.
+
+Root cause chain across Rounds 32-35, for the record: Round 32/33 wrongly
+suspected clock-gating (`clk_disable_unused()`); Round 34 wrongly
+suspected a devicetree reserved-memory gap (real gaps existed and were
+worth fixing, but weren't the cause); Round 35 found the actual
+mechanism by reading this project's own vendored driver source directly
+rather than continuing to guess from symptom-matching against other
+projects' porting logs.

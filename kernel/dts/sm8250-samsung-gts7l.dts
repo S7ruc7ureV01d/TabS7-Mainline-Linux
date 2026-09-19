@@ -216,6 +216,118 @@
 };
 
 /*
+ * Round 34 (2026-09-19, docs/kernel-boot-debugging.md): the S9 Ultra
+ * mainline porting project hit our exact symptom class (Linux boots,
+ * console/logo visible, then dies with zero pstore/panic evidence) and
+ * traced an early instance of it to `TZBSP_ERR_FATAL_NOC_ERROR` - Linux
+ * touching a physical range Samsung's stock DTBO normally reserves but
+ * their minimal upstream DTB didn't carry. Our own DTS has the same gap:
+ * pulled this device's *live* `/reserved-memory` node straight off real
+ * hardware (`adb shell` against a TWRP boot, which uses the same
+ * ABL-merged stock DTB/DTBO as normal boot) and diffed it against what
+ * upstream's `sm8250.dtsi` + `sm8250-samsung-common.dtsi` already
+ * declare (`work/round34-reserved-mem/live-reserved-memory.txt`).
+ *
+ * Everything below is either populated by ABL/XBL/TrustZone before any
+ * kernel choice is even made (so it's live/protected the same way
+ * whether Samsung's downstream kernel or our own mainline one is
+ * running), or is a case where upstream's own static node undershoots
+ * what this specific device's firmware actually protects. The `pil_*`
+ * remoteproc firmware regions were also compared and found shifted vs.
+ * upstream, but were deliberately left alone: those addresses are only
+ * ever touched by an active PIL/remoteproc driver requesting them, none
+ * of which this Phase 1 kernel enables, and we have direct proof
+ * (`docs/kernel-boot-debugging.md` Round 30+) that code executing from
+ * uniLoader's own `PAYLOAD_ENTRY` - which happens to sit inside the
+ * live `cdsp_secure_heap` range - runs correctly for many seconds, so
+ * that particular overlap isn't hardware-enforced against us. These are:
+ *
+ *  - sec_debug_region@0x9f000000 (8 MiB) actually encloses our own
+ *    sec_log_region above; reserved here as the two flanking pieces so
+ *    the two nodes don't overlap.
+ *  - ss_plog_region, hdm_region, kaslr_region: small, unconditional
+ *    Samsung/TZ carveouts right next to sec_log/ramoops, entirely
+ *    unreserved in our DTB until now.
+ *  - dfps_data_region@0x9e300000 sits immediately after
+ *    cont_splash_mem/our simple-framebuffer's own carveout ends -
+ *    exactly the kind of neighbor worth reserving given our current
+ *    unsolved "screen goes black right after simplefb registers"
+ *    symptom.
+ *  - tima_region/rkp_region/uh_heap_region: contiguous
+ *    0xb0100000-0xb1800000, Samsung's kernel-protection carveouts.
+ *  - sec_debug_rdx_bootdev@0x100000000: a large (173 MiB) live
+ *    reservation with no upstream equivalent at all.
+ */
+&{/reserved-memory} {
+	sec_debug_region_lo@9f000000 {
+		reg = <0x0 0x9f000000 0x0 0x200000>;
+		no-map;
+	};
+
+	sec_debug_region_hi@9f400000 {
+		reg = <0x0 0x9f400000 0x0 0x400000>;
+		no-map;
+	};
+
+	ss_plog_region@9f800000 {
+		reg = <0x0 0x9f800000 0x0 0x200000>;
+		no-map;
+	};
+
+	hdm_region@9fb00000 {
+		reg = <0x0 0x9fb00000 0x0 0x1000>;
+		no-map;
+	};
+
+	kaslr_region@a0001000 {
+		reg = <0x0 0xa0001000 0x0 0x1000>;
+		no-map;
+	};
+
+	dfps_data_region@9e300000 {
+		reg = <0x0 0x9e300000 0x0 0x100000>;
+		no-map;
+	};
+
+	tima_region@b0100000 {
+		reg = <0x0 0xb0100000 0x0 0x100000>;
+		no-map;
+	};
+
+	rkp_region@b0200000 {
+		reg = <0x0 0xb0200000 0x0 0x200000>;
+		no-map;
+	};
+
+	uh_heap_region@b0400000 {
+		reg = <0x0 0xb0400000 0x0 0x1400000>;
+		no-map;
+	};
+
+	sec_debug_rdx_bootdev@100000000 {
+		reg = <0x1 0x00000000 0x0 0xad00000>;
+		no-map;
+	};
+};
+
+/*
+ * Round 34: upstream's static `xbl_aop_mem`/`removed_mem` nodes both
+ * undershoot what this device's live firmware actually protects -
+ * confirmed via the same live `/reserved-memory` pull above. Real live
+ * xbl_aop starts a full ~0xfd000 (~1 MiB) earlier than upstream's
+ * `0x80700000`, and removed_mem is 0x800000 (8 MiB) bigger than
+ * upstream's `0x5300000`. Overriding both by their upstream labels to
+ * match the live values exactly, rather than adding overlapping nodes.
+ */
+&xbl_aop_mem {
+	reg = <0x0 0x80603000 0x0 0x25d000>;
+};
+
+&removed_mem {
+	reg = <0x0 0x80b00000 0x0 0x5b00000>;
+};
+
+/*
  * Round 23 (2026-09-19, docs/kernel-boot-debugging.md): pulled Samsung's
  * persistent `/dev/block/by-name/debug` ramdump-summary partition (a
  * genuine, real crash-history log spanning many prior resets - unlike
@@ -498,4 +610,49 @@
 	dfps_data_mem: dfps_data_region@9e300000 {
 		reg = <0x0 0x9e300000 0x0 0x100000>;
 	};
+};
+
+/*
+ * Round 35 (2026-09-19, docs/kernel-boot-debugging.md): the real,
+ * mechanistically-confirmed cause of "screen goes black immediately
+ * after `fb0: simplefb registered!`" (Round 33's `clk_ignore_unused` and
+ * Round 34's reserved-memory audit both left this untouched, because
+ * this isn't a devicetree-completeness problem at all).
+ *
+ * `CONFIG_SM_DISPCC_8250=y` is a *built-in* driver (no module loading
+ * needed, unlike `CONFIG_DRM_MSM=m` which never gets loaded by this
+ * minimal initramfs) - so it auto-probes unconditionally during normal
+ * boot. Read `drivers/clk/qcom/dispcc-sm8250.c`'s own
+ * `disp_cc_sm8250_probe()` directly: for our exact compatible string
+ * ("qcom,sm8250-dispcc", not the sm8150/sm8350 variants handled
+ * elsewhere in that function), it unconditionally calls
+ * `clk_lucid_pll_configure(&disp_cc_pll0, ...)` and the same for pll1 -
+ * reprogramming both display PLLs from scratch on every single probe,
+ * with no check for "is this already locked and actively clocking
+ * something". That's normal and expected on mainline *if* a real
+ * MDSS/DPU/panel driver runs right after to redo the whole
+ * power-sequenced re-init (GDSC, reset, PLL relock, panel commands) -
+ * but we don't have one (`CONFIG_DRM_MSM=m`, never loaded here), so
+ * dispcc tears down whatever PLL state ABL left actively driving this
+ * LCD's video-mode DSI link, and nothing ever restores it. Unlike a
+ * command-mode/self-refreshing AMOLED panel (which just keeps showing
+ * its last frame from internal GRAM), a video-mode LCD panel - which is
+ * genuinely what this tablet has, confirmed by the owner correcting an
+ * earlier assumption - loses sync and blanks the instant the DSI host
+ * stops actively streaming, which is exactly the "immediately after
+ * simplefb registers" timing that's been observed since Round 32.
+ *
+ * Confirmed every consumer of `&dispcc`'s clocks/power-domain/resets in
+ * `sm8250.dtsi` is an MDSS/MDP/DSI/DP child node, all only ever bound by
+ * the same never-loaded `CONFIG_DRM_MSM` module - nothing built into
+ * this kernel actually needs dispcc's clocks at boot. Disabling the node
+ * entirely keeps its driver from probing (and thus from touching the
+ * PLLs) for the rest of Phase 1; this is explicitly a stopgap for the
+ * "leave ABL's splash content on screen" approach, not a real display
+ * fix - actually driving the panel from Linux (Phase 2 scope) will need
+ * dispcc probing properly alongside a real MDSS/DPU/panel driver that
+ * redoes the full re-init sequence, not avoiding it.
+ */
+&dispcc {
+	status = "disabled";
 };

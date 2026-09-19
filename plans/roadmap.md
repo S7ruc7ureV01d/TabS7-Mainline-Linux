@@ -161,10 +161,18 @@ Progress log:
 
 ## Phase 1 — Boot to a shell (no display, no peripherals)
 
-**Status:** essentially complete - genuine mainline Linux boots on real
-hardware, mounts UFS root, execs this project's own busybox initramfs
-(Round 30/31, 2026-09-19). Confirming an actual interactive shell prompt
-is the one remaining live check.
+**Status:** COMPLETE - genuine mainline Linux boots on real hardware via
+uniLoader, mounts UFS root, execs this project's own busybox initramfs,
+and reaches a live, interactive `ash` shell prompt with real display
+(the physical LCD panel, staying on) and keyboard input (USB host mode)
+confirmed working (Round 30/31 + Round 35, 2026-09-19,
+`../docs/kernel-boot-debugging.md`). The remaining Round 32-34 detour was
+entirely about *display* staying on past its first frame - not a Phase 1
+blocker on its own terms, but a real, now-fixed bug
+(`kernel/dts/sm8250-samsung-gts7l.dts`'s Round 35 `&dispcc { status =
+"disabled"; };`, since `CONFIG_SM_DISPCC_8250`'s built-in driver
+reprograms the display PLLs on every probe with no panel driver present
+to restore them afterward).
 
 Goal: mainline (or near-mainline) kernel boots on the Tab S7 far enough to get
 a serial/USB shell — proof the boot chain, DTB, and minimal platform drivers
@@ -338,11 +346,14 @@ Exit criteria:
       right partition counts/names matching this device's real GPT
       layout.**
 - [x] Root filesystem reachable via ADB/serial shell, even without
-      display. **Kernel reaches `Run /init as init process` and execs
-      this project's own busybox initramfs successfully (Round 30) -
-      Round 31 removed the last obstacle (an obsolete diagnostic
-      watchdog) cutting it off right at that point; confirming an actual
-      interactive shell is the immediate next step.**
+      display. **ACHIEVED - Round 35, 2026-09-19.** Kernel reaches
+      `Run /init as init process`, execs this project's own busybox
+      initramfs, and drops to a live, interactive `ash` shell -
+      confirmed directly by the owner typing commands at it
+      (`ls -l /sys/class/udc`) via a USB keyboard in host mode, with the
+      output visible on the physical LCD panel (which Round 35 also
+      fixed - see the "no display" qualifier above is now moot, this
+      exceeds the criterion).
 
 Progress log:
 - 2026-09-11: Wrote and validated (build-only, not hardware-booted)
