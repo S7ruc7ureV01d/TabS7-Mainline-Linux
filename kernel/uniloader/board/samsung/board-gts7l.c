@@ -62,16 +62,32 @@ static const struct device gts7l_devices[] = {
  * Printed as two 32-bit halves since nanoprintf's large-format (%llx)
  * specifiers are disabled in this build (see lib/console/console.c).
  */
-static int gts7l_late_init(void)
+static void print_marker(const char *label, unsigned long long addr)
 {
-	volatile unsigned long long *marker =
-		(volatile unsigned long long *)0x95000000ULL;
-	unsigned long long val = *marker;
+	volatile unsigned long long *p = (volatile unsigned long long *)addr;
+	unsigned long long val = *p;
 	unsigned int hi = (unsigned int)(val >> 32);
 	unsigned int lo = (unsigned int)(val & 0xffffffffU);
 
-	printk(KERN_INFO, "debug marker @ 0x95000000:\n");
+	printk(KERN_INFO, "%s:\n", label);
 	printk(KERN_INFO, "%x %x\n", hi, lo);
+}
+
+static int gts7l_late_init(void)
+{
+	/*
+	 * Kernel-written marker (arch/arm64/kernel/head.S primary_entry) -
+	 * deadbeef cafec0de means the kernel's first instructions ran.
+	 */
+	print_marker("kernel marker @ 0x95000000", 0x95000000ULL);
+	/*
+	 * uniLoader-written canary (arch/aarch64/load-kernel.c,
+	 * arch_load_kernel(), written right before the jump on the
+	 * *previous* boot) - c001babe b00b1e55 here but not on the kernel
+	 * marker proves this memory region is genuinely accessible/writable
+	 * DRAM and isolates the problem to the jump/kernel-entry itself.
+	 */
+	print_marker("uniLoader canary @ 0x95001000", 0x95001000ULL);
 	return 0;
 }
 

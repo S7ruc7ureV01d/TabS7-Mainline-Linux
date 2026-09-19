@@ -2723,3 +2723,37 @@ different problems requiring completely different next steps.
 Tablet state at time of writing: `boot` = this round's marker build,
 `dtb`/`dtbo`/`ramdisk.cpio` = stock, untouched throughout. `rp`/
 `ro.bootloader` reconfirmed unchanged before flashing.
+
+### Tested: `ffffffff ffffffff`, not the kernel's marker - ambiguous,
+needed a control
+
+Owner's readback: `debug marker @ 0x95000000: ffffffff ffffffff` - not
+`deadbeef cafec0de`, but also not zero. Genuinely ambiguous on its own:
+all-`0xff` is a classic pattern many SoCs return when a bus master reads
+a hardware-protected or unmapped region (as opposed to genuinely free-but-
+never-written DRAM, which this project had no independent way to
+characterize at this exact address). Without a control, this result
+couldn't distinguish "the kernel never executed its first instruction at
+all" from "0x95000000 was never actually safe, ordinary DRAM in the first
+place, and Round 25's whole premise was flawed."
+
+**Added a control**: a second, independent marker
+(`0xc001babeb00b1e55`) written by uniLoader *itself*, immediately before
+the jump to the kernel (`arch/aarch64/load-kernel.c`,
+`arch_load_kernel()`), at a nearby address (`0x95001000`) using the same
+write+cache-clean pattern as the kernel-side marker. `board-gts7l.c`'s
+`late_init` now prints both. Logic: if uniLoader's own canary reads back
+correctly next boot but the kernel's marker still doesn't, that proves
+`0x9500xxxx` is genuinely accessible, ordinary DRAM (ruling out the
+protected-region explanation) and isolates the problem specifically to
+the jump/kernel-entry itself, not this memory region.
+
+Rebuilt uniLoader only (kernel Image unchanged from Round 25), packaged
+via the same proven method (byte-exact verification passed), flashed.
+Same two-cycle procedure as Round 25 - hang, then reboot again without
+reflashing to read back both markers.
+
+Tablet state at time of writing: `boot` = this round's canary build,
+`dtb`/`dtbo`/`ramdisk.cpio` = stock, untouched throughout. `rp`/
+`ro.bootloader` reconfirmed unchanged before flashing. **Awaiting
+hardware test result.**
