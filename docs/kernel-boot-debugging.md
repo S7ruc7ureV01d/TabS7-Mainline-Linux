@@ -3862,3 +3862,57 @@ proven method (byte-exact verification passed), flashed.
 `rp`/`ro.bootloader` reconfirmed unchanged before and after.
 
 **Not yet tested on hardware as of writing this entry.**
+
+## Round 46 (2026-09-19, same day): found the real cause via research -
+the automatic backlight update races the DRM commit, corrupting mode_flags
+
+Round 45's diagnostics were decisive: `nt36523_bl_update_status` fires
+at 1.074002s (`brightness=512`), `mipi_dsi_dcs_set_display_brightness_large`
+returns `0` (success) one microsecond later, and the
+`dsi_err_worker: status=4` FIFO error fires **under 1ms after that** -
+every single time. Not a coincidence.
+
+Researched this online (per the owner's explicit request) rather than
+keep guessing blind - found this matches a documented mainline bug
+class exactly: unsynchronized `dsi->mode_flags` read-modify-write
+between a backlight/brightness callback and the DRM commit path's own
+concurrent use of the same flags can corrupt or drop
+`MIPI_DSI_MODE_VIDEO` for a moment. `nt36523_bl_update_status()` does
+exactly this (`dsi->mode_flags &= ~MIPI_DSI_MODE_LPM;` ... `|=
+MIPI_DSI_MODE_LPM;`, toggling into HS mode to force the brightness
+command through) - unsynchronized against whatever the commit path is
+concurrently doing to the same device's mode_flags. Found a related
+real mainline fix for a similar race
+(`dsi_host_transfer()` checking `power_on` vs. `enabled` -
+`drivers/gpu/drm/msm/dsi/dsi_host.c`) confirming this class of
+synchronization bug is a real, previously-hit problem in this exact
+driver stack, not a one-off theory.
+
+Traced why this fires at all: `devm_backlight_device_register()`
+(called from `nt36523_create_backlight()`, only reached because
+`gts7l_desc.has_dcs_backlight = true`) triggers one automatic initial
+`update_status()` call - timing confirmed to land ~1ms before the
+CRTC/encoder chain's own concurrent DSI mode_flags manipulation as part
+of the same commit finishing up.
+
+**Fix**: set `.has_dcs_backlight = false` on `gts7l_desc`. Confirmed by
+reading `drm_panel_of_backlight()`/`devm_of_find_backlight()`/
+`of_find_backlight()` directly (not assumed) that this is a
+fully-supported, clean no-op when - as here - the panel's own
+devicetree node has no `backlight = <&phandle>;` property:
+`panel->backlight` simply stays `NULL`, no error, no probe failure.
+Software brightness control becomes a deferred item rather than
+required for a first picture - this device's backlight isn't wired to
+any real consumer-facing control path at this bring-up stage anyway.
+
+Kept the Round 44/45 diagnostics in for this test as a confirmation
+signal - the backlight-related ones (`nt36523_bl_update_status called`,
+`mipi_dsi_dcs_set_display_brightness_large returned`) should simply
+stop appearing entirely if this fix is correct, since that whole code
+path is no longer reached.
+
+Kernel + uniLoader rebuild (unchanged sizes), packaged via the same
+proven method (byte-exact verification passed), flashed.
+`rp`/`ro.bootloader` reconfirmed unchanged before and after.
+
+**Not yet tested on hardware as of writing this entry.**
