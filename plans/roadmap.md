@@ -280,6 +280,13 @@ Exit criteria:
       the primary direction** - in progress, see
       `../docs/kernel-boot-debugging.md` Round 19/20. Round 13's pivot
       recipe remains the documented fallback if this doesn't pan out.**
+      **Round 20 built and flashed a working SM8250 uniLoader port and got
+      the first qualitatively different result yet**: no Download-Mode
+      drop, stuck at the logo but the CPU visibly warmed up (real
+      execution, not an instant crash) - `/proc/last_kmsg` shows a boot
+      loop of clean ABL passes each ending in a `PS_HOLD` reset. Can't go
+      further without direct evidence of what's actually running during
+      that warm period - UART is the clear next step.**
 - [ ] UFS storage enumerates and is readable. **Driver forced built-in
       already (`gts7l.fragment`); needs the actual boot attempt to confirm.**
 - [ ] Root filesystem reachable via ADB/serial shell, even without display.
@@ -789,6 +796,29 @@ Progress log:
   drop-in reuse. **This is now the primary direction.** Full detail in
   `../docs/kernel-boot-debugging.md` Round 19. Nothing flashed this round;
   pure research. Tablet remains at Round 18's restored stock state.
+- 2026-09-19 (Round 20): Added SM8250 "kona" support to uniLoader (no fork
+  had it) - one Kconfig entry, a minimal `board-gts7l.c`, and a defconfig
+  with three physical addresses picked from this device's already-known
+  real `/reserved-memory` map (a genuinely free ~181MiB gap between
+  `cdsp_secure_heap` and the splash carveout). Built cleanly, packaged via
+  the already-proven Round 13 method (uniLoader binary as boot.img's
+  `kernel`, stock `dtb`/`dtbo`/`ramdisk` completely untouched), flashed
+  and tested on real hardware. **Result: different from every prior
+  round** - no drop to Download Mode, stuck at the logo but **the CPU
+  visibly warmed up** (a real, meaningful new data point - not consistent
+  with an instant crash or a fully idle hang). `/proc/last_kmsg` shows the
+  same clean ABL pass as Round 13 every cycle, but the capture holds many
+  repeated `PM: HARD RESET by PS_HOLD` cycles - most plausibly a boot loop
+  where something (uniLoader itself, or the real kernel after handoff)
+  runs for a real duration before resetting. Cannot be distinguished
+  further without direct evidence - `last_kmsg` is bootloader-only and
+  pstore still only reflects an old, unrelated stock session. **This
+  project has now hit the same evidence ceiling three times** (Rounds
+  13-16, 17-18, and this one) - UART is no longer optional if the
+  uniLoader branch is to be debugged further. Full detail in
+  `../docs/kernel-boot-debugging.md` Round 20. Tablet restored to stock
+  (`boot` only - `dtb`/`dtbo`/`ramdisk` were never touched), `rp`/
+  `ro.bootloader` reconfirmed unchanged.
 
 ---
 

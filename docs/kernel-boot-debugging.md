@@ -2318,3 +2318,56 @@ unchanged beforehand.
 
 **Not yet tested on hardware as of writing this entry** - the actual
 reboot/observe/log-capture step comes next.
+
+### Tested on real hardware: different from every prior round, still no
+direct kernel evidence
+
+Rebooted to normal boot. **Owner's report: no drop to Download Mode this
+time, stuck at the Samsung logo, but the CPU visibly warmed up** - a
+qualitatively different symptom from both Round 13-16's passive silent
+hang (device just sits there, cool, until manually forced back to
+recovery) and Round 17-18's fast automatic Download-Mode drop.
+
+`/proc/last_kmsg` shows the same clean pass as every pivot-based test
+since Round 13 (`EDTBO check fail` → `Shutting Down UEFI Boot Services`,
+zero DTB/DTBO errors - this test used stock `dtb`/`dtbo` exactly like
+Round 13, so this was expected and confirms uniLoader's packaging is
+sound), but the capture holds **many repeated boot cycles**, each ending
+in a `PM: HARD RESET by PS_HOLD` - a software-triggered reset, not a
+button-combo. Read one cycle in full: same length/shape as every other
+test's ABL sequence, nothing unusual in the bootloader stage itself.
+
+**What this most plausibly means**: a boot loop - reset, boot, run for
+some real duration (long enough to warm the CPU - a meaningful new data
+point, since silicon doesn't warm up from an instant crash or a completely
+idle hang), reset again. This is consistent with uniLoader actually
+executing (not immediately faulting), and possibly the real mainline
+kernel itself getting control and running for a while before something
+resets it - but **this cannot be distinguished from uniLoader itself
+looping or hanging internally** without direct evidence, since
+`/proc/last_kmsg` is bootloader-only (stops being written the instant
+ABL hands off) and `console-ramoops-0` still only reflects a much older,
+unrelated stock Android session (confirmed again this round - real
+downstream driver names like `max77705`/`ufshcd-qcom`/`sec_battery`
+appear in it, which this project's own mainline build doesn't have
+drivers for at all).
+
+**This is genuinely further/different progress, not a dead end** -
+distinctly not the passive hang or the instant Odin-drop symptom of any
+prior round, and the first time real evidence (thermal) suggests
+sustained execution past ABL handoff, on this project's first attempt at
+a from-scratch SM8250 uniLoader port. But it also means this project has
+now hit the same evidence ceiling for the third time (Rounds 13-16,
+17-18, and now 20) - **UART is no longer optional if this branch is to be
+debugged further**, since no bootloader-log or pstore trick can see what
+either uniLoader or the real kernel is actually doing during this warm
+period. The Round 8 UART research
+(`docs/uart-debug-research.md`) is the natural next step to actually
+resolve this, rather than continuing to guess at memory addresses or
+board-file details blind.
+
+Tablet restored to stock and hash-verified (`boot` `dd`-restored from a
+rooted TWRP shell, md5 `cf0cfcbaacc8cbc95f31a569d9823c12` matches
+`work/stock-backup/boot.img` exactly - `dtb`/`dtbo`/`ramdisk.cpio` were
+never touched this round, so needed no restore). `rp` (`1`) and
+`ro.bootloader` (`T875XXU1ATK4`) both reconfirmed unchanged.
