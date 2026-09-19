@@ -3797,3 +3797,30 @@ same proven method (byte-exact verification passed), flashed.
 `rp`/`ro.bootloader` reconfirmed unchanged before and after.
 
 **Not yet tested on hardware as of writing this entry.**
+
+## Round 44 (2026-09-19, same day): more temporary diagnostics - is
+dsi_7nm_phy_enable/vco_prepare even called during the real modeset?
+
+Round 43's raw `REG_DSI_FIFO_STATUS` value (`0x1ddd1011`) decoded to
+`HS_FIFO_EMPTY` + `OVERFLOW` + `UNDERFLOW` simultaneously true across
+multiple data lanes - a pattern consistent with a FIFO whose read/write
+pointers were never coherently clocked at all, not a fine-grained
+timing/traffic-mode mismatch. Recomputed the actual bit clock mainline
+would derive from our devicetree mode by hand (`dsi_get_pclk_rate()` +
+`dsi_byte_clk_get_rate()` in `dsi_host.c`, bonded-DSI halving already
+confirmed correct): ~935 MHz, vs. downstream's declared 998 MHz for
+this panel - only ~6% off, well inside a fractional-N PLL's normal
+lock range, so unlikely to explain a hard `status=0x00000000` failure
+on its own. Given two targeted fixes in a row (refgen, trim, burst
+mode) produced no observable change, added temporary `pr_err()`s
+directly in `dsi_7nm_phy_enable()` (entry: phy id/cphy_mode/
+bitclk_rate/tuning_cfg pointer; and again with the final trim values
+right before they're written to hardware) and `dsi_pll_7nm_vco_prepare()`
+(entry: phy id/vco_current_rate) - to settle, with certainty rather
+than inference, whether these functions are even reached during the
+real modeset, and whether the Round 41 trim override is actually being
+applied. Kernel + uniLoader rebuild (unchanged sizes), packaged via the
+same proven method (byte-exact verification passed), flashed.
+`rp`/`ro.bootloader` reconfirmed unchanged before and after.
+
+**Not yet tested on hardware as of writing this entry.**
