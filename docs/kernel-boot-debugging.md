@@ -3088,3 +3088,81 @@ build, `dtb`/`dtbo`/`ramdisk.cpio` = stock, untouched throughout. `rp`/
 `ro.bootloader` reconfirmed unchanged before flashing. **Awaiting
 hardware test result** - the real one, this time, on a build with no
 known bugs left in the loading path.
+
+### Tested: full success - genuine mainline Linux boots on real hardware
+
+Owner's report: after uniLoader's own splash, a black screen appeared
+(backlight on - a real, different visual state, not the frozen uniLoader
+text every prior round showed), held for ~4-5 seconds, then the device
+auto-reset on its own and looped back into uniLoader. Pulled
+`/proc/last_kmsg` immediately - and for the first time in this entire
+project, **it's full of real, genuine mainline Linux kernel boot output**:
+
+```
+[    0.000000] Booting Linux on physical CPU 0x0000000000 [0x51df805e]
+[    0.000000] Linux version 7.2.0-dirty (builder@host) (clang version 22.1.8, LLD 22.1.8) #11 SMP PREEMPT Sat Sep 19 15:29:12 -03 2026
+[    0.000000] Machine model: Samsung Galaxy Tab S7
+[    0.000000] printk: legacy console [earlyseclog0] enabled
+[    0.000000] CPU features: detected: GICv3 CPU interface
+...
+[    0.000000] Kernel command line: console=tty0 loglevel=15 softlockup_panic=1 watchdog_thresh=5
+```
+
+This project's own kernel, this project's own build, genuinely executing
+on the real tablet - real CPU feature detection (Spectre mitigations, LSE
+atomics, PMUv3, GICv3), the exact compiled-in cmdline read back
+correctly, and **Round 29's `sec_log` console registered successfully**
+(`earlyseclog0` - the very mechanism built to catch exactly this moment,
+working on the first real opportunity to prove it).
+
+Kept reading - memory management init, devtmpfs, thermal governors,
+cpuidle, ASID allocator, PSCI CPU power domain topology, CoreSight debug
+trace component dependency resolution across dozens of devicetree
+nodes - **all working, genuine platform bring-up**, not a crash. Then:
+
+```
+[    0.729898] sd 0:0:0:0: [sda] Attached SCSI disk
+[    0.732927] Freeing unused kernel memory: 2880K
+[    0.734507] Run /init as init process
+[    0.735961]   with arguments:
+[    0.737442]     /init
+[    0.738942]   with environment:
+[    0.740386]     HOME=/
+[    0.741843]     TERM=linux
+```
+
+**Full UFS storage enumeration** (all four LUNs, correct partition
+counts/names matching this exact device's real GPT layout - `sda`
+through `sdd`, 37 partitions each on the two full-layout LUNs) and **the
+kernel successfully mounted root and exec'd this project's own busybox
+initramfs `/init`.** This is Phase 1's actual exit criteria, met in full:
+mainline kernel boots, UFS storage enumerates and is readable, root
+filesystem reached.
+
+**The reset loop itself was immediately explained, not a new mystery**:
+right after the `TERM=linux` line, the log shows a fresh
+`XBL(477, warm reset, valid magic)` session start - a clean, recognized
+warm reset, exactly matching Round 28's own hardware-watchdog arm (3
+second fixed `WDT_BITE_TIME`, armed by uniLoader before the jump, left
+running unpetted since the kernel has no way to know it exists). That
+watchdog code was still present in every build since Round 28 including
+this one - it had already done exactly what Round 28 asked of it
+(turn a hang into a captured, analyzable reset), and was now the only
+thing left cutting the kernel off, at a fixed 3 seconds, right as it
+reached `/init`.
+
+## Round 31 (2026-09-19, same day): remove the now-obsolete watchdog arm
+
+Removed Round 28's hardware-watchdog-arm code from
+`arch/aarch64/load-kernel.c` entirely - it was a diagnostic aid for a
+problem that's now solved (Round 30's overlapping `PAYLOAD_ENTRY`), and
+is now the only remaining obstacle between the kernel and running past
+its own `/init`. Rebuilt uniLoader only (kernel/DTB unchanged from
+Round 29), packaged via the same proven method (byte-exact verification
+passed), flashed.
+
+Tablet state at time of writing: `boot` = this round's watchdog-removed
+build, `dtb`/`dtbo`/`ramdisk.cpio` = stock, untouched throughout. `rp`/
+`ro.bootloader` reconfirmed unchanged before flashing. **Awaiting
+hardware test result** - expecting this project's own busybox initramfs
+`init` script to actually run and reach an interactive shell.

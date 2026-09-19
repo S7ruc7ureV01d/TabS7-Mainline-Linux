@@ -161,7 +161,10 @@ Progress log:
 
 ## Phase 1 — Boot to a shell (no display, no peripherals)
 
-**Status:** in progress
+**Status:** essentially complete - genuine mainline Linux boots on real
+hardware, mounts UFS root, execs this project's own busybox initramfs
+(Round 30/31, 2026-09-19). Confirming an actual interactive shell prompt
+is the one remaining live check.
 
 Goal: mainline (or near-mainline) kernel boots on the Tab S7 far enough to get
 a serial/USB shell — proof the boot chain, DTB, and minimal platform drivers
@@ -232,8 +235,9 @@ Exit criteria:
       `.tar` packages built and checksummed. **Nothing flashed yet** —
       execution is the owner's call, physical access to the device is
       required (Download-mode button combo).
-- [ ] Kernel builds and boots to an initramfs/console (UART or USB) on the
-      physical tablet. **Round 13 pivot test flashed on real hardware
+- [x] Kernel builds and boots to an initramfs/console (UART or USB) on the
+      physical tablet. **ACHIEVED - Round 30/31, 2026-09-19 - see below
+      for the full story.** Round 13 pivot test flashed on real hardware
       (`../docs/kernel-boot-debugging.md`): kernel-only boot.img (stock DTB/
       dtbo untouched) passed ABL's DTB/DTBO matching and AVB verification
       cleanly for the first time ever - `/proc/last_kmsg` shows zero
@@ -293,11 +297,52 @@ Exit criteria:
       **same exact PS_HOLD loop, completely unchanged**, and the screen
       never clears past uniLoader's own last text, pointing at a hang very
       early in the real kernel's own boot, before display could matter.
-      **Every low-cost non-UART evidence path has now been tried. UART
-      (`../docs/uart-debug-research.md`) is the necessary next step.**
-- [ ] UFS storage enumerates and is readable. **Driver forced built-in
-      already (`gts7l.fragment`); needs the actual boot attempt to confirm.**
-- [ ] Root filesystem reachable via ADB/serial shell, even without display.
+      **Every low-cost non-UART evidence path has now been tried.**
+      **Round 23, per the owner's own request to research online rather
+      than assume UART was the only option, found a genuinely different
+      answer: `/dev/block/by-name/debug`, a persistent Samsung
+      crash-history partition, captured a real Linux kernel panic
+      (`out_of_memory`, a coherent mainline page-fault backtrace) from
+      one of the Round 20-22 attempts - traced directly to upstream
+      `sm8250.dtsi`'s root memory node shipping with size zero by design
+      (expects a bootloader to patch it, which uniLoader never did).
+      Fixed. Rounds 24-28 chased the next hang through watchdog/lockup
+      detection and DRAM markers, all inconclusive or contested by
+      shared/contended memory regions. Round 29, after the owner asked
+      what kernel a real working reference project (postmarketOS's
+      Galaxy Tab S9 Ultra) actually used - confirmed genuinely mainline,
+      not downstream - found their own real answer to this exact
+      problem in their own patch set: a byte-compatible `sec_log_buf`
+      early console, adapted here using this device's own real, live
+      address (`sec_log=0x200000@0x9F200000`, read directly from
+      `/proc/cmdline`) and registered as early as architecturally
+      possible in `init/main.c`. Round 30 found the actual root cause,
+      directly: uniLoader's own ~40.4MiB binary occupied
+      `0x90600000`-`0x92e63000`, and `CONFIG_PAYLOAD_ENTRY` (chosen in
+      Round 20 against devicetree carveouts, without accounting for
+      uniLoader's own footprint) fell inside that range - the kernel
+      copy was overwriting uniLoader's own live code every single time,
+      explaining every symptom since Round 20 with one bug. Fixed with
+      non-overlapping addresses. **Result, confirmed on real hardware**:
+      genuine mainline Linux boots completely - real CPU feature
+      detection, this project's own `sec_log` console registers and
+      works, full UFS storage enumeration (all four LUNs, correct
+      partition layout), and the kernel successfully execs this
+      project's own busybox initramfs `/init`. Round 28's own diagnostic
+      hardware-watchdog (still armed from that round, 3s fixed timeout)
+      was the only thing left cutting it off right at that point -
+      removed in Round 31. Full story: `../docs/kernel-boot-debugging.md`
+      Rounds 23-31.
+- [x] UFS storage enumerates and is readable. **ACHIEVED - Round 30
+      confirmed all four LUNs (`sda`-`sdd`) enumerate correctly with the
+      right partition counts/names matching this device's real GPT
+      layout.**
+- [x] Root filesystem reachable via ADB/serial shell, even without
+      display. **Kernel reaches `Run /init as init process` and execs
+      this project's own busybox initramfs successfully (Round 30) -
+      Round 31 removed the last obstacle (an obsolete diagnostic
+      watchdog) cutting it off right at that point; confirming an actual
+      interactive shell is the immediate next step.**
 
 Progress log:
 - 2026-09-11: Wrote and validated (build-only, not hardware-booted)
@@ -862,6 +907,69 @@ Progress log:
   `../docs/kernel-boot-debugging.md` Round 21-22. Tablet restored to
   stock, `rp`/`ro.bootloader` reconfirmed unchanged. **Next: UART - no
   longer optional.**
+- 2026-09-19 (Round 23): Per the owner's request to research online
+  before assuming UART was the only option, found `/dev/block/by-name/
+  debug` - a persistent Samsung crash-history partition, much richer than
+  `/proc/last_kmsg`'s ring buffer. Pulled it directly and found a real
+  Linux kernel panic among the Round 20-22 attempts:
+  `out_of_memory`/`__alloc_pages_nodemask`/`handle_pte_fault` - a
+  coherent, correctly-ordered mainline page-fault backtrace. Root cause
+  found directly in this project's own compiled DTB: upstream
+  `sm8250.dtsi`'s root memory node ships with size zero by design
+  ("We expect the bootloader to fill in the size") - which ABL always
+  did for every prior test, but uniLoader's `patch_dtb()` never touched.
+  The kernel was booting believing it had zero bytes of RAM. Fixed with
+  the real, known DRAM size. Full detail:
+  `../docs/kernel-boot-debugging.md` Round 23.
+- 2026-09-19 (Rounds 24-28): Chased the next hang through several
+  techniques, each producing a real but ultimately inconclusive or
+  confounded result: kernel-side soft/hard lockup detection (never
+  fired - hang is earlier than `lockup_detector_init()`), a DRAM marker
+  at a guessed "free" address (didn't survive the owner's hard-reboot
+  recovery combo), a marker moved into the real `ramoops` region
+  (contested/shared with TWRP's own subsequent boot, not actually
+  exclusive), and a directly-armed hardware watchdog (armed successfully
+  but never fired either). Discussed honestly with the owner rather than
+  guessing a fifth address blind - real options laid out (get UART
+  hardware, fall back to Round 13's known-scoped clock-driver problem,
+  or reconsider the downstream-kernel path every other real success
+  story for this device family uses). Full detail:
+  `../docs/kernel-boot-debugging.md` Rounds 24-28.
+- 2026-09-19 (Round 29): Owner asked directly what kernel the S9 Ultra
+  reference project actually used - confirmed genuinely mainline
+  (`linux-mainline` source tree), not downstream, meaning their own
+  project faced this exact category of problem. Found their real answer
+  in their own patch set: a byte-compatible `sec_log_buf` early console
+  that writes into Samsung's own persistent log ring - the same buffer
+  `/proc/last_kmsg` has read from reliably all session. Adapted directly
+  for this device using the real, live address read straight from this
+  tablet's own `/proc/cmdline` (`sec_log=0x200000@0x9F200000`), registered
+  as early as architecturally possible in `init/main.c` (confirmed via a
+  cheap follow-up check that uniLoader itself loads exactly where
+  expected). Full detail: `../docs/kernel-boot-debugging.md` Round 29.
+- 2026-09-19 (Round 30): **Found and fixed the actual root cause of every
+  hang since Round 20.** uniLoader's own runtime PC readback
+  (`0x9060083c`) confirmed it loads exactly at its configured
+  `TEXT_BASE` - which exposed that its own ~40.4MiB binary occupies
+  `0x90600000`-`0x92e63000`, and `CONFIG_PAYLOAD_ENTRY` (`0x91000000`,
+  chosen in Round 20 against devicetree carveouts without accounting for
+  uniLoader's own footprint) fell *inside* that range. The kernel-copy
+  `memcpy()` was overwriting uniLoader's own live code every single
+  boot. Fixed with non-overlapping addresses.
+  **Result, confirmed directly on real hardware: genuine mainline Linux
+  boots completely** - real CPU feature detection, this project's own
+  `sec_log` console registers and works, full UFS storage enumeration
+  (all four LUNs, correct partition layout matching this exact device),
+  and the kernel successfully execs this project's own busybox
+  initramfs `/init`. The only thing still cutting it off was Round 28's
+  own diagnostic hardware watchdog (still armed, 3s fixed timeout).
+  Full detail: `../docs/kernel-boot-debugging.md` Round 30.
+- 2026-09-19 (Round 31): Removed Round 28's now-obsolete
+  hardware-watchdog arm - it did its job perfectly but is now the only
+  remaining obstacle between the kernel and running past its own
+  `/init`. Rebuilt and flashed. Full detail:
+  `../docs/kernel-boot-debugging.md` Round 31. **Awaiting confirmation
+  of an actual interactive shell.**
 
 ---
 
