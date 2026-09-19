@@ -2037,3 +2037,188 @@ Tablet restored to stock and hash-verified after this round: `boot`
 `51ece8aecea8862b258b71aea8154b3d`) both `dd`-restored from a rooted TWRP
 shell, both match `work/stock-backup/` exactly. `rp` (`1`) and
 `ro.bootloader` (`T875XXU1ATK4`) both reconfirmed unchanged.
+
+## Round 18 (2026-09-19): the reserved-memory fix, tested - no change
+
+Audited this project's compiled DTB against stock's real `/reserved-memory`
+node address-by-address (not just presence/absence), using the exact
+1-to-1 comparison method: extracted stock's `/reserved-memory` (already on
+disk, `work/round16-clkfix/entry0.dts`) and this project's own compiled
+`sm8250-samsung-gts7l.dtb`, matched every child node by physical address.
+Found two concrete, well-evidenced gaps and fixed both in
+`kernel/dts/sm8250-samsung-gts7l.dts` (see the file's own inline comment
+for full reasoning):
+
+1. **`xbl_aop_mem` address/size mismatch**: upstream's `sm8250.dtsi`
+   reserves Always-On Processor firmware memory at `0x80700000`, size
+   `0x160000`. Stock's real firmware reserves `0x80603000`, size
+   `0x25d000` - same end address, but starting ~1MiB earlier. That gap is
+   real, secure-world-owned AOP memory our kernel's allocator could
+   legitimately hand out. Overridden via `&xbl_aop_mem { reg = <...>; };`
+   to match stock exactly.
+2. **Missing `dfps_data_region@9e300000`** (0x100000, dynamic frame-rate
+   tracking data): present in stock, absent from upstream entirely. Added
+   as a new child node via `&{/reserved-memory} { ... };`, matching
+   stock's own `no-map`-less treatment.
+
+Rebuilt the DTB (clean build, both fixes confirmed present via `fdtget`),
+rebuilt the same Round 17 packaging (own mainline DTB gzip+appended onto
+the kernel, `dtbo.img` invalidated), reflashed both `boot` and `dtbo`
+(verified via independent-directory unpack first, learning Round 17's
+same-directory-clobber lesson).
+
+**Result: identical to Round 17.** Same `PM: HARD RESET by PS_HOLD`
+auto-reset immediately after `Shutting Down UEFI Boot Services`, across
+11 repeated attempts caught in one longer `last_kmsg` capture (spanning a
+session gap where the owner retried several times independently) - zero
+kernel-level evidence in any of them, same as before. The reserved-memory
+fix made no observable difference either way.
+
+## Round 19 (2026-09-19): reality check - the dtbo invalidation likely never
+reached ABL at all, and a materially better architecture found
+
+Two things happened this round that reframe Rounds 17-18 significantly.
+
+### The owner's reality check
+
+Asked directly whether Round 17/18's "falls to Odin" symptom was a
+genuinely new problem or a regression of the one already solved in
+Round 12/13. Answer, stated plainly: **it's a different, new issue, not a
+regression.** Round 13's fix (kernel-only swap, stock DTB/dtbo left
+completely untouched) still stands and still works - it produces a clean
+ABL pass and a *silent* hang, never an auto-reset to Download Mode.
+Rounds 17-18 abandoned that base entirely in favor of a different
+technique (this project's own mainline DTB, appended after the kernel,
+plus a deliberately invalidated `dtbo.img` - borrowed from the S9 Ultra
+project) to chase Option B (get ABL to accept a genuine mainline
+devicetree) after Round 15 found Option A's (patch stock's DTB compatible
+strings) fundamental clock-driver mismatch. The Odin-drop symptom belongs
+entirely to that separate Round 17-18 branch, not to Round 13's still-good
+pivot. Worth remembering: **Round 13's pivot is the known-good fallback
+state to return to if the mainline-DTB branch doesn't pan out** - it's
+what the tablet is restored to at the end of every round already, but the
+*devicetree/kernel artifacts* for it (Round 13's exact boot.img) aren't
+separately archived beyond what's already in `docs/kernel-boot-debugging.md`
+Round 13 and `plans/roadmap.md`'s matching entry - rebuilding it means
+repeating Round 13's exact recipe (kernel-only swap, stock `boot.img`'s own
+`dtb`/`ramdisk.cpio` sections untouched, no `dtbo.img` flash at all), not
+reusing a saved artifact.
+
+### The Ghidra decompile: our theory was structurally right, but the test
+setup was very likely broken
+
+Forked a background Ghidra decompile of `LinuxLoader.pe`'s actual
+appended-DTB-fallback logic (the strings found via `strings` on
+`work/abl-analysis/abl.bin_output/.../file-f536d559.../section1.pe`:
+`Continue with appended DTB`, `Single appended DTB found`, etc. - distinct
+from the separate, unrelated, always-present `EDTBO`/`user_dtbo` mechanism
+that had been incorrectly treated as circumstantial confirmation in
+Round 17's writeup; `EDTBO check fail` was already present identically
+back in Round 13, when the main `dtbo` was still 100% stock, proving it's
+unrelated to our dtbo-invalidation trick).
+
+**Confirmed, with a decompiled function address**: `FUN_000325f8` (0x325f8)
+in `BootLinux()`'s call chain is the real `LoadAndValidateDtboImg`
+equivalent. It loads the `dtbo` partition, checks the header magic
+(`0xd7b7ab1e` - the real Android DT Table magic, matching what's on
+stock's genuine `dtbo.img`), and if that check fails, `BootLinux()` routes
+into the single-appended-DTB path instead of the normal
+`FUN_00025490`/`FUN_00026748` Soc-Dtb/Board-Dtb matcher chain. **This
+confirms the S9-Ultra-style mechanism genuinely exists in this device's
+own ABL** - the underlying theory was sound, contrary to what a first
+read of the Round 17/18 symptom might suggest.
+
+**But**: cross-checking both Round 17 and Round 18's actual
+`/proc/last_kmsg` captures against this decompiled logic found something
+that doesn't fit. Both logs show, in the real test sessions: `GetFooterInfo:
+Found Footer Info for dtbo`, `Using SignerV2`, `Signature verification
+succeed`, `(Booting) AUTHENTICATE Succeed Dtbo binary: dtbo`, followed by
+the normal `FindBestMatch GetBoardRev = 7, DtSubType = 6` matcher chain.
+**A genuine AVB signature verification succeeding is not possible against
+an all-zero 10MB file.** ABL authenticated a real, validly-signed `dtbo`
+image in both test boots - not the invalidated one that was flashed and
+hash-verified (via `md5sum` immediately after `dd`) right beforehand. This
+strongly suggests **the invalidated `dtbo.img` never actually reached ABL
+in either test** - `FUN_000325f8` almost certainly returned nonzero (the
+normal path) both times, meaning Rounds 17-18 most likely never actually
+exercised the appended-DTB fallback at all, and whatever caused the
+`PS_HOLD` auto-reset happened via the *ordinary* Soc-Dtb/Board-Dtb matcher
+chain succeeding on this project's own mainline DTB (not via the intended
+fallback mechanism) - a genuinely different situation than what Round
+17-18's writeups assumed, and not yet root-caused. (No `ResetSystem`/reboot
+call exists inside `BootLinux()` or `FUN_000325f8` themselves per this
+decompile - the reset originates elsewhere, either a caller reacting to
+`BootLinux()`'s return, or the kernel side, post-handoff.)
+
+**Not yet investigated further**: why the dtbo write didn't take effect by
+boot time despite a clean immediate-readback hash match - worth checking
+for A/B slot mismatches, a self-healing/repair mechanism, or a
+partition-addressing gap between what TWRP's `dd` writes and what ABL
+reads, *if* this branch of investigation is resumed later.
+
+### A materially better architecture, found by checking whether this
+exact wall has already been solved elsewhere
+
+Per the owner's direction, checked whether Note20/S20-family (same SM8250
+"kona" SoC) mainline efforts have already solved this exact
+"Samsung-ABL-vs-mainline-devicetree" problem, rather than continuing to
+invent fixes. Found **uniLoader**
+(`https://github.com/ivoszbg/uniLoader`, also maintained in parallel forks
+`JeyKul/uniLoader`, `DaemonMCR/uniLoader`, `faveoled/uniLoader`) - a real,
+proven, actively-used shim bootloader with exactly this design goal, with
+working device support for Samsung Exynos 990 (Note20, S20, S20 FE) and
+Qualcomm SM8350/SM8450/SM8650, among many other vendors (Xiaomi, Apple,
+MediaTek, etc.).
+
+**How it works, confirmed by reading its actual source**
+(`arch/aarch64/linux-kernel-image-header.h`, `board/samsung/board-r0q.c`,
+`README.md`): uniLoader's compiled output embeds a genuine `"ARM\x64"`
+Linux kernel image header (the exact magic real Linux `Image` files start
+with) at its own entry point - structurally indistinguishable from a real
+kernel to any tool that checks for this header, *including Samsung's ABL
+itself*. It's built by cross-compiling uniLoader with a real mainline
+`Image`, `dtb`, and `ramdisk` copied into its own `blob/` directory and
+linked in directly; the result is a single binary that gets flashed as the
+boot.img's `kernel` field - **exactly this project's already-proven
+Round 13 pivot packaging** (stock `dtb`/`dtbo` left completely untouched,
+satisfying ABL's DTB/DTBO matching trivially, the same way Round 13 does).
+Once uniLoader has CPU control (having been jumped to by ABL exactly as if
+it were loading a real kernel), it ignores whatever devicetree ABL handed
+off and instead places its own embedded real mainline kernel + real
+mainline DTB + ramdisk at fixed physical addresses (`CONFIG_PAYLOAD_ENTRY`
+et al. from its own `defconfig`) and jumps to the real kernel with its own
+DTB pointer.
+
+**This sidesteps both walls at once, architecturally rather than by
+fighting either directly**: the ABL DTB-matching problem (Rounds 4-11,
+17-18) never comes up, because ABL only ever validates whatever devicetree
+it already accepts today (stock's); and the downstream-vs-mainline
+clock-driver mismatch (Round 15-16) never comes up either, because the
+*real* Linux kernel boots with a *real* mainline devicetree uniLoader
+supplies directly, never touching stock's downstream-shaped one at all.
+
+**Not a drop-in reuse, but a well-templated extension**: checked every
+uniLoader fork found and confirmed **none currently has Qualcomm SM8250
+"kona" support** - existing Samsung boards are all Exynos 990 (`r8s`/`c1s`/
+`x1s`, Note20/S20/S20-FE Exynos variants) or newer Qualcomm generations
+(`r0q` in this fork is actually Galaxy S22/SM8450, a codename collision
+with our own project's unrelated `sm8250-samsung-r0q.dts` reference file -
+worth remembering these are two different devices sharing a codename
+letter-string across chip generations). Adding SM8250 support means: one
+new SoC Kconfig entry, one minimal `board-gts7l.c` (the entire pattern for
+an existing device, e.g. `board-r0q.c`, is ~20 lines - a name string plus
+an optional `simplefb` device struct), and one `defconfig` with three
+physical memory addresses (`CONFIG_TEXT_BASE`, `CONFIG_PAYLOAD_ENTRY`,
+`CONFIG_RAMDISK_ENTRY`) chosen to avoid this device's real
+`/reserved-memory` carveouts (already fully enumerated in Round 15-16's
+work, `work/round16-clkfix/entry0.dts`).
+
+**Status**: this is the new primary direction. Tablet is currently at
+Round 18's post-test restored state (`boot`/`dtbo` both `dd`-restored to
+stock, hash-verified, `rp`/`ro.bootloader` unchanged) - the same
+known-safe baseline every round ends at. **Round 13's pivot recipe remains
+the documented fallback** if the uniLoader work doesn't pan out: rebuild
+via kernel-only swap against stock `boot.img`, stock `dtb`/`ramdisk.cpio`
+sections untouched, no `dtbo.img` flash - see Round 13 above for the full,
+proven recipe. Nothing flashed this round; pure research and one Ghidra
+decompile.

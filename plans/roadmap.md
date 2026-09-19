@@ -259,9 +259,27 @@ Exit criteria:
       instead of hanging silently - closely paralleling the exact next
       problem S9 Ultra hit at this stage (a TrustZone NoC fault from
       missing `/reserved-memory` `no-map` carveouts their mainline DTS
-      didn't have). Next: audit `kernel/dts/sm8250-samsung-gts7l.dts`
-      against stock's real carveout list and add the missing entries -
-      not yet attempted.**
+      didn't have). **Round 18 tried that fix - identical symptom, no
+      observable change across 11 repeated attempts. Round 19 found the
+      dtbo-invalidation likely never actually reached ABL in either test
+      (ABL's log shows a validly-signed dtbo being authenticated, which
+      an all-zero file can't produce) - Rounds 17-18's real cause is still
+      not root-caused.** Per the owner's direction, checked whether
+      Note20/S20-family (same SM8250 SoC) mainline efforts already solved
+      this - found **uniLoader**
+      (`https://github.com/ivoszbg/uniLoader`), a proven shim-bootloader
+      framework (working on Exynos 990 Note20/S20/S20-FE and newer
+      Qualcomm SoCs) that sidesteps the ABL DTB-matching problem
+      architecturally: it gets loaded by ABL as if it were a real kernel
+      (reusing this project's own proven Round 13 pivot packaging - stock
+      DTB/dtbo untouched), then ignores whatever devicetree ABL handed it
+      and jumps to its own embedded real mainline kernel + DTB directly.
+      No SM8250 "kona" support exists in any uniLoader fork yet - this
+      would be a new-SoC extension (one Kconfig entry, one ~20-line board
+      file, three memory addresses), not a drop-in reuse. **This is now
+      the primary direction** - in progress, see
+      `../docs/kernel-boot-debugging.md` Round 19/20. Round 13's pivot
+      recipe remains the documented fallback if this doesn't pan out.**
 - [ ] UFS storage enumerates and is readable. **Driver forced built-in
       already (`gts7l.fragment`); needs the actual boot attempt to confirm.**
 - [ ] Root filesystem reachable via ADB/serial shell, even without display.
@@ -739,6 +757,38 @@ Progress log:
   reconfirmed unchanged. **Next**: audit our DTS against stock's real
   `/reserved-memory` carveout list (already extracted this session) and
   add the missing `no-map` entries - not yet attempted.
+- 2026-09-19 (Round 18): Applied the reserved-memory fix - two concrete
+  address-level gaps found against stock's real `/reserved-memory` node
+  (`xbl_aop_mem` reserved ~1MiB short of stock's real range; a missing
+  `dfps_data_region@9e300000` carveout entirely), fixed both in
+  `kernel/dts/sm8250-samsung-gts7l.dts`, rebuilt, reflashed the same
+  Round 17 packaging. **Identical symptom, no change** - same `PS_HOLD`
+  auto-reset, across 11 repeated attempts caught in one capture (owner
+  retried several times independently over a session gap). Tablet
+  restored to stock, `rp`/`ro.bootloader` unaffected.
+- 2026-09-19 (Round 19): Owner asked for a reality check - confirmed the
+  Round 17/18 auto-reset is a genuinely different, new issue, not a
+  regression of Round 12/13's already-working fix (which still stands:
+  kernel-only swap, stock DTB/dtbo untouched, clean pass, silent hang -
+  the documented fallback if this branch doesn't pan out). Forked a
+  Ghidra decompile of the actual appended-DTB-fallback logic in this
+  device's own ABL (`FUN_000325f8`, gates on the `dtbo` partition's
+  Android-DT-Table magic) - **confirmed the mechanism genuinely exists on
+  this device**, but cross-checking Round 17/18's own logs found ABL
+  authenticating a validly-signed `dtbo` in both tests, which an all-zero
+  file can't produce - meaning the dtbo-invalidation likely never actually
+  reached ABL in either test, and Rounds 17-18's real cause is still open.
+  Per the owner's direction, checked whether Note20/S20-family (same
+  SM8250 SoC) mainline efforts already solved this exact problem - found
+  **uniLoader** (`https://github.com/ivoszbg/uniLoader`), a proven
+  shim-bootloader that gets loaded by ABL as a fake "kernel" (reusing this
+  project's own Round 13 pivot packaging) then jumps to its own embedded
+  real mainline kernel+DTB directly, sidestepping both the ABL
+  DTB-matching wall and the downstream-vs-mainline clock-driver mismatch
+  at once. No SM8250 support in any fork yet - a new-SoC extension, not a
+  drop-in reuse. **This is now the primary direction.** Full detail in
+  `../docs/kernel-boot-debugging.md` Round 19. Nothing flashed this round;
+  pure research. Tablet remains at Round 18's restored stock state.
 
 ---
 
