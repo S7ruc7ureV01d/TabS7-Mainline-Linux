@@ -2814,3 +2814,84 @@ Tablet state at time of writing: `boot` = this round's ramoops-marker
 build, `dtb`/`dtbo`/`ramdisk.cpio` = stock, untouched throughout. `rp`/
 `ro.bootloader` reconfirmed unchanged before flashing. **Awaiting
 hardware test result.**
+
+### Tested: real text fragments came back, not our marker - the region
+wasn't actually unused padding
+
+Owner's readback: `kernel marker @ 0x9fac4000: 23800 6c6c` / `uniLoader
+canary @ 0x9fac5000: 2e2e2e 72656874`. Decoded directly: `6c6c` = ASCII
+`ll`; `72656874` read as bytes `72 65 68 74`, little-endian word =
+`t h e r` - a genuine English text fragment, not noise and not either
+marker. **This is real console/dmesg log content**, meaning the "unused
+padding past ramoops' sub-buffers" assumption was wrong - this offset is
+actually live, and gets overwritten by whatever kernel boots next
+(TWRP's own recovery kernel, which legitimately uses the same shared
+`ramoops` region) before uniLoader's next readback ever happens. A
+genuinely shared/contested region, not an exclusive one - defeats the
+whole point regardless of DRAM retention.
+
+Asked the owner how to proceed rather than guess a fourth address.
+Researched online (per the owner's request) whether other porters have a
+known answer for "early hang, no UART" - found `CONFIG_NETCONSOLE` and
+postmarketOS's USB-ACM debug shell as the established mainline answers,
+but both need substantially more kernel infrastructure already running
+(USB controller probed, network stack up) than this project's hang point
+- already shown, via Round 24's watchdog-detector test, to be *before*
+even `lockup_detector_init()` can arm. Neither would help here.
+
+## Round 28 (2026-09-19, same day): arm the real hardware watchdog
+directly from uniLoader - reusing proven infrastructure instead of a
+fourth memory-address guess
+
+Reconsidered the approach entirely rather than trying another DRAM
+address: this device's real hardware "apps watchdog" is the same *class*
+of mechanism that has *already*, repeatedly, reliably produced real,
+analyzable crash-dump entries in `/dev/block/by-name/debug` throughout
+this project - Round 23's genuine `out_of_memory` panic backtrace, and
+RWC=72-78's `Watchdog Reset (CPU HANG)` entries from Rounds 20-22. This
+is proven, working infrastructure, not a new guess - the actual gap was
+just that nothing was arming a *short-timeout* watchdog specifically
+covering uniLoader's own jump-to-kernel window.
+
+**Confirmed the exact hardware directly**: `work/linux/.../sm8250.dtsi`
+declares `watchdog@17c10000`, `compatible = "qcom,apss-wdt-sm8250",
+"qcom,kpss-wdt"`, clocked by `&sleep_clk` (this device's real fixed
+32000 Hz clock, confirmed since Round 16). Cross-checked the exact
+register layout against the real mainline driver,
+`drivers/watchdog/qcom-wdt.c`'s `reg_offset_data_kpss` table (the
+`"qcom,kpss-wdt"` compatible string maps to this exact layout, not the
+`apcs_tmr` one): `WDT_RST=0x4`, `WDT_EN=0x8`, `WDT_BARK_TIME=0x10`,
+`WDT_BITE_TIME=0x14`.
+
+**Implemented in `arch/aarch64/load-kernel.c`, `arch_load_kernel()`**,
+immediately before the jump to the kernel, mirroring the real driver's
+own `qcom_wdt_start()` sequence exactly (disable → reset counter → set
+bark/bite time → enable) with a short 3-second timeout
+(`3 * 32000` ticks) and then left running, unpetted. If the kernel hangs
+before it could ever reach Linux's own watchdog-petting infrastructure
+(already shown to be the case - Round 24's own softlockup/hardlockup
+detectors, which arm earlier than watchdog petting would, never even
+fired), this hardware watchdog fires independently of anything the
+kernel does, forcing a real reset without needing the owner's manual
+hard-reboot at all - and per this device's own proven `sec_debug`/TZBSP
+crash-dump behavior, the resulting event should itself get captured with
+a real, symbolized backtrace, the same as Round 23's OOM panic.
+
+Removed the now-redundant DRAM canary write (Round 27's confound doesn't
+apply to this approach at all - no reliance on reading anything back
+through uniLoader's own screen). Left the kernel-side `head.S` marker and
+`board-gts7l.c`'s readback prints in place as harmless bonus
+instrumentation, in case DRAM does happen to survive a watchdog-triggered
+reset differently than the owner's manual combo.
+
+Rebuilt uniLoader only (kernel Image unchanged from Round 27), packaged
+via the same proven method (byte-exact verification passed), flashed.
+**Snapshotted the debug partition immediately before this test**
+(`work/debug_partition_pre_round28.bin`, md5
+`7d9548f71dffbce8ff1d7564ce45c525`) so any new entry afterward can be
+confirmed genuinely new, not a stale artifact.
+
+Tablet state at time of writing: `boot` = this round's watchdog-arm
+build, `dtb`/`dtbo`/`ramdisk.cpio` = stock, untouched throughout. `rp`/
+`ro.bootloader` reconfirmed unchanged before flashing. **Awaiting
+hardware test result.**
