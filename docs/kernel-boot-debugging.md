@@ -2651,3 +2651,75 @@ Tablet state at time of writing: `boot` = this round's watchdog-enabled
 uniLoader build, `dtb`/`dtbo`/`ramdisk.cpio` = stock, untouched
 throughout. `rp`/`ro.bootloader` reconfirmed unchanged before flashing.
 **Awaiting hardware test result.**
+
+### Tested: no panic even after 1-2 minutes - hang is earlier than the
+lockup detectors themselves
+
+Owner's report: hung again, waited 1-2 minutes (well past the shortened
+5s threshold), no auto-reboot. Pulled the debug partition fresh
+(`work/debug_partition3.bin`) - **still completely unchanged**, `RWC=81`
+still the newest entry. Even with soft/hard lockup detection enabled and
+a short threshold, nothing panicked.
+
+**This is real, meaningful negative evidence**: `lockup_detector_init()`
+itself only runs partway through `start_kernel()`, after timekeeping and
+the scheduler are already up. If neither detector ever fired in 1-2
+minutes, the hang is happening *before* that init point - the kernel
+doesn't yet have enough of itself running to detect its own hang, let
+alone panic. Not "stuck somewhere in general boot" - stuck very close to
+the actual entry point.
+
+## Round 25 (2026-09-19, same day): a raw DRAM marker at the kernel's very
+first instruction - the most fundamental check possible, no UART needed
+
+Checked whether physical memory could be read directly from TWRP to avoid
+needing another boot cycle at all - confirmed neither `/dev/mem` nor
+`/proc/kcore` exist on this device's TWRP kernel (both plain "No such
+file or directory"). No direct physical-memory readback available.
+
+**Workaround, reusing infrastructure already proven working**: since DRAM
+survives the warm `PS_HOLD`/`KPDPWR_AND_RESIN` resets used throughout this
+project (confirmed by every pstore/ramoops reference so far), have
+uniLoader itself - which we know reliably runs and can print to its own
+`simplefb` console every single boot - read a fixed physical address and
+print it on screen via a new `late_init` board hook
+(`board/samsung/board-gts7l.c`), right after the console comes up, before
+jumping to the kernel again. This makes the check a two-cycle,
+single-flash process: cycle 1 lets a potential write happen (or not);
+cycle 2 (same image, no reflash) prints back whatever cycle 1's kernel
+left behind, right there on uniLoader's own splash screen.
+
+**The write side**: patched `arch/arm64/kernel/head.S`'s `primary_entry` -
+the literal first instructions executed after the kernel's own Linux
+image header, before `record_mmu_state`, before anything else - to write
+a distinctive, essentially-impossible-by-coincidence 64-bit pattern
+(`0xdeadbeefcafec0de`) to a fixed physical address in this device's known-
+free memory gap (`0x95000000`), using plain `movz`/`movk` immediate-move
+instructions (not a literal-pool `ldr =`, safer in this identity-mapped
+startup section) followed by an explicit `dc cvac`+`dsb sy` to force the
+write out of any cache line and into real DRAM before a later hang/reset
+could lose it (caches don't survive a reset; only DRAM does, the same
+reason pstore/ramoops itself works). Safe by construction: the arm64 boot
+protocol *requires* the MMU to be off at this exact entry point, so a
+plain physical-address `str` is always valid regardless of how uniLoader
+hands off. Saved as a tracked patch:
+`kernel/patches/0001-round25-early-dram-debug-marker.patch` (applied
+against `work/linux`, a build-scratch checkout, not tracked by this
+project's own git history otherwise).
+
+Rebuilt kernel Image (incremental, one file changed), rebuilt uniLoader
+with both the marker-write kernel and the marker-read board hook,
+packaged via the same proven method (byte-exact verification passed),
+flashed.
+
+**Awaiting hardware test result** - the owner needs to run *two* boot
+cycles from this one flash: reboot and let it hang as before, then reboot
+again (no reflash) and read whatever uniLoader prints for "debug marker @
+0x95000000" on its splash screen. `deadbeef cafec0de` means the kernel's
+first instructions genuinely executed; anything else means the jump from
+uniLoader never reached real kernel code at all - two completely
+different problems requiring completely different next steps.
+
+Tablet state at time of writing: `boot` = this round's marker build,
+`dtb`/`dtbo`/`ramdisk.cpio` = stock, untouched throughout. `rp`/
+`ro.bootloader` reconfirmed unchanged before flashing.

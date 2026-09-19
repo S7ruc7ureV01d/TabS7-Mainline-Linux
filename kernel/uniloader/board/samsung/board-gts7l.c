@@ -20,6 +20,7 @@
 #include <util.h>
 #include <drivers/framework.h>
 #include <lib/simplefb.h>
+#include <lib/debug.h>
 
 static struct video_info gts7l_fb = {
 	.format = FB_FORMAT_ARGB8888,
@@ -43,9 +44,41 @@ static const struct device gts7l_devices[] = {
 	{ "simplefb", &gts7l_fb, "fb" },
 };
 
+/*
+ * Round 25 debug marker readback (docs/kernel-boot-debugging.md) - this
+ * device's TWRP kernel has neither /dev/mem nor /proc/kcore, so there's no
+ * way to inspect arbitrary physical RAM from userspace after a hang. Since
+ * DRAM survives the warm PS_HOLD reset used to get back into TWRP (the
+ * same principle pstore/ramoops already relies on), have uniLoader itself
+ * read the fixed marker address and print it on its own splash screen -
+ * runs on *every* boot, right after simplefb comes up (late_init, so a
+ * console is already registered), before jumping to the kernel again.
+ * On the first flash this prints whatever garbage was already there; the
+ * meaningful read is whatever shows after a hang+reboot cycle, reflecting
+ * what the *previous* boot's kernel (kernel/arch/arm64/kernel/head.S,
+ * see kernel/patches/0001-round25-early-dram-debug-marker.patch) left
+ * behind - `deadbeef cafec0de` means the kernel's very first instructions
+ * genuinely executed; anything else means the jump never got that far.
+ * Printed as two 32-bit halves since nanoprintf's large-format (%llx)
+ * specifiers are disabled in this build (see lib/console/console.c).
+ */
+static int gts7l_late_init(void)
+{
+	volatile unsigned long long *marker =
+		(volatile unsigned long long *)0x95000000ULL;
+	unsigned long long val = *marker;
+	unsigned int hi = (unsigned int)(val >> 32);
+	unsigned int lo = (unsigned int)(val & 0xffffffffU);
+
+	printk(KERN_INFO, "debug marker @ 0x95000000:\n");
+	printk(KERN_INFO, "%x %x\n", hi, lo);
+	return 0;
+}
+
 struct board_data board_ops = {
 	.name = "samsung-gts7l",
 	.ops = {
+		.late_init = gts7l_late_init,
 	},
 	.devices = gts7l_devices,
 	.num_devices = ARRAY_SIZE(gts7l_devices),
