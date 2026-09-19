@@ -4010,3 +4010,83 @@ same safe address margins), packaged via the same proven method
 reconfirmed unchanged before and after.
 
 **Not yet tested on hardware as of writing this entry.**
+
+### Tested: Round 48 confirmed correct - ISL98608 bias IC now probes and
+programs successfully, but the FIFO error is completely unchanged
+
+Owner confirmed via the live shell: `ls /sys/bus/i2c/devices/` now
+shows `8-0029` and `i2c-8` (both the adapter and our child device), and
+`dmesg` shows `isl98608_gts7l_probe called, i2c addr=0x29` followed by
+`both bias registers written successfully`. The Round 48 QUP wrapper
+fix was correct and is a real, independent bug fix - the panel's own
+AVDD/AVEE bias rails are now genuinely programmed to 5.5V, for the
+first time in this project.
+
+**The screen is still black, backlight still off, and the raw
+`REG_DSI_FIFO_STATUS` value is bit-for-bit identical
+(`0x1ddd1011`) to every previous capture since Round 43, at the same
+relative timing (~380ms after the PLL's 5 successful prepares, right
+before `fb0` registers).** This is now the fifth consecutive
+independently-confirmed, real bug fix (refgen, PHY trim, burst mode,
+disabling the racy backlight callback, GPI DMA, the QUP wrapper enable,
+and now the bias IC) with zero measurable effect on this one specific
+failure - strong evidence it's a single, deterministic, structural
+issue rather than a race or a missing peripheral dependency.
+
+Precisely decoded the raw value bit-by-bit (via a small Python script,
+not manual counting - caught a genuine miscount in an earlier casual
+read): `VIDEO_MDP_FIFO_OVERFLOW` (bit 0) is set, alongside simultaneous
+`HS_FIFO_EMPTY`/`OVERFLOW`/`UNDERFLOW` on data lanes 0-2 and
+`HS_FIFO_EMPTY` alone on the unused lane 3 (expected/idle for a
+3-lane C-PHY link), plus `DLN0_LP_FIFO_EMPTY` and one unaccounted bit
+(`0x10`, not present in `dsi.xml.h`'s named constants). Critically,
+`VIDEO_MDP_FIFO_OVERFLOW` specifically means the DPU's own pixel-source
+FIFO (feeding the DSI controller, not just the DSI-side lane FIFOs) is
+overflowing - a genuine bandwidth/timing symptom, not just an
+artifact of an unclocked block.
+
+**Ruled out this round, each checked directly against source rather
+than assumed:**
+- **Lane mapping/swap**: confirmed correct via `dsi_host.c`'s own
+  `dsi_host_parse_lane_data()`/`supported_data_lane_swaps[]` lookup -
+  our `data-lanes = <0 1 2>` resolves to the straight "0123" mapping
+  (index 0, no swap), matching downstream's own explicit
+  `qcom,mdss-dsi-lane-map = "lane_map_0123"` for this exact panel.
+  `dsi_phy_7nm.c`'s own hardcoded `LANE_CFG0`/`LANE_CFG1` registers
+  (with their "TODO: we need to calculate this" comment) are a
+  separate, lower-level PHY analog-lane thing, not the logical
+  swap/ordering mechanism - a red herring.
+- **DSC (display stream compression)**: downstream's own
+  `qcom,display-topology = <2 0 2>` decodes via
+  `dsi_panel_parse_topology()` (`references/gts7l/techpack/display/
+  msm/dsi/dsi_panel.c`) to `num_lm=2, num_enc=0, num_intf=2` - zero
+  compression encoders. Not a factor.
+- **DPU/DSI bit-rate self-consistency**: both the DPU's pixel timing
+  and the DSI bit clock are derived from the exact same
+  `drm_display_mode.clock` value (`dsi_get_pclk_rate()` /
+  `dsi_byte_clk_get_rate()` in `dsi_host.c`), so they cannot disagree
+  with each other regardless of whether the absolute value matches
+  downstream's declared 998MHz - the earlier ~935MHz-vs-998MHz
+  difference (Round 44) is not a source/sink bandwidth mismatch.
+- **Interconnect/bandwidth-vote driver availability**: confirmed
+  `CONFIG_INTERCONNECT_QCOM_SM8250=y` is already built-in - not another
+  instance of the "module never loads" bug pattern this project has
+  hit five times now (`DRM_MSM`, `PHY_QCOM_USB_SNPS_FEMTO_V2`,
+  `REGULATOR_QCOM_REFGEN`, `QCOM_GPI_DMA`, and effectively the
+  `qupv3_id_1` enable).
+
+**Not yet checked / candidate theories for the next session:**
+- The DPU/MMCX RPMh performance-state (OPP) vote possibly staying too
+  low for genuine 1600x2560@120Hz uncompressed throughput once real
+  streaming starts (as opposed to whatever idle/setup-time vote is
+  active during the earlier successful stages).
+- A subtle error somewhere in the panel's own 180-command init
+  sequence that doesn't fail explicitly (accum_err stays 0, confirmed
+  every round via `nt36523_prepare()`'s own unfired `dev_err()` path)
+  but leaves some internal panel state wrong in a way that only
+  manifests once real HS video streaming begins.
+
+Paused here at the owner's request to record state before continuing -
+this is the deepest, most stubborn single bug hit in this project so
+far, five independently-real fixes deep with no change to this one
+specific symptom.

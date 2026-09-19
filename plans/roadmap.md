@@ -986,14 +986,24 @@ Progress log:
 
 ## Phase 2 — Display and input
 
-**Status:** not started, but scoped - see `../docs/phase2-panel-scoping.md`
-(2026-09-19). Headline finding: `drivers/gpu/drm/panel/
-panel-novatek-nt36523.c` already exists in mainline and already supports
-a directly comparable SM8250 tablet (Xiaomi Pad 5 "elish" - dual-DSI,
-C-PHY, same driver IC family), a far closer reference than anything used
-so far in this project. Our own panel's exact timings/commands/GPIOs
-were extracted directly from Samsung's downstream source and recorded in
-that doc.
+**Status:** in progress, real hardware bring-up underway (Rounds 38-48,
+2026-09-19, `../docs/kernel-boot-debugging.md`). Added a new panel
+driver entry to mainline's existing `drivers/gpu/drm/panel/
+panel-novatek-nt36523.c` (already supports this exact chip family via
+Xiaomi's elish, a directly comparable SM8250 tablet - see
+`../docs/phase2-panel-scoping.md`), a new ISL98608 bias IC driver, and a
+board-specific DSI PHY trim override. Five independently-real bugs found
+and fixed on real hardware so far: a missing `refgen` regulator driver,
+wrong PHY analog trim constants (the real PLL now locks cleanly, 5x, no
+failures), `CONFIG_QCOM_GPI_DMA` never loading, the parent QUP wrapper
+devicetree node never being enabled, and a racy backlight callback. The
+bias IC now probes and programs correctly, `DPU` binds both DSI hosts
+and reads a real hardware ID, `fb0` registers. **Still unresolved**: a
+completely deterministic `VIDEO_MDP_FIFO_OVERFLOW` (`dsi_err_worker:
+status=4`) right before the first real frame would display, unchanged
+across all five fixes above - the deepest single bug hit in this
+project so far. Screen is still black/backlight off as of the last
+test.
 
 Goal: get a usable framebuffer and touch input — the minimum for anything
 interactive.
