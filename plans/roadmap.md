@@ -986,7 +986,14 @@ Progress log:
 
 ## Phase 2 — Display and input
 
-**Status:** not started
+**Status:** not started, but scoped - see `../docs/phase2-panel-scoping.md`
+(2026-09-19). Headline finding: `drivers/gpu/drm/panel/
+panel-novatek-nt36523.c` already exists in mainline and already supports
+a directly comparable SM8250 tablet (Xiaomi Pad 5 "elish" - dual-DSI,
+C-PHY, same driver IC family), a far closer reference than anything used
+so far in this project. Our own panel's exact timings/commands/GPIOs
+were extracted directly from Samsung's downstream source and recorded in
+that doc.
 
 Goal: get a usable framebuffer and touch input — the minimum for anything
 interactive.
