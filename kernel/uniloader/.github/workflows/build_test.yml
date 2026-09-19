@@ -1,0 +1,30 @@
+name: Build all devices
+
+on:
+  push:
+    branches: [ "master" ]
+  pull_request:
+    branches: [ "master" ]
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v5
+
+    - name: Install build dependencies
+      run: sudo apt install -y bash build-essential gcc-arm-linux-gnueabihf gcc-aarch64-linux-gnu
+
+    - name: Create dummy kernel blob
+      run: dd if=/dev/zero of=blob/Image bs=1M count=1
+
+    - name: Create dummy ramdisk blob
+      run: dd if=/dev/zero of=blob/ramdisk bs=1M count=1
+
+    - name: Create dummy device tree blob
+      run: dd if=/dev/zero of=blob/dtb bs=1M count=1
+
+    - name: Run build_test.sh
+      run: bash .github/workflows/build_test.sh

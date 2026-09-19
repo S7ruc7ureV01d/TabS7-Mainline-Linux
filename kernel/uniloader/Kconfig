@@ -1,0 +1,77 @@
+#
+# For a description of the syntax of this configuration file,
+# see Documentation/kbuild/kconfig-language.txt.
+#
+mainmenu "uniLoader Configuration"
+
+source "arch/Kconfig"
+
+menu "Building options"
+	config CROSS_COMPILE
+		string "Cross-compiler tool prefix"
+		help
+		  Same as running 'make CROSS_COMPILE=prefix-' but stored for
+		  default make runs in this kernel build directory.  You don't
+		  need to set this unless you want the configured kernel build
+		  directory to select the cross-compiler automatically.
+
+	config LOGLEVEL
+		int "Verbosity of logs"
+		default 7
+
+	config COMPRESS_GZIP
+		bool "Compress the uniLoader image with gzip"
+		default y
+		help
+		  Select this if you want to use gzip to compress the final uniLoader image.
+
+	config COMPRESS_LZ4
+		bool "Compress the uniLoader image with lz4"
+		default n
+		help
+		  Select this if you want to use lz4 to compress the final uniLoader image.
+		  This is required on some new MediaTek devices.
+
+	config EMBED_LINUX
+		bool "Embed linux kernel and device tree"
+		default y
+		help
+		  Select this if you want uniLoader to load a linux kernel and device tree
+
+	config KERNEL_PATH
+		string "Path to kernel image"
+		depends on EMBED_LINUX
+		default blob/Image
+		help
+		  Path to the kernel, which is going to get embedded to uniLoader
+
+	config DT_PATH
+		string "Path to device tree image"
+		depends on EMBED_LINUX
+		default blob/dtb
+		help
+		  Path to the device tree, which is going to get embedded to uniLoader
+
+	config RAMDISK_PATH
+		string "Path to ramdisk image"
+		depends on EMBED_LINUX
+		default blob/ramdisk
+		help
+		  Path to the ramdisk, which is going to get embedded to uniLoader
+	
+	config RAMDISK_NO_COPY
+		bool "Do not copy ramdisk"
+		depends on EMBED_LINUX
+		default n
+		help
+		  Select this if the bootloader copies the ramdisk itself
+
+endmenu
+
+source "drivers/Kconfig"
+
+source "lib/Kconfig"
+
+source "soc/Kconfig"
+
+source "board/Kconfig"

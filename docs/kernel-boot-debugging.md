@@ -2222,3 +2222,99 @@ via kernel-only swap against stock `boot.img`, stock `dtb`/`ramdisk.cpio`
 sections untouched, no `dtbo.img` flash - see Round 13 above for the full,
 proven recipe. Nothing flashed this round; pure research and one Ghidra
 decompile.
+
+## Round 20 (2026-09-19, same day): uniLoader built for `gts7l`, flashed via
+the proven Round 13 packaging - awaiting test result
+
+Cloned `https://github.com/ivoszbg/uniLoader` twice: a pristine reference
+copy at `references/uniLoader` (untouched, per this project's convention
+for reference material) and a working copy at `kernel/uniloader` (this
+project's own patches live here, `.git` stripped since it's tracked by
+this project's own repo instead).
+
+### Confirmed the mechanism by reading uniLoader's own source, not just
+the README
+
+- `arch/aarch64/start.S`: computes addresses of `dtb`/`kernel`/`ramdisk`
+  symbols **linked directly into uniLoader's own binary** (the `blob/`
+  directory contents, embedded at build time), then calls
+  `main(dtb_addr, kernel_addr, ramdisk_addr)`.
+- `arch/aarch64/load-kernel.c`'s `arch_load_kernel()`: `memcpy`s the
+  embedded `kernel` blob to `CONFIG_PAYLOAD_ENTRY` and the embedded
+  `ramdisk` to `CONFIG_RAMDISK_ENTRY` (both fixed physical addresses from
+  the board's `defconfig`), then branches directly to
+  `CONFIG_PAYLOAD_ENTRY` with `x0` = the **embedded, uniLoader-local**
+  devicetree pointer - standard ARM64 Linux boot register convention.
+  Whatever devicetree ABL originally handed off is never read at all.
+- `arch/aarch64/linux-kernel-image-header.h`: uniLoader's own compiled
+  output embeds a genuine `"ARM\x64"` Linux kernel image header
+  (`linux_image_header` macro) at its entry point - confirmed directly on
+  our own build: `file uniLoader` reports "Linux kernel ARM64 boot
+  executable Image", identical to how every real kernel Image this
+  project has built or flashed identifies itself.
+- `main/main.c`/`soc/qualcomm/msm8916.c`: confirmed `soc_init()`-style
+  per-SoC C files are optional, not required - most current Qualcomm
+  board configs (`SM8350`/`SM8450`/`SM8650`) have no `soc/Makefile` entry
+  at all, and the one example that exists (`msm8916.c`) is a complete
+  no-op. Board files are the real customization point, and the minimal
+  working example (`board/samsung/board-r0q.c`) is ~20 lines - a name
+  string plus an optional `simplefb` device struct.
+
+### Added SM8250 "kona" support (didn't exist in any fork checked)
+
+- `soc/Kconfig`: added `SM8250` (`select QUALCOMM`, matching the pattern
+  of every other current Qualcomm entry - no `soc/Makefile` line needed).
+- `board/Kconfig`: added `SAMSUNG_GTS7L` (`depends on SM8250`).
+- `board/Makefile`: wired `CONFIG_SAMSUNG_GTS7L` to
+  `samsung/board-gts7l.o`.
+- `board/samsung/board-gts7l.c`: minimal board file, no early/late init
+  hooks, no framebuffer (Phase 1 doesn't need display; this is a Phase 2
+  concern per `plans/roadmap.md`).
+- `configs/gts7l_defconfig`: `CONFIG_LINUX_KRNL_HEADER_IMG=y` (confirmed
+  this defaults to `n` in `arch/Kconfig` - explicitly required, matches
+  every other Qualcomm/Samsung-ABL board's defconfig) plus three physical
+  addresses, chosen by computing this device's *entire* real
+  `/reserved-memory` map (already fully enumerated in Round 15-16's work)
+  and picking the genuinely free gap between `0x90500000` (end of
+  `cdsp_secure_heap`) and `0x9c000000` (start of the splash carveout) -
+  about 181MiB clear of every known carveout:
+  - `CONFIG_TEXT_BASE=0x90600000`
+  - `CONFIG_PAYLOAD_ENTRY=0x91000000` (real kernel goes here)
+  - `CONFIG_RAMDISK_ENTRY=0x94000000` (48MiB later - clears a ~41MiB
+    kernel + our 115KiB DTB with generous margin)
+
+### Built and packaged
+
+Blobs: this project's own built `Image` (40,929,792 bytes, plain, no
+`CONFIG_FB_SIMPLE`/framebuffer changes - not needed for this test),
+`kernel/dts/sm8250-samsung-gts7l.dtb` (115,197 bytes, the Round 18
+carveout-fixed version, `qcom,msm-id`/`board-id` correct since Round 8),
+and this project's own busybox initramfs (`work/initramfs.cpio`,
+re-gzipped fresh for this build). Clean build (`make ARCH=aarch64 LLVM=1
+gts7l_defconfig` then `make ARCH=aarch64 LLVM=1`), output
+`uniLoader` is 42,348,544 bytes, confirmed via `file` to identify as a
+genuine ARM64 Linux boot Image.
+
+Packaged via **exactly Round 13's proven-safe method** - `magiskboot
+unpack -h` on stock `boot.img`, replaced only `kernel` with the uniLoader
+binary, left `dtb`/`ramdisk.cpio` completely untouched (stock's, byte
+for byte), `magiskboot repack`. **Learned from Round 17's mistake early
+this time**: `magiskboot unpack -h` on the *output*, run to verify,
+reported a confusing `kernel_dtb` auto-split (its own heuristic getting
+confused by uniLoader's internal blob layout, which doesn't match the
+"kernel then one appended dtb" convention magiskboot expects) - rather
+than trust that, verified the actual boot.img bytes directly via a raw
+Python struct parse of the Android boot header (kernel offset/size fields)
+and confirmed **byte-for-byte exact match** between the packed image's
+real kernel bytes and the original `uniLoader` build output, and (via
+magiskboot's own unpack, which got the `dtb` field right even though it
+mis-parsed `kernel`) confirmed the `dtb` section matches stock's known-good
+hash exactly.
+
+Flashed `boot` only (`dtbo` and stock `dtb`/`ramdisk.cpio` sections
+untouched, matching Round 13 exactly) via the established rooted-TWRP
+`dd` method, hash-verified after write. `rp`/`ro.bootloader` reconfirmed
+unchanged beforehand.
+
+**Not yet tested on hardware as of writing this entry** - the actual
+reboot/observe/log-capture step comes next.
