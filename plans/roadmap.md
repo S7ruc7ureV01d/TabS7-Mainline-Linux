@@ -1207,18 +1207,24 @@ Progress log:
 
 ## Phase 5 — Userspace, packaging, and dual boot
 
-**Status:** in progress - **real Arch Linux ARM boot achieved on
-hardware** (2026-09-20). `userdata` reused as a 105 GiB ext4 `archroot`
+**Status:** in progress - **real KDE Plasma desktop working on
+hardware** (2026-09-20), on top of the real Arch Linux ARM boot from
+earlier the same day. `userdata` reused as a 105 GiB ext4 `archroot`
 partition (whole-tablet approach, zero GPT changes), a minimal console
 rootfs built via `pacstrap`-under-Docker, and a real `switch_root`-based
-initramfs - reached a genuine `archlinux login` prompt and a full
-`systemctl is-system-running` → `running` state, confirmed over a
-dedicated USB-Ethernet-gadget SSH link set up specifically for this
-phase's debugging. See `../docs/kernel-boot-debugging.md`'s "Phase 5:
-first real Arch Linux ARM boot on hardware" section for the two real
-bugs found and fixed along the way (a busybox `blkid` label-scan quirk,
-and a UFS WriteBooster runtime-PM interaction that took a live kernel
-stack trace to actually pin down). KDE Plasma itself not yet attempted.
+initramfs got to a genuine `archlinux login` prompt first. From there:
+real USB-Ethernet internet sharing (so `pacman` works directly
+on-device), `mesa`/`kwin`/`sddm`/`plasma-desktop` installed as real Arch
+packages, a real debugging detour through KWin's seat/VT handling (SSH
+sessions have no seat - SDDM, not manual `openvt` tricks, is the actual
+fix), and a hard watchdog-triggered reset safely isolated down to one
+environment-propagation bug (`QT_QPA_PLATFORM` never reaching a
+D-Bus-activated service). Confirmed on a genuine cold reboot with zero
+manual intervention: `systemctl is-system-running` → `running`, and the
+owner watching a real, responding Plasma desktop on the physical screen.
+Full story in `../docs/kernel-boot-debugging.md`'s "Phase 5: first real
+Arch Linux ARM boot on hardware" and "KDE Plasma: a real desktop, on
+real hardware" sections.
 
 Goal: turn a hand-booted hacked kernel + rootfs into something installable and
 maintainable, matching the S9 Ultra project's user-facing shape.
@@ -1241,9 +1247,13 @@ Exit criteria:
       build (2026-09-20, via Docker `--platform linux/arm64` +
       `pacman -Syu --disable-sandbox`) - not yet wired into a tracked
       `packaging/` directory in this repo, still a manual process.
-- [ ] KDE Plasma (Wayland/KWin) installed and reaching a usable desktop,
+- [x] KDE Plasma (Wayland/KWin) installed and reaching a usable desktop,
       building on the confirmed-working Mesa/Freedreno GPU acceleration
-      from Phase 2.
+      from Phase 2. **Done** - real Plasma Wayland session, confirmed by
+      the owner on the physical screen, reproducible from a cold boot
+      with zero manual intervention (SDDM autologin), 2026-09-20. Rough
+      edges remain: no audio subsystem installed yet (a few applet QML
+      warnings), no real keyboard/mouse input beyond touch.
 - [ ] Installer ZIP flashable from TWRP, tested on real hardware.
 - [ ] Dual boot (Android kept alongside Arch) working, with a toggle from
       both sides, following the S9 Ultra project's split-storage approach where
@@ -1300,6 +1310,34 @@ Progress log:
   reader is real (Goodix GW3X in the power button), not absent as an
   earlier kernel-source-only check had concluded - see Phase 4. Full
   writeup: `../docs/kernel-boot-debugging.md`. Next: KDE Plasma itself.
+- 2026-09-20: **KDE Plasma working on real hardware.** Set up real USB-
+  Ethernet internet sharing (host NAT/MASQUERADE over the existing
+  debug link) so `pacman` works directly on-device instead of building
+  everything via Docker and transferring tarballs. Installed
+  `mesa`/`kwin`/`sddm`/`plasma-desktop` as real Arch packages. Chased a
+  real bug through several layers: `kwin_wayland --drm` refused to
+  start over SSH (`No suitable DRM devices have been found`) because
+  SSH sessions have no seat assignment and `seatd` manages device access
+  tied to a real VT - `openvt`/`setsid` workarounds proved unreliable,
+  installed SDDM instead (the actually-correct fix - a display manager
+  exists specifically to handle this). Hit a real hard reset (watchdog-
+  triggered, zero journal entries for that window) when the full
+  `plasma.desktop` session first ran under SDDM autologin - immediately
+  set `multi-user.target` back as default to avoid a crash-loop, then
+  safely isolated the cause (attached to the already-stable bare-KWin
+  session's Wayland socket over SSH, ran `plasmashell` by hand under a
+  `timeout -s KILL 15` safety net) to a genuine environment-propagation
+  bug: `kactivitymanagerd` is D-Bus-activated by `systemd --user`
+  directly and never inherited `QT_QPA_PLATFORM=wayland`, so it crashed
+  immediately and plasmashell hung forever waiting on it instead of
+  failing cleanly. Fixed via `systemctl --user set-environment` (live)
+  and `~/.config/environment.d/` (persistent). **Confirmed on a genuine
+  cold reboot, zero manual intervention**: `systemctl is-system-running`
+  → `running`, and the owner watching a real, responding KDE Plasma
+  desktop on the physical screen. Full story:
+  `../docs/kernel-boot-debugging.md` ("KDE Plasma: a real desktop, on
+  real hardware"). Remaining rough edges (audio not installed, no real
+  keyboard/mouse beyond touch) are Phase 3/4 scope, not Phase 5 gaps.
 
 ---
 

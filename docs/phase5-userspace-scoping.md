@@ -252,4 +252,21 @@ Linux ARM boot on hardware" section. Also worth correcting here: this
 scoping pass never looked into the fingerprint reader question - a
 separate stock-firmware-dump pass found this device does have one
 (Goodix GW3X, power button), contrary to an earlier kernel-source-only
-check. Next: KDE Plasma itself (steps 4-5 from the list above).
+check.
+
+## Status: KDE Plasma working on hardware too (2026-09-20)
+
+Steps 4-5 are done as well - a real KDE Plasma Wayland session, confirmed
+by the owner watching the physical screen, reproducible from a genuine
+cold boot with zero manual intervention (SDDM autologin). Getting there
+needed real USB-Ethernet internet sharing (`pacman` doesn't work over a
+plain point-to-point link), a real debugging detour through KWin's
+seat/VT handling (SSH sessions have no seat - a display manager, not
+manual `openvt`/`setsid` tricks, is the actual right fix), and safely
+isolating a hard, watchdog-triggered reset down to a single environment-
+propagation bug (`QT_QPA_PLATFORM` never reaching a D-Bus-activated
+service). Full story: `docs/kernel-boot-debugging.md`'s "KDE Plasma: a
+real desktop, on real hardware" section. Nothing left open from this
+scoping document - what remains (audio, real input devices beyond
+touch, packaging this into a repeatable `packaging/` directory) is
+Phase 3/4 and general polish work, not Phase 5 scoping gaps.

@@ -5336,3 +5336,133 @@ seven SCSI devices showing `power=on` automatically via udev with no
 manual intervention. `rp`/`ro.bootloader` reconfirmed unchanged
 throughout every flash in this phase, as usual - `userdata` reuse only
 ever touched that one partition's filesystem content, never the GPT.
+
+## KDE Plasma: a real desktop, on real hardware (2026-09-20)
+
+With a stable Arch Linux ARM boot in hand, went straight for the actual
+Phase 5 goal - a real KDE Plasma session, not just a console. Real
+progress required real remote access first: the point-to-point USB
+debug link set up for the boot work has no route to the internet on its
+own, and `pacman` needs one. Enabled `ip_forward` (already on, from
+Docker) plus a host-side NAT/MASQUERADE rule
+(`iptables -t nat -A POSTROUTING -s 172.16.42.0/24 -o wlan0 -j
+MASQUERADE`) sharing the host's own Wi-Fi, added a default route via
+the host (`172.16.42.2`) and a plain `1.1.1.1` resolver on the device,
+and folded both into `usb-gadget-ecm.service` so they come up
+automatically (guarded by a quick ping check, so it's a no-op if the
+debug cable isn't attached at all). This turned `pacman -S` into
+something that just works directly on-device, no more building
+everything inside a Docker container and transferring tarballs by hand.
+
+Installed `mesa`/`vulkan-icd-loader`/`kwin` as real Arch packages first
+- confirmed the msm Freedreno driver (`/usr/lib/dri/msm_dri.so`) and the
+glvnd vendor JSON both land in exactly the canonical paths this
+session's earlier GPU work (with a hand-collected Ubuntu userspace
+bundle) had to work around manually. Real packages, no workarounds
+needed this time.
+
+### The seat/session rabbit hole: why `kwin_wayland --drm` refused to start over SSH
+
+First attempt, straight from an SSH shell: `No suitable DRM devices have
+been found`, despite EGL initializing fine and `renderD128` being added
+as a render device - `/dev/dri/card0` itself, the actual KMS-capable
+primary node, never got added at all. Chased this through several real,
+distinct layers before landing on the actual fix:
+
+1. `journalctl --no-pager | grep -B30 dCurWrite...` - wrong lead, that
+   was leftover UFS log noise from earlier testing, not related.
+2. `loginctl list-sessions` showed the SSH session's `SEAT` column
+   empty (`-`) - not assigned to `seat0` at all, unlike a real local
+   console login. This looked like the cause (KWin's own udev
+   enumeration filters candidate GPUs by `device->seat() ==
+   m_session->seat()`, confirmed by reading KWin's own
+   `drm_backend.cpp` source), but wasn't the actual blocker - `udevadm
+   info /dev/dri/card0` showed correct `TAGS=:master-of-seat:uaccess:
+   seat:`, so the device itself was properly seat-tagged regardless.
+3. `KWIN_DRM_DEVICES=/dev/dri/card0` (an explicit override, found
+   directly in KWin's own source, that bypasses the udev/seat
+   enumeration entirely) revealed the real, more specific error:
+   `Failed to open /dev/dri/card0 device (Operation not permitted)`.
+   KWin opens DRM devices through `libseat`, not a plain `open()` -
+   even as root - and `seatd` logs itself as `Created VT-bound seat
+   seat0`: it manages device access tied to an actual virtual
+   terminal, which an SSH session simply doesn't have.
+4. `openvt`/`setsid --ctty` attempts to attach the process to a real VT
+   were unreliable in this minimal environment (`openvt -w` returned
+   instantly with zero output, no process ever actually ran) - not
+   worth chasing further once the real, correct answer was obvious:
+   this exact VT/seat/session dance is precisely what a display manager
+   exists to do correctly. Installed **SDDM** instead of continuing to
+   hand-roll it, and it worked immediately - `Using VT 1`, real Xorg
+   greeter (SDDM's own greeter still runs under X11 by default; the
+   actual session underneath is separately selectable and this device
+   only has a `wayland-sessions/plasma.desktop` entry, no `xsessions`
+   one, so the real desktop is genuinely Wayland/KWin), `Greeter session
+   started successfully`, and - confirmed directly by the owner watching
+   the physical screen - a real, visible SDDM login GUI.
+
+### A real hard hang, and isolating it safely
+
+No keyboard yet (no USB-OTG host mode, Book Cover Keyboard driver is
+Phase 3/4 scope) - configured SDDM autologin
+(`/etc/sddm.conf.d/10-autologin.conf`) to get past the login prompt for
+testing. First real attempt at the full `plasma.desktop` session: owner
+watched it reach the Plasma loading splash, sit there, then the whole
+device hard-reset - no graceful shutdown, and `journalctl -b -1 --since
+<the exact time>` came back with **zero entries** for that window,
+confirming this wasn't a kernel panic or a clean crash with something to
+log; the hang was severe enough that not even a journal flush happened
+before whatever (almost certainly this project's own hardware watchdog,
+already known to exist from much earlier bring-up rounds) forced a reset.
+
+**Immediately switched `systemctl set-default multi-user.target` and
+removed the autologin config** before doing anything else - with
+graphical autologin left as the default, every subsequent boot would
+have walked straight back into the same hang.
+
+Isolated the actual cause safely rather than guessing blind or risking
+more hard resets: since `kwin_wayland --drm` alone (no `plasmashell`) had
+already proven stable under SDDM, attached to its already-running
+Wayland socket (`/run/user/1001/wayland-0`) and launched `plasmashell`
+by hand over SSH with a hard `timeout -s KILL 15` safety net - killing
+anything that hung within 15 seconds, comfortably before the watchdog
+window that caused the earlier reset. It never exited on its own; `ps
+-o wchan` during the hang showed it blocked in `do_sys_poll` the whole
+time (a genuine wait, not a spinning busy-loop), and `journalctl -t
+plasmashell` had the real answer: `Aborting shell load: The activity
+manager daemon (kactivitymanagerd) is not running`, and separately,
+`kactivitymanagerd` itself logging `This application failed to start
+because no Qt platform plugin could be initialized` before dying with
+SIGABRT.
+
+First fix attempt - masking `plasma-kactivitymanagerd.service` - stopped
+the hang (confirmed: plasmashell no longer got stuck in `do_sys_poll`),
+but only traded a hang for a different failure: plasmashell now aborted
+its own shell load outright once it found the service genuinely absent,
+leaving a stable but completely black screen. Not a fix, just a less
+dangerous failure mode.
+
+**The real fix**: ran `kactivitymanagerd` by hand with
+`QT_QPA_PLATFORM=wayland` explicitly set, and it started cleanly -
+proving the actual bug was environment propagation, not the daemon
+itself. `kactivitymanagerd` is D-Bus-activated by `systemd --user`
+directly, not spawned as a child of `plasmashell`/`kwin_wayland`, so it
+never inherited the `QT_QPA_PLATFORM`/`WAYLAND_DISPLAY` that a normal
+interactive Wayland client would pick up automatically. Fixed for the
+live session with `systemctl --user set-environment
+QT_QPA_PLATFORM=wayland WAYLAND_DISPLAY=wayland-0`, and persistently
+with `~/.config/environment.d/10-wayland-qt.conf` (the standard
+mechanism `systemd --user` reads automatically on every login, no
+custom scripting needed).
+
+**Confirmed on a genuine cold reboot**, not just the live-patched
+session: `systemctl is-system-running` → `running`, `kwin_wayland`,
+`plasmashell`, and `kactivitymanagerd` all started automatically via
+SDDM autologin with zero manual intervention, and the owner confirmed
+directly - a real, visible, responding KDE Plasma desktop on the
+physical screen. Some real rough edges remain (a few QML module warnings
+for applets whose backing services - PulseAudio/audio in particular -
+aren't installed yet, no real keyboard/mouse input beyond touch), but
+the actual milestone - Wayland, KWin, Mesa/Freedreno, and Plasma's shell
+all working together on this mainline kernel - is real and reproducible.
+`rp`/`ro.bootloader` unaffected throughout, as always.
