@@ -156,3 +156,14 @@ check on-device to confirm rather than assume.
    interconnect paths, GDSC sequencing, SCM config gaps) would first
    show up, the same way the touchscreen's real bugs only surfaced once
    actually tested on hardware rather than scoped on paper.
+
+## Status: done, real rendering confirmed on hardware (2026-09-20)
+
+Everything above happened almost exactly as scoped, plus two real bugs
+only found once actually tested (a too-old stock SQE firmware version,
+and a firmware-path assumption that only held for the zap shader) - see
+the "Adreno 650 GPU bring-up" section in `docs/kernel-boot-debugging.md`
+for the full story. Went further than "the driver probes": cross-built
+Mesa/kmscube for aarch64 and confirmed genuine, sustained 3D rendering
+at the display's native 96 fps, watched directly on the physical
+screen. Nothing left open from this scoping document.

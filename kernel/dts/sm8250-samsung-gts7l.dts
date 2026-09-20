@@ -1000,3 +1000,34 @@
 		interrupts = <15 IRQ_TYPE_LEVEL_LOW>;
 	};
 };
+
+/*
+ * Adreno 650 GPU (docs/phase2-gpu-scoping.md). sm8250.dtsi already fully
+ * describes this GPU (gpu/gmu/gpucc/adreno_smmu, chip_ids 0x06050002 in
+ * a6xx_catalog.c matching downstream's own `qcom,chipid = 0x06050000` for
+ * this exact silicon) - just disabled by default like every other
+ * peripheral in this recurring pattern. The only genuinely device-
+ * specific piece is the zap-shader firmware: the GX power rail is behind
+ * TrustZone, and adreno_zap_shader_load() authenticates a device-signed
+ * blob through the PAS/SCM path before Linux can touch the GPU. Pulled
+ * directly off this device's own `apnhlos` partition (mounted at
+ * `/vendor/firmware_mnt` per `vendor/etc/fstab.qcom`) -
+ * `a650_zap.mdt`/`.b00`/`.b01`/`.b02`, the standard PIL mdt+segments
+ * split image mainline's own qcom_mdt_loader consumes directly, no
+ * reassembly needed. `a650_sqe.fw`/`a650_gmu.bin` (generic, freely-
+ * redistributable Qualcomm blobs, not device-signed) came from this
+ * device's `/vendor/firmware` instead. Enablement recipe confirmed
+ * against a real, shipping mainline device with the same GPU
+ * (sm8250-xiaomi-elish-common.dtsi).
+ */
+&gmu {
+	status = "okay";
+};
+
+&gpu {
+	status = "okay";
+};
+
+&gpu_zap_shader {
+	firmware-name = "qcom/sm8250/samsung/gts7l/a650_zap.mdt";
+};

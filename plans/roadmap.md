@@ -1047,8 +1047,10 @@ Exit criteria:
       (`drivers/input/touchscreen/nt36523-gts7l.c`, new driver - not a match
       for mainline's existing, flatly-addressed `novatek-nvt-ts.c`). **Done** -
       real multi-touch input confirmed on hardware, 2026-09-20.
-- [ ] Adreno 650 GPU acceleration working (Mesa/Turnip or Freedreno, whichever
-      mainline supports for this GPU generation).
+- [x] Adreno 650 GPU acceleration working (kernel driver + Mesa/Freedreno
+      confirmed - Vulkan/Turnip not separately tested). **Done** - real
+      sustained 3D rendering (kmscube, 3000 frames at a vsync-locked
+      96 fps) confirmed on hardware, 2026-09-20.
 - [ ] Basic GNOME/Wayland session reaches a usable desktop on-device.
 
 Progress log:
@@ -1121,6 +1123,27 @@ Progress log:
   Next: get real device access, locate and pull the actual zap blob off
   `/vendor/firmware*`, fetch the generic `a650_sqe.fw`/`a650_gmu.bin`
   from `linux-firmware.git`, and add the devicetree pieces.
+- 2026-09-20: Adreno 650 GPU confirmed working on real hardware - see
+  `../docs/kernel-boot-debugging.md` ("Adreno 650 GPU bring-up: real
+  rendering confirmed on hardware"). Pulled the real zap-shader blob
+  directly off this device's own `apnhlos`/`vendor` partitions and added
+  the devicetree pieces per the scoping above. Found two more real bugs
+  once actually tested: this device's stock `a650_sqe.fw` (v0x087) is
+  older than mainline's hard-required minimum (v0x095) - fixed with a
+  newer, generic build from `linux-firmware.git`; and generic firmware
+  (SQE/GMU) needs a flat `qcom/<name>` path, not the nested per-board
+  path the zap shader uses. Went beyond kernel-level probe success:
+  cross-built Mesa/Freedreno + `kmscube` for aarch64 via Docker's arm64
+  QEMU emulation, staged on the device's `cache` partition, and found a
+  real userspace bug too - Ubuntu's `libEGL.so.1` is a libglvnd
+  dispatcher needing a separate vendor JSON manifest and
+  `libEGL_mesa.so.0` (invisible to `ldd`, loaded via `dlopen()`) that a
+  naive dependency-collection pass missed entirely. Once fixed: watched
+  a real spinning cube render on the physical screen for 3000 frames at
+  a vsync-locked 96 fps, with the kernel's own GPU debugfs confirming
+  `last-fence == retired-fence` (submitted work genuinely executed and
+  retired, not just queued). **Phase 2's GPU goal is done** - only a
+  basic desktop session remains for this phase.
 
 ---
 

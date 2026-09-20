@@ -5076,3 +5076,103 @@ real, multi-touch-tracked finger contacts.
 Stripped the temporary `gpi.c` diagnostic (the real `qcom,gpi-ee-
 offset` fix from the previous round stays). Touch and display are both
 now working on real hardware.
+
+## Adreno 650 GPU bring-up: real rendering confirmed on hardware (2026-09-20)
+
+Scoped first (`docs/phase2-gpu-scoping.md`): mainline's `sm8250.dtsi`
+already fully describes this GPU (`gpu`/`gmu`/`gpucc`/`adreno_smmu`
+nodes, `status = "disabled"` by default - the same recurring pattern as
+every prior peripheral), and `CONFIG_DRM_MSM=y` was already forced on
+from the display work. Confirmed the real silicon match against
+downstream's `qcom,chipid = 0x06050000` and mainline's `a6xx_catalog.c`
+(`chip_ids = 0x06050002`, `revn = 650`).
+
+**The real per-device piece**: this GPU's GX power rail is behind
+TrustZone - `adreno_zap_shader_load()` authenticates a device-signed
+"zap shader" firmware blob through the PAS/SCM path before Linux can
+touch the GPU at all. Booted TWRP, mounted the device's own dynamic
+`vendor` partition (`/dev/block/mapper/vendor`) and the `apnhlos`
+partition (real mount source for `/vendor/firmware_mnt`, found via
+`vendor/etc/fstab.qcom`) and found the genuine, already-present blob:
+`a650_zap.mdt`/`.b00`/`.b01`/`.b02` (the standard PIL mdt+segments split
+image mainline's own `qcom_mdt_loader` consumes directly) plus the
+generic, freely-redistributable `a650_sqe.fw`/`a650_gmu.bin` in
+`/vendor/firmware`. Pulled all six files, byte-verified via `md5sum`
+before and after. Added `&gmu`/`&gpu { status = "okay"; }` and
+`&gpu_zap_shader { firmware-name = "..."; }` to
+`kernel/dts/sm8250-samsung-gts7l.dts`, matching the exact enablement
+recipe a real shipping mainline device with the same GPU
+(`sm8250-xiaomi-elish-common.dtsi`) already uses.
+
+**First real hardware test**: GMU bound, but `[drm:adreno_request_fw]
+*ERROR* failed to load a650_sqe.fw`. Root cause: `adreno_request_fw()`
+(`drivers/gpu/drm/msm/adreno/adreno_gpu.c`) looks for generic firmware
+at a flat `qcom/<name>` path, not the nested per-board path used for the
+zap shader - only the zap shader's own `firmware-name` devicetree
+property is used as a literal path. Fixed by placing `a650_sqe.fw`/
+`a650_gmu.bin` directly under the bring-up initramfs's
+`lib/firmware/qcom/`, keeping only the zap `.mdt`/`.bNN` files nested
+under the per-board path.
+
+**Second real hardware test**: firmware all loaded, but `[drm:
+a6xx_ucode_load] *ERROR* a650 SQE ucode is too old. Have version 87 need
+at least 95` - `a6xx_gpu.c`'s own `a6xx_ucode_check_version()` hard-
+requires SQE microcode `>= 0x095` for this chip; this device's real,
+extracted firmware is version `0x087`. Unlike the zap shader, the SQE
+microcode isn't device-signed (loaded directly by the GPU driver, no
+PAS/SCM auth), so a newer, generic one from upstream
+`linux-firmware.git` is safe to substitute. Did exactly that -
+**confirmed fixed**: `msm_dpu ae01000.display-controller: bound
+3d00000.gpu (ops a3xx_ops)`, `/sys/kernel/debug/dri/128/gpu` shows
+`gpu-initialized: 1`, `revision: 650 (06050002)`, `rbbm-status:
+0x00000000` (idle, healthy), and `renderD128` exists under
+`/sys/class/drm`.
+
+### Getting an actual frame rendered: cross-building Mesa/kmscube and a real glvnd bug
+
+Kernel/DRM-level bring-up alone doesn't prove rendering works - built a
+self-contained Mesa (Freedreno) + `kmscube` bundle for aarch64 via
+Docker's `--platform linux/arm64` (QEMU emulation) against
+`arm64v8/ubuntu:22.04`, collecting `kmscube` + `msm_dri.so` + every
+`ldd`-resolved shared library into a tarball, staged onto the device's
+`cache` partition (mounted read-write from both TWRP for staging and
+the bring-up initramfs for running - avoids needing to touch the boot
+image at all for a one-off userspace test).
+
+First attempt: `failed to initialize` / `failed to initialize EGL`, with
+no corresponding kernel-side error at all. Wrote a small hand-rolled EGL
+diagnostic (`eglGetError()` printed after every call, since kmscube's
+own binary gives no more detail than that one line) and cross-compiled
+it the same way. Found the real cause: `eglQueryString(EGL_NO_DISPLAY,
+EGL_EXTENSIONS)` returned an **empty string** and
+`eglGetPlatformDisplayEXT()` failed with `EGL_BAD_PARAMETER` - Ubuntu's
+`libEGL.so.1` is a **libglvnd dispatcher**, not Mesa's real
+implementation. glvnd needs a vendor JSON manifest
+(`/usr/share/glvnd/egl_vendor.d/50_mesa.json`) plus the real
+`libEGL_mesa.so.0` - both are loaded via `dlopen()` at runtime based on
+that JSON, completely invisible to `ldd`, so collecting only direct link
+dependencies missed them entirely. Fetched `libEGL_mesa.so.0` (and its
+own further dependencies - `libwayland-client`, several `libxcb-*`
+pieces, `libX11-xcb`, `libxshmfence`, none of which showed up via `ldd
+kmscube` since they're two dlopen-hops away), wrote a local copy of the
+vendor JSON, and pointed `__EGL_VENDOR_LIBRARY_FILENAMES` at it.
+
+**Confirmed fixed**: the EGL diagnostic now reports `eglInitialize
+ok=1 major=1 minor=5`, `EGL_VENDOR: Mesa Project`, and a full, real
+extension list. Ran real `kmscube` for 3000 frames - owner watched a
+real spinning cube on the physical screen, sustained at a rock-solid
+**96.0 fps** (matching the display's own configured refresh rate
+exactly, i.e. genuinely vsync-locked, not just technically running).
+`/sys/kernel/debug/dri/128/gpu` afterward showed `last-fence ==
+retired-fence` with real command-stream data in the ring buffer -
+submitted GPU work was genuinely executed and retired, not just
+queued.
+
+The userspace Mesa/kmscube bundle itself was only ever staged on the
+`cache` partition for this one test - not part of the kernel/boot image
+and not committed (a large, standard Ubuntu-packaged binary blob, not
+project-specific). What *is* committed: the three devicetree lines
+enabling the GPU and pointing at the zap shader, matching the same
+"kernel driver correctly enabled and confirmed against real hardware"
+bar every other Phase 2 peripheral has met. `rp`/`ro.bootloader`
+reconfirmed unchanged throughout every flash in this round, as usual.
