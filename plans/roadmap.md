@@ -1102,6 +1102,25 @@ Progress log:
   tested via real finger touches read from `/dev/input/event0` -
   correct multi-touch tracking IDs, position, and touch/release.
   **Phase 2's display and touch goals are both done.**
+- 2026-09-20: GPU (Adreno 650) scoped, not yet implemented -
+  `../docs/phase2-gpu-scoping.md`. Good news: mainline's `sm8250.dtsi`
+  already fully describes this GPU (`gpu`/`gmu`/`gpucc`/`adreno_smmu`
+  nodes, `status = "disabled"` - same enable-the-disabled-node pattern as
+  every prior peripheral), and `CONFIG_DRM_MSM=y` is already forced on.
+  Confirmed the exact real-hardware silicon match against downstream's
+  `qcom,chipid = 0x06050000` and mainline's `a6xx_catalog.c` (`chip_ids
+  = 0x06050002`, `revn = 650`). The one real per-device piece: a
+  TrustZone-signed "zap shader" firmware blob
+  (`adreno_zap_shader_load()`) that must come from this device's own
+  vendor firmware partition - confirmed the exact working enablement
+  recipe (`&gmu`/`&gpu` status + `&gpu_zap_shader` `firmware-name`)
+  against `sm8250-xiaomi-elish-common.dtsi`, a real shipping mainline
+  device using the same GPU. Also flagged: the current bring-up
+  initramfs has no `/lib/firmware` tree yet, needed for
+  `request_firmware()` to find the zap/GMU/SQE blobs at probe time.
+  Next: get real device access, locate and pull the actual zap blob off
+  `/vendor/firmware*`, fetch the generic `a650_sqe.fw`/`a650_gmu.bin`
+  from `linux-firmware.git`, and add the devicetree pieces.
 
 ---
 
