@@ -634,6 +634,35 @@
 		interrupt-parent = <&max77705_pmic>;
 		interrupts = <0>;
 	};
+
+	/*
+	 * Battery percentage / fuel gauge (docs/phase3-fuelgauge-scoping.md).
+	 * Not a driver port - mainline's existing MAX17042-family driver
+	 * (drivers/power/supply/max17042_battery.c) already carries a real
+	 * "maxim,max77705-battery" compatible entry, mapped to the
+	 * MAXIM_DEVICE_TYPE_MAX17047 register variant - confirmed real
+	 * prior art (its own author, Dzmitry Sankouski - the same person
+	 * behind pmic@66/charger@69 above - originally wrote a standalone
+	 * MAX77705 fuel-gauge driver, then switched to extending this
+	 * shared driver instead, per that series' own changelog; the same
+	 * pattern is independently proven for the related MAX77759 chip,
+	 * fully merged in this same file). I2C address 0x36 independently
+	 * confirmed for this exact chip via downstream's own
+	 * `I2C_ADDR_FG = (0x6C >> 1)` (references/gts7l/drivers/mfd/
+	 * max77705.c:46) - byte-for-byte the same address. Interrupt 2
+	 * ("2 - fuelgauge") per the same documented MFD IRQ-source mapping
+	 * charger@69's own interrupt 0 already uses successfully. Unlike
+	 * the charger, this driver has no `monitored-battery`
+	 * requirement at all - it computes capacity from the chip's own
+	 * internal ModelGauge algorithm directly.
+	 */
+	fuelgauge@36 {
+		compatible = "maxim,max77705-battery";
+		reg = <0x36>;
+		interrupt-parent = <&max77705_pmic>;
+		interrupts = <2>;
+		shunt-resistor-micro-ohms = <10000>;
+	};
 };
 
 /*

@@ -1206,17 +1206,25 @@ tested) or tested for audio/A2DP over Bluetooth.
 Goal: the tablet is usable as a tablet — power, connectivity, audio, sensors.
 
 Exit criteria:
-- [x] Charging status — charger IC confirmed **Maxim MAX77705**
-      (`../docs/hardware-inventory.md`). **Kernel-level bring-up done**:
-      real, live telemetry (`POWER_SUPPLY_STATUS`/`ONLINE`/charge
-      current-voltage) confirmed on real hardware, `upower` correctly
-      enumerates it. **Battery percentage (fuel gauge) is a separate,
-      much bigger task** - mainline has no fuel-gauge driver for this
-      chip at all, scoped separately in
-      `../docs/phase3-fuelgauge-scoping.md` - this is why no icon shows
-      in Plasma's tray yet (a real, structural gap, not a missing
-      package). Core PMIC rails are standard Qualcomm PM8150+PM8009,
-      unrelated to this chip.
+- [x] Charging status and battery percentage — charger IC confirmed
+      **Maxim MAX77705** (`../docs/hardware-inventory.md`).
+      **Kernel-level bring-up done for both**: real, live charging
+      telemetry (`POWER_SUPPLY_STATUS`/`ONLINE`/charge current-voltage)
+      and real fuel-gauge telemetry (93% capacity, real cycle count,
+      visible capacity fade matching a genuinely used battery) both
+      confirmed on real hardware, `upower` correctly enumerates both,
+      **battery percentage now shows directly in Plasma** - confirmed
+      by the owner. The fuel gauge turned out to need zero new driver
+      code at all - mainline's existing MAX17042-family driver already
+      has a real `"maxim,max77705-battery"` compatible entry, found via
+      explicit prior-art research rather than assuming a from-scratch
+      port (`../docs/phase3-fuelgauge-scoping.md`). **USB-C/PD/MUIC is
+      a separate, real remaining gap**: a genuine USB-PD charger's
+      connection state doesn't stay stable in Plasma (icon flashes then
+      disappears) - this chip's separate Type-C port-management/MUIC
+      block has never been touched by this project, scoped separately
+      in `../docs/phase3-typec-muic-scoping.md`. Core PMIC rails are
+      standard Qualcomm PM8150+PM8009, unrelated to this chip.
 - [x] Wi-Fi working — combo chip confirmed **Qualcomm QCA6390**, targeted by
       mainline `ath11k`. **Kernel-level bring-up done** (real PCIe
       enumeration, real firmware, real scan results) - remaining work is
@@ -1303,8 +1311,27 @@ Progress log:
   first whether real prior art (a submitted mainline patch, another
   community project, or register-compatibility with the
   already-mainlined MAX17042 family) exists before committing to a
-  from-scratch port. Next: implement the fuel gauge once that scoping
-  pass reports back.
+  from-scratch port.
+- 2026-09-20 (later): Battery percentage (fuel gauge) - the prior-art
+  research paid off exactly as hoped. Full story in
+  `docs/phase3-fuelgauge-scoping.md`'s "Status: battery percentage
+  working on real hardware" section and `docs/kernel-boot-debugging.md`.
+  Zero new driver code needed - mainline's existing MAX17042-family
+  driver already had a real `"maxim,max77705-battery"` compatible
+  entry (the driver's own original author, already behind the
+  MFD/charger work this project uses, had switched to extending this
+  shared driver instead of a standalone one; a related chip going
+  through the identical fully-merged process was independent proof the
+  pattern is sound). Worked on the first flash - no new patches, no DTS
+  corrections, no boot-partition overflow. Confirmed: real, plausible
+  telemetry (93% capacity, real cycle count, visible capacity fade
+  matching a genuinely used battery), and the owner confirmed the
+  percentage now shows directly in Plasma. Found a separate, real
+  problem during the same testing session: a genuine USB-PD charger's
+  connection state doesn't stay stable in Plasma (icon flashes then
+  disappears) - this chip's Type-C/MUIC block has never been touched,
+  scoped separately in `docs/phase3-typec-muic-scoping.md`. Next:
+  implement Type-C/MUIC once that scoping pass reports back.
 
 ---
 

@@ -5826,3 +5826,49 @@ anything - exactly the deliberately-deferred fuel-gauge gap.
 `CONFIG_SECURITY_LANDLOCK` (added the same session, for `pacman`'s own
 install-time sandboxing) - `pacman -Sy` completed with zero sandbox
 errors on this boot.
+
+---
+
+## Phase 3: battery percentage / fuel gauge (MAX77705), real hardware confirmed (2026-09-20)
+
+Full research in `docs/phase3-fuelgauge-scoping.md`; this section is
+the short version. Goal: battery percentage, the piece charging-status
+alone couldn't provide (no icon in Plasma's tray without a real
+`Battery`-type `power_supply` device with a capacity).
+
+**Not a driver port.** Mainline's existing `drivers/power/supply/
+max17042_battery.c` already carries a real `"maxim,max77705-battery"`
+compatible-string entry, mapped to the `MAXIM_DEVICE_TYPE_MAX17047`
+register variant. Found via explicit prior-art research (per the
+owner's direction) rather than assuming a from-scratch port was
+needed, the same discipline this project used for touch (where
+nothing existed) and Wi-Fi/BT (where a real reference board existed) -
+here, the driver's own original author (Dzmitry Sankouski, already
+behind the MFD/charger drivers this project uses) had originally
+written a standalone MAX77705 fuel-gauge driver, then switched to
+extending this shared driver instead, per that patch series' own
+changelog. A related chip (MAX77759, Google Pixel's PMIC) went through
+the identical, fully-merged process - independent proof the pattern is
+sound, not a one-off.
+
+**DTS work**: a `fuelgauge@36` sibling I2C node (address independently
+confirmed via downstream's own `I2C_ADDR_FG = (0x6C >> 1)`), IRQ index
+2 ("2 - fuelgauge") off the same MFD interrupt-controller mechanism
+`charger@69` already uses successfully at index 0. Unlike the charger,
+no `monitored-battery` requirement at all - this driver computes
+capacity from the chip's own internal algorithm directly.
+
+**Confirmed on real hardware, first flash, zero surprises**: real,
+plausible, complete telemetry (93% capacity, real cycle count 4281,
+visible capacity fade matching a genuinely used battery) - strong
+independent confirmation the register mapping is a genuine match, not
+just "close enough to probe." The owner confirmed battery percentage
+now shows directly in KDE Plasma.
+
+**A separate, real problem found during the same testing session**: a
+genuine USB-PD charger's connection state doesn't stay stable in
+Plasma (icon flashes briefly then disappears) - not a bug in the
+charging-status or fuel-gauge work above, but almost certainly the
+MAX77705's separate USB-C/PD port-management and MUIC block, never
+touched by this project at all. Scoped separately:
+`docs/phase3-typec-muic-scoping.md`.

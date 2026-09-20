@@ -342,3 +342,11 @@ CONFIG_SECURITY_LANDLOCK=y
 # infrastructure) rather than trusting defconfig's default.
 CONFIG_MFD_MAX77705=y
 CONFIG_CHARGER_MAX77705=y
+
+# Battery percentage / fuel gauge (docs/phase3-fuelgauge-scoping.md) -
+# not a driver port, real prior art already merged in mainline's
+# shared MAX17042-family driver (a "maxim,max77705-battery" compatible
+# entry already exists in drivers/power/supply/max17042_battery.c).
+# tristate, depends on I2C (already =y), selects REGMAP_I2C - no
+# tristate-ceiling chain expected.
+CONFIG_BATTERY_MAX17042=y
