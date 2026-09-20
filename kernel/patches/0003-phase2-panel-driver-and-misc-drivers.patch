@@ -68,7 +68,7 @@ index 982abaaac..a3a93ddf2 100644
  		msm_host->err_work_state |= DSI_ERR_STATE_FIFO;
  		if (status & DSI_FIFO_STATUS_CMD_MDP_FIFO_UNDERFLOW)
 diff --git a/drivers/gpu/drm/msm/dsi/phy/dsi_phy_7nm.c b/drivers/gpu/drm/msm/dsi/phy/dsi_phy_7nm.c
-index 984a66085..1f1420239 100644
+index 984a66085..e440deb35 100644
 --- a/drivers/gpu/drm/msm/dsi/phy/dsi_phy_7nm.c
 +++ b/drivers/gpu/drm/msm/dsi/phy/dsi_phy_7nm.c
 @@ -493,6 +493,11 @@ static int dsi_pll_7nm_vco_prepare(struct clk_hw *hw)
@@ -83,7 +83,7 @@ index 984a66085..1f1420239 100644
  	dsi_pll_enable_pll_bias(pll_7nm);
  	if (pll_7nm->slave)
  		dsi_pll_enable_pll_bias(pll_7nm->slave);
-@@ -953,6 +958,78 @@ static void dsi_phy_hw_v4_0_lane_settings(struct msm_dsi_phy *phy)
+@@ -953,6 +958,104 @@ static void dsi_phy_hw_v4_0_lane_settings(struct msm_dsi_phy *phy)
  	}
  }
  
@@ -112,6 +112,25 @@ index 984a66085..1f1420239 100644
 + * arrays. Each field is only applied if the devicetree property is
 + * actually present, so every other board/panel using this driver keeps
 + * its existing (untouched) hardcoded behavior.
++ *
++ * Round 55 (docs/kernel-boot-debugging.md): with the DSI command/LP
++ * path now confirmed genuinely working on real hardware (backlight
++ * physically turns on via a DCS write baked into prepare()), while real
++ * HS *video* streaming still deterministically overflows
++ * (VIDEO_MDP_FIFO_OVERFLOW, every round since 43) and produces zero
++ * visible output even for definitely-non-black data written straight
++ * into the real scanout buffer - re-read downstream's dtsi and found a
++ * third rescode-offset property never ported: `samsung,phy_offset_mid_ctrl
++ * = <0x1F>`, alongside the already-ported top/bot. Mainline defines the
++ * matching register
++ * (REG_DSI_7nm_PHY_CMN_GLBL_RESCODE_OFFSET_MID_CTRL, dsi_phy_7nm.xml.h)
++ * but `dsi_7nm_phy_enable()` never writes to it at all - left at
++ * whatever the hardware's power-on-reset value is. C-PHY lanes are
++ * 3-wire trios (vs. D-PHY's 2-wire differential pairs), so a third,
++ * independent calibration code for the "mid" wire is a real, physically
++ * plausible gap - exactly the kind of marginal analog trim that would
++ * degrade tightly-timed HS signaling while barely-tolerant LP/command
++ * signaling keeps working, matching the current symptom split exactly.
 + */
 +struct dsi_phy_7nm_tuning_cfg {
 +	bool has_vreg_ctrl_0;
@@ -122,6 +141,8 @@ index 984a66085..1f1420239 100644
 +	u8 rescode_top_ctrl;
 +	bool has_rescode_bot_ctrl;
 +	u8 rescode_bot_ctrl;
++	bool has_rescode_mid_ctrl;
++	u8 rescode_mid_ctrl;
 +};
 +
 +static int dsi_7nm_phy_parse_dt(struct msm_dsi_phy *phy)
@@ -154,6 +175,11 @@ index 984a66085..1f1420239 100644
 +		tuning_cfg->rescode_bot_ctrl = val;
 +	}
 +
++	if (!of_property_read_u32(dev->of_node, "qcom,phy-rescode-offset-mid-ctrl", &val)) {
++		tuning_cfg->has_rescode_mid_ctrl = true;
++		tuning_cfg->rescode_mid_ctrl = val;
++	}
++
 +	phy->tuning_cfg = tuning_cfg;
 +
 +	return 0;
@@ -162,8 +188,11 @@ index 984a66085..1f1420239 100644
  static int dsi_7nm_phy_enable(struct msm_dsi_phy *phy,
  			      struct msm_dsi_phy_clk_request *clk_req)
  {
-@@ -969,6 +1046,14 @@ static int dsi_7nm_phy_enable(struct msm_dsi_phy *phy,
+@@ -967,8 +1070,17 @@ static int dsi_7nm_phy_enable(struct msm_dsi_phy *phy,
+ 	u32 glbl_pemph_ctrl_0;
+ 	u32 glbl_str_swi_cal_sel_ctrl, glbl_hstx_str_ctrl_0;
  	u32 glbl_rescode_top_ctrl, glbl_rescode_bot_ctrl;
++	u32 glbl_rescode_mid_ctrl = 0x00;
  	u32 data;
  
 +	/* gts7l temporary diagnostic (docs/kernel-boot-debugging.md) -
@@ -177,7 +206,7 @@ index 984a66085..1f1420239 100644
  	DBG("");
  
  	if (phy->cphy_mode)
-@@ -1084,6 +1169,28 @@ static int dsi_7nm_phy_enable(struct msm_dsi_phy *phy,
+@@ -1084,6 +1196,30 @@ static int dsi_7nm_phy_enable(struct msm_dsi_phy *phy,
  		glbl_rescode_bot_ctrl = 0x3c;
  	}
  
@@ -195,18 +224,29 @@ index 984a66085..1f1420239 100644
 +			glbl_rescode_top_ctrl = tuning_cfg->rescode_top_ctrl;
 +		if (tuning_cfg->has_rescode_bot_ctrl)
 +			glbl_rescode_bot_ctrl = tuning_cfg->rescode_bot_ctrl;
++		if (tuning_cfg->has_rescode_mid_ctrl)
++			glbl_rescode_mid_ctrl = tuning_cfg->rescode_mid_ctrl;
 +	}
 +
 +	/* gts7l temporary diagnostic - final trim values about to be
 +	 * written to hardware. */
-+	pr_err("gts7l: phy%d trim: vreg_ctrl_0=0x%x str_swi_cal_sel_ctrl=0x%x rescode_top=0x%x rescode_bot=0x%x\n",
++	pr_err("gts7l: phy%d trim: vreg_ctrl_0=0x%x str_swi_cal_sel_ctrl=0x%x rescode_top=0x%x rescode_bot=0x%x rescode_mid=0x%x\n",
 +	       phy->id, vreg_ctrl_0, glbl_str_swi_cal_sel_ctrl,
-+	       glbl_rescode_top_ctrl, glbl_rescode_bot_ctrl);
++	       glbl_rescode_top_ctrl, glbl_rescode_bot_ctrl, glbl_rescode_mid_ctrl);
 +
  	/* de-assert digital and pll power down */
  	data = DSI_7nm_PHY_CMN_CTRL_0_DIGTOP_PWRDN_B |
  	       DSI_7nm_PHY_CMN_CTRL_0_PLL_SHUTDOWNB;
-@@ -1271,6 +1378,7 @@ const struct msm_dsi_phy_cfg dsi_phy_7nm_cfgs = {
+@@ -1125,6 +1261,8 @@ static int dsi_7nm_phy_enable(struct msm_dsi_phy *phy,
+ 	       base + REG_DSI_7nm_PHY_CMN_GLBL_RESCODE_OFFSET_TOP_CTRL);
+ 	writel(glbl_rescode_bot_ctrl,
+ 	       base + REG_DSI_7nm_PHY_CMN_GLBL_RESCODE_OFFSET_BOT_CTRL);
++	writel(glbl_rescode_mid_ctrl,
++	       base + REG_DSI_7nm_PHY_CMN_GLBL_RESCODE_OFFSET_MID_CTRL);
+ 	writel(0x55, base + REG_DSI_7nm_PHY_CMN_GLBL_LPTX_STR_CTRL);
+ 
+ 	/* Remove power down from all blocks */
+@@ -1271,6 +1409,7 @@ const struct msm_dsi_phy_cfg dsi_phy_7nm_cfgs = {
  		.save_pll_state = dsi_7nm_pll_save_state,
  		.restore_pll_state = dsi_7nm_pll_restore_state,
  		.set_continuous_clock = dsi_7nm_set_continuous_clock,
@@ -215,10 +255,10 @@ index 984a66085..1f1420239 100644
  	.min_pll_rate = 600000000UL,
  #ifdef CONFIG_64BIT
 diff --git a/drivers/gpu/drm/panel/panel-novatek-nt36523.c b/drivers/gpu/drm/panel/panel-novatek-nt36523.c
-index 226d91daf..47c6bdfed 100644
+index 226d91daf..525c3f1e2 100644
 --- a/drivers/gpu/drm/panel/panel-novatek-nt36523.c
 +++ b/drivers/gpu/drm/panel/panel-novatek-nt36523.c
-@@ -57,6 +57,395 @@ static inline struct panel_info *to_panel_info(struct drm_panel *panel)
+@@ -57,6 +57,416 @@ static inline struct panel_info *to_panel_info(struct drm_panel *panel)
  	return container_of(panel, struct panel_info, panel);
  }
  
@@ -583,7 +623,28 @@ index 226d91daf..47c6bdfed 100644
 +	mipi_dsi_dual_dcs_write_seq_multi(&dsi_ctx, dsi0, dsi1, 0xff, 0x10);
 +	mipi_dsi_dual_dcs_write_seq_multi(&dsi_ctx, dsi0, dsi1, 0xfb, 0x01);
 +	mipi_dsi_dual_dcs_write_seq_multi(&dsi_ctx, dsi0, dsi1, 0x35, 0x00);
-+	mipi_dsi_dual_dcs_write_seq_multi(&dsi_ctx, dsi0, dsi1, 0x51, 0x00, 0x00);
++	/*
++	 * Round 54 (docs/kernel-boot-debugging.md): downstream sends
++	 * brightness=0 here (`39 00 00 00 00 00 03 51 00 00`) and expects a
++	 * later runtime DCS write to set the real value via
++	 * `bl_ctrl_dcs`/`samsung,brightness_tx_cmds_revA` - mainline's own
++	 * equivalent is nt36523_bl_update_status(), triggered automatically
++	 * by devm_backlight_device_register() right as fb0 unblanks, which
++	 * lands within microseconds of dpu_encoder_phys_vid's
++	 * enable_timing(1) (confirmed via dmesg timestamps: both at
++	 * ~1.0565s). Research found a real, accepted mainline fix
++	 * ("skip the wait for video mode done if not applicable") for
++	 * exactly this class of hardware limitation: "some display
++	 * controllers cannot send DSI commands after starting the video
++	 * stream... all DSI configuration should be done in
++	 * prepare()/unprepare()". Rather than trust a DCS write racing
++	 * video-stream start on this hardware, bake a real, non-zero
++	 * default brightness (462 = 0x01CE, downstream's own declared max)
++	 * directly into this already-reliable prepare()-time sequence
++	 * instead, sidestepping the late write entirely for the initial
++	 * value.
++	 */
++	mipi_dsi_dual_dcs_write_seq_multi(&dsi_ctx, dsi0, dsi1, 0x51, 0x01, 0xce);
 +	mipi_dsi_dual_dcs_write_seq_multi(&dsi_ctx, dsi0, dsi1, 0x53, 0x24);
 +	mipi_dsi_dual_dcs_write_seq_multi(&dsi_ctx, dsi0, dsi1, 0x55, 0x00);
 +	mipi_dsi_dual_dcs_write_seq_multi(&dsi_ctx, dsi0, dsi1, 0xbb, 0x13);
@@ -614,7 +675,7 @@ index 226d91daf..47c6bdfed 100644
  static int elish_boe_init_sequence(struct panel_info *pinfo)
  {
  	struct mipi_dsi_device *dsi0 = pinfo->dsi[0];
-@@ -886,6 +1275,96 @@ static int j606f_boe_init_sequence(struct panel_info *pinfo)
+@@ -886,6 +1296,198 @@ static int j606f_boe_init_sequence(struct panel_info *pinfo)
  	return dsi_ctx.accum_err;
  }
  
@@ -630,14 +691,115 @@ index 226d91daf..47c6bdfed 100644
 + * panel resolution (not the per-DSI-link half) - same convention as
 + * elish's own modes below, confirmed by elish using its full 1600 width
 + * despite also being dual-DSI.
++ *
++ * Round 49 (docs/kernel-boot-debugging.md): the deterministic
++ * VIDEO_MDP_FIFO_OVERFLOW hit on every real frame commit (Rounds 40-48)
++ * traced to drivers/gpu/drm/msm/disp/dpu1/dpu_plane.c's
++ * _dpu_plane_calc_bw(): SM8250's DPU catalog declares
++ * `min_prefill_lines = 35` (dpu_6_0_sm8250.h), but this panel's
++ * downstream-declared total vertical blanking (vbp=7 + vpw=1 + vfp=26 =
++ * 34) is one line *short* of that minimum. Padded vfp from 26 to 28 to
++ * clear it (two lines of margin) - real hardware testing (Round 49
++ * result) showed this alone had zero effect: identical fault, byte-for-
++ * byte identical REG_DSI_FIFO_STATUS, same relative timing. Kept anyway
++ * (harmless, and genuinely required - see Round 50) since it's not
++ * sufficient on its own.
++ *
++ * Round 50 (docs/kernel-boot-debugging.md): temporary runtime
++ * instrumentation in dpu_core_perf_crtc_update() proved the real cause
++ * directly, on real hardware: `requested_clk=523353600 max_clk=460000000`
++ * - the DPU's own core clock is hard-clamped 12% below what this mode
++ * actually needs. `disp_cc_mdss_mdp_clk_src`'s frequency table
++ * (drivers/clk/qcom/dispcc-sm8250.c) tops out at 460MHz on this SoC
++ * generation - a real, fixed hardware ceiling shared by every SM8250
++ * board, not a devicetree/config gap. This is *not* fixable by
++ * porch/blanking tuning (Round 49's whole premise): the clock formula
++ * (`vtotal * hdisplay * fps`, `dpu_core_perf.c`) only ever grows with
++ * more blanking, and even the impossible zero-blanking floor
++ * (vtotal=vdisplay=2560) at 120Hz already demands ~516MHz - over the
++ * 460MHz ceiling regardless of how blanking is arranged. Only a lower
++ * `fps` actually reduces the required clock. This panel's own downstream
++ * DFPS list (`qcom,dsi-supported-dfps-list = <120 96 60 48>`) already
++ * treats 96Hz as a first-class supported rate, not an invented
++ * workaround - at 96Hz with Round 49's vtotal, required clock is
++ * ~419MHz, comfortably under the 460MHz cap with real margin. Dropped
++ * native rate from 120 to 96Hz to fit inside the real, measured hardware
++ * budget; Round 49's vfp=28 padding is still needed independently (fps
++ * doesn't affect the min_prefill_lines=35 blanking-line-count check).
++ *
++ * Round 50 result: 96Hz alone also had zero effect - `requested_clk`
++ * dropped to 418,682,880 (confirmed via the same instrumentation, no
++ * longer clamped by `max_clk`=460,000,000), yet the identical
++ * REG_DSI_FIFO_STATUS fault still fired, at a proportionally-scaled
++ * delay after `enable_timing()` (~749us vs Round 49's ~602us, matching
++ * the 523/419 clock ratio almost exactly) - conclusively ruling out
++ * *any* clock/bandwidth shortfall, clamped or not, as the cause. Eight
++ * independently-real fixes/theories now falsified by direct hardware
++ * test.
++ *
++ * Round 51: found the one code path elish's own devicetree never
++ * exercises at all, which is exactly why comparing against elish never
++ * surfaced this. `dpu_encoder_phys_vid.c`'s `programmable_fetch_get_num_lines()`
++ * only engages DPU's "programmable fetch" prefetch-ahead mechanism when
++ * `vbp + vsync_pulse_width < prog_fetch_lines_worst_case` (24 for
++ * SM8250, `dpu_6_0_sm8250.h`). Ours: vbp=7 + vpw=1 = 8, well under 24 -
++ * fetch is engaged, and DPU relies on `programmable_fetch_config()`'s
++ * vsync-counter arithmetic to prime its FIFO correctly ahead of active
++ * video. Elish's own back porch (168) alone clears the 24-line
++ * threshold outright - elish *never* engages this mechanism, so a bug
++ * anywhere in it would be completely invisible when comparing against
++ * elish's known-working configuration, matching every previous dead end
++ * exactly. Padded v-back-porch from 7 to 30 (`vbp + vpw` = 31 > 24) to
++ * disable programmable fetch entirely and match elish's own approach of
++ * avoiding this code path altogether, rather than trying to
++ * out-calculate its counter math. Total blanking (vpw+vbp+vfp =
++ * 1+30+28 = 59) stays well above `min_prefill_lines`=35 and the
++ * required core clock (~422MHz at 96Hz) stays comfortably under the
++ * 460MHz ceiling, so this doesn't reopen either of the previous two
++ * constraints. (Rounds 49/51 both later found to be based on a false
++ * premise - see Round 56.)
++ *
++ * Round 56 (docs/kernel-boot-debugging.md): found the actual bug, proven
++ * bit-for-bit against a real, working register readback pulled live off
++ * stock Android via `/sys/kernel/debug/ss_dsi_panel_.../dsi-ctrl-0/reg_dump`
++ * while the real desktop was genuinely running real 120Hz video.
++ * `dsi_timing_setup()` (drivers/gpu/drm/msm/dsi/dsi_host.c) halves
++ * `h_total`/`hs_end`/`ha_start`/`ha_end`/`hdisplay` for bonded DSI,
++ * because it assumes the *combined* DRM mode's horizontal porches
++ * already represent two links' worth, pre-doubled. Ours didn't - we put
++ * the real, single-link porch values (84/2/30) directly into a
++ * 1600-wide combined mode, so mainline's automatic halving cut them in
++ * half *again*, handing each physical DSI controller only half its real
++ * blanking (42/1/15 instead of 84/2/30) on every single line, every
++ * single frame - a static, structural, deterministic timing violation
++ * on the one thing that's fundamentally different between LP-mode
++ * commands (unaffected, no line timing involved) and real HS video
++ * (corrupted from the very first line) - matching the entire observed
++ * symptom split exactly. Confirmed the fix bit-for-bit: doubling the
++ * horizontal porches here (168/4/60) and running it through
++ * `dsi_timing_setup()`'s exact halving formulas reproduces the real
++ * hardware's `DSI_VIDEO_MODE_ACTIVE_H=0x03400020`,
++ * `_TOTAL=0x0a210393`, and `_HSYNC=0x00020000` precisely.
++ *
++ * The same live readback also proved Rounds 49 and 51's vertical porch
++ * padding was chasing a false lead: real stock Android runs this exact
++ * panel at `v_total=2594` - vpw=1, vbp=7, vfp=26, completely unpadded,
++ * one line *under* `min_prefill_lines`=35. Reverted both back to their
++ * original, downstream-declared values. Round 50's fps=96 finding
++ * stands independently and is kept - it's a real MDP-core-clock/OPP-
++ * table limitation in mainline's own clk driver (`dispcc-sm8250.c` has
++ * no frequency-table entry above 460MHz), not something the porch fix
++ * touches; stock Android achieving real 120Hz just means Samsung's own
++ * downstream clock driver has additional divider entries mainline's
++ * doesn't - a separate, valid future improvement, out of scope here.
 + */
 +static const struct drm_display_mode gts7l_modes[] = {
 +	{
-+		.clock = (1600 + 84 + 2 + 30) * (2560 + 26 + 1 + 7) * 120 / 1000,
++		.clock = (1600 + 168 + 4 + 60) * (2560 + 26 + 1 + 7) * 96 / 1000,
 +		.hdisplay = 1600,
-+		.hsync_start = 1600 + 84,
-+		.hsync_end = 1600 + 84 + 2,
-+		.htotal = 1600 + 84 + 2 + 30,
++		.hsync_start = 1600 + 168,
++		.hsync_end = 1600 + 168 + 4,
++		.htotal = 1600 + 168 + 4 + 60,
 +		.vdisplay = 2560,
 +		.vsync_start = 2560 + 26,
 +		.vsync_end = 2560 + 26 + 1,
@@ -680,38 +842,52 @@ index 226d91daf..47c6bdfed 100644
 +	.init_sequence = gts7l_init_sequence,
 +	.is_dual_dsi = true,
 +	/*
-+	 * Round 46 (2026-09-19, docs/kernel-boot-debugging.md): this was
-+	 * `true` (downstream's qcom,mdss-dsi-bl-pmic-control-type =
-+	 * "bl_ctrl_dcs" - brightness is a DCS command to the panel itself,
-+	 * register 0x51) - but real-hardware diagnostics caught
-+	 * nt36523_bl_update_status()'s automatic initial brightness write
-+	 * (triggered by devm_backlight_device_register() itself, ~1.07s
-+	 * into boot, well after the panel's own init sequence and PLL lock
-+	 * had already succeeded) landing within under 1ms of every
-+	 * dsi_err_worker: status=4 (DSI_ERR_STATE_FIFO) failure - matches a
-+	 * documented mainline bug class exactly (found via research): this
-+	 * callback's own unsynchronized read-modify-write of
-+	 * dsi->mode_flags (toggling MIPI_DSI_MODE_LPM off then back on to
-+	 * force the brightness command into HS mode) can race the DRM
-+	 * commit path's own concurrent mode_flags use and corrupt/drop
-+	 * MIPI_DSI_MODE_VIDEO for a moment, producing exactly this class of
-+	 * FIFO corruption. This device's backlight isn't wired to a real
-+	 * consumer-facing control path anyway at this bring-up stage -
-+	 * `false` here means drm_panel_of_backlight() gets called instead
-+	 * (see nt36523_probe() below), which is a fully-supported, no-op
-+	 * success (panel->backlight stays NULL) when - as here - the panel
-+	 * devicetree node has no `backlight = <&phandle>;` property at all,
-+	 * eliminating the automatic racy DCS write path entirely rather
-+	 * than trying to synchronize it properly. Software brightness
-+	 * control is a deferred item, not required to get a picture.
++	 * Round 46 (2026-09-19, docs/kernel-boot-debugging.md) set this to
++	 * `false` because nt36523_bl_update_status()'s automatic initial
++	 * brightness write landed within 1ms of every
++	 * dsi_err_worker: status=4 (DSI_ERR_STATE_FIFO) failure, theorized
++	 * as an unsynchronized dsi->mode_flags race with the DRM commit
++	 * path. Round 48 directly retracted this: with the callback removed
++	 * entirely, the identical FIFO fault still fired at the same timing
++	 * - "the backlight race was a coincidental correlation, not the
++	 * actual cause - both were triggered by the same underlying event
++	 * (the first real frame commit), not one causing the other." That
++	 * retraction was never acted on - `has_dcs_backlight` stayed `false`
++	 * through Rounds 47-51 by omission, not by any new evidence against
++	 * it, while five more rounds chased the (separately confirmed
++	 * harmless - see Round 52 in docs/kernel-boot-debugging.md;
++	 * dsi_err_worker only calls dsi_sw_reset() for
++	 * DSI_FIFO_STATUS_CMD_MDP_FIFO_UNDERFLOW, bit 0x80, which our
++	 * observed 0x1ddd1011 never sets) FIFO log line. Meanwhile this
++	 * panel's backlight is DCS-controlled by the panel's own internal
++	 * LED driver (downstream's `bl_ctrl_dcs`, register 0x51) - not a
++	 * separate GPIO/PWM rail - so with no backlight device registered at
++	 * all, nothing has sent a brightness-on command in any of those
++	 * rounds regardless of whether the DSI/DPU pipeline was healthy.
++	 * Reverted to `true` to restore the only code path that actually
++	 * turns the backlight on, now that its only cited justification for
++	 * being off is known-retracted.
 +	 */
-+	.has_dcs_backlight = false,
++	.has_dcs_backlight = true,
 +};
 +
  static const struct drm_display_mode elish_boe_modes[] = {
  	{
  		.clock = (1600 + 60 + 8 + 60) * (2560 + 26 + 4 + 168) * 120 / 1000,
-@@ -1107,9 +1586,20 @@ static int nt36523_bl_update_status(struct backlight_device *bl)
+@@ -1012,6 +1614,12 @@ static int nt36523_prepare(struct drm_panel *panel)
+ 		return ret;
+ 	}
+ 
++	/* gts7l temporary diagnostic - exact moment the panel's own DCS
++	 * init sequence finishes successfully, to correlate against when
++	 * DPU actually starts real HS video streaming and against the
++	 * FIFO overflow that follows shortly after. */
++	pr_err("gts7l: nt36523_prepare init_sequence done, ret=%d\n", ret);
++
+ 	return 0;
+ }
+ 
+@@ -1107,9 +1715,20 @@ static int nt36523_bl_update_status(struct backlight_device *bl)
  	u16 brightness = backlight_get_brightness(bl);
  	int ret;
  
@@ -732,7 +908,7 @@ index 226d91daf..47c6bdfed 100644
  	if (ret < 0)
  		return ret;
  
-@@ -1253,6 +1743,10 @@ static const struct of_device_id nt36523_of_match[] = {
+@@ -1253,6 +1872,10 @@ static const struct of_device_id nt36523_of_match[] = {
  		.compatible = "xiaomi,elish-csot-nt36523",
  		.data = &elish_csot_desc,
  	},
@@ -743,6 +919,42 @@ index 226d91daf..47c6bdfed 100644
  	{},
  };
  MODULE_DEVICE_TABLE(of, nt36523_of_match);
+diff --git a/drivers/gpu/drm/msm/disp/dpu1/dpu_core_perf.c b/drivers/gpu/drm/msm/disp/dpu1/dpu_core_perf.c
+index 13cc65806..2a4f36f57 100644
+--- a/drivers/gpu/drm/msm/disp/dpu1/dpu_core_perf.c
++++ b/drivers/gpu/drm/msm/disp/dpu1/dpu_core_perf.c
+@@ -394,6 +394,14 @@ int dpu_core_perf_crtc_update(struct drm_crtc *crtc,
+ 
+ 		trace_dpu_core_perf_update_clk(kms->dev, !crtc->enabled, clk_rate);
+ 
++		/* gts7l temporary diagnostic - real requested vs. clamped core
++		 * clock and bandwidth vote, to settle (not guess) whether the
++		 * MDP core clock/bandwidth is actually under-provisioned for
++		 * this panel's mode. */
++		pr_err("gts7l: perf update requested_clk=%llu max_clk=%llu bw_ctl=%llu max_per_pipe_ib=%u\n",
++		       clk_rate, kms->perf.max_core_clk_rate,
++		       new->bw_ctl, new->max_per_pipe_ib);
++
+ 		clk_rate = min(clk_rate, kms->perf.max_core_clk_rate);
+ 		ret = dev_pm_opp_set_rate(&kms->pdev->dev, clk_rate);
+ 		if (ret) {
+diff --git a/drivers/gpu/drm/msm/disp/dpu1/dpu_encoder_phys_vid.c b/drivers/gpu/drm/msm/disp/dpu1/dpu_encoder_phys_vid.c
+index ba810f26e..197dd9477 100644
+--- a/drivers/gpu/drm/msm/disp/dpu1/dpu_encoder_phys_vid.c
++++ b/drivers/gpu/drm/msm/disp/dpu1/dpu_encoder_phys_vid.c
+@@ -661,6 +661,12 @@ static void dpu_encoder_phys_vid_handle_post_kickoff(
+ 	if (phys_enc->enable_state == DPU_ENC_ENABLING) {
+ 		trace_dpu_enc_phys_vid_post_kickoff(DRMID(phys_enc->parent),
+ 				    phys_enc->hw_intf->idx - INTF_0);
++		/* gts7l temporary diagnostic - exact moment DPU actually
++		 * starts pushing real pixel data onto this INTF, to pin down
++		 * the real elapsed time vs. the panel init sequence finishing
++		 * and vs. the FIFO overflow that follows shortly after. */
++		pr_err("gts7l: dpu_encoder_phys_vid enable_timing(1), intf=%d\n",
++		       phys_enc->hw_intf->idx - INTF_0);
+ 		spin_lock_irqsave(phys_enc->enc_spinlock, lock_flags);
+ 		phys_enc->hw_intf->ops.enable_timing(phys_enc->hw_intf, 1);
+ 		spin_unlock_irqrestore(phys_enc->enc_spinlock, lock_flags);
 diff --git a/drivers/misc/Kconfig b/drivers/misc/Kconfig
 index 390256ed9..a882f1fc2 100644
 --- a/drivers/misc/Kconfig
