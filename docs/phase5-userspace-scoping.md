@@ -239,3 +239,17 @@ gate on first boot.
    verification first, exactly like every other Phase so far.
 5. Only then layer on KDE Plasma, tested in stages (bare KWin session
    before full Plasma+SDDM).
+
+## Status: real boot achieved on hardware (2026-09-20)
+
+Steps 1-2 from the suggested next-step list above are done: a minimal
+Arch Linux ARM console rootfs is built and boots for real on hardware
+(genuine `archlinux login` prompt, `systemctl is-system-running` →
+`running`), on `userdata` reused directly as recommended (GPT never
+touched). Full story, including two real bugs found and fixed along the
+way, is in `docs/kernel-boot-debugging.md`'s "Phase 5: first real Arch
+Linux ARM boot on hardware" section. Also worth correcting here: this
+scoping pass never looked into the fingerprint reader question - a
+separate stock-firmware-dump pass found this device does have one
+(Goodix GW3X, power button), contrary to an earlier kernel-source-only
+check. Next: KDE Plasma itself (steps 4-5 from the list above).

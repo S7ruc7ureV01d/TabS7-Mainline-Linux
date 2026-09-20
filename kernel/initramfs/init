@@ -1,54 +1,28 @@
 #!/bin/busybox sh
-# Minimal Phase 1 bring-up init for gts7l - not a real rootfs, just enough
-# to prove the kernel boots, gives us a shell, and lets us look at UFS/dmesg.
-# See docs/phase1-boot-testing.md.
+# Phase 5 real init handoff for gts7l - finds the Arch Linux ARM root
+# filesystem (LABEL=archroot, the Android userdata partition reused per
+# docs/phase5-userspace-scoping.md's "whole-tablet" approach) and
+# switch_root's into it, handing off to systemd as PID 1.
 #
-# Round 32 (docs/kernel-boot-debugging.md): after Round 30/31 got the
-# kernel booting all the way to "Run /init as init process", every test
-# since has cut off cleanly right after this script's own last printed
-# line, with a warm PS_HOLD reset and *no* crash-dump entry or panic text
-# anywhere - not matching either the (now-removed) uniLoader watchdog or
-# a captured kernel panic. Stripped this down to the bare minimum
-# (dropped the /proc/partitions/block-device listing, the only real
-# device I/O in the earlier version) to isolate whether that was the
-# trigger, rather than guessing blind.
-#
-# Also adds a USB gadget serial console (configfs ACM) - real display
-# needs a proper panel/MDSS driver (Phase 2 scope), but this device's
-# USB controller and most of the gadget infrastructure were already
-# compiled in by default (kernel/config/gts7l.fragment). This gives live,
-# interactive access instead of the reboot-and-read-last_kmsg cycle this
-# whole debugging effort has depended on so far.
+# Supersedes the Phase 1/2 bring-up init (docs/phase1-boot-testing.md,
+# Round 32/36) - that version's interactive debug shell and USB-gadget
+# diagnostics did their job getting the kernel itself proven working;
+# this one's job is different; get out of the way and into a real
+# userspace as fast and reliably as possible. The USB gadget ACM console
+# is kept as a second, independent debug channel alongside the serial
+# UART for this first real-rootfs boot milestone - if switch_root or
+# systemd itself goes wrong, having two ways to reach a fallback shell
+# is worth the small setup cost.
 
-/bin/busybox mkdir -p /proc /sys /dev
+/bin/busybox mkdir -p /proc /sys /dev /newroot
 /bin/busybox mount -t proc proc /proc
 /bin/busybox mount -t sysfs sysfs /sys
 /bin/busybox mount -t devtmpfs devtmpfs /dev 2>/dev/null
 
-echo "=== gts7l Phase 1 test initramfs (Round 32) ==="
-
-# Round 36 (docs/kernel-boot-debugging.md): debugging why /sys/class/udc
-# stays empty (no USB gadget console). CONFIG_DYNAMIC_DEBUG is off in
-# this kernel, so dwc3/dwc3-qcom-legacy's dev_dbg() calls are compiled
-# out entirely - their silence in dmesg proves nothing either way. No
-# USB-OTG keyboard works either (host mode is correctly disabled,
-# dr_mode = "peripheral"), so there's no way to type at this shell -
-# printing everything needed automatically, before the shell, so it's
-# on screen without needing any input.
-/bin/busybox mkdir -p /sys/kernel/debug
-/bin/busybox mount -t debugfs none /sys/kernel/debug 2>/dev/null
-echo "--- platform devices matching usb/dwc ---"
-/bin/busybox ls /sys/bus/platform/devices/ 2>&1 | /bin/busybox grep -i "usb\|dwc\|a600000\|a6f8800"
-echo "--- /sys/class/udc ---"
-/bin/busybox ls -l /sys/class/udc/ 2>&1
-echo "--- deferred probe list ---"
-/bin/busybox cat /sys/kernel/debug/devices_deferred 2>&1
-echo "--- dwc3/usb related dmesg lines ---"
-/bin/busybox dmesg 2>&1 | /bin/busybox grep -i "usb\|dwc\|phy\|extcon\|role"
-echo "--- end Round 36 USB diagnostics ---"
+echo "=== gts7l Arch Linux ARM initramfs ==="
 
 # USB gadget serial console (configfs ACM) - best-effort, never let a
-# failure here block reaching the fallback shell below.
+# failure here block the real boot attempt below.
 /bin/busybox mkdir -p /sys/kernel/config
 /bin/busybox mount -t configfs none /sys/kernel/config 2>/dev/null
 if [ -d /sys/kernel/config/usb_gadget ]; then
@@ -59,7 +33,7 @@ if [ -d /sys/kernel/config/usb_gadget ]; then
 	/bin/busybox mkdir -p "$G/strings/0x409"
 	echo "gts7l-000000" > "$G/strings/0x409/serialnumber"
 	echo "UbuntuTabS7 project" > "$G/strings/0x409/manufacturer"
-	echo "gts7l mainline bring-up console" > "$G/strings/0x409/product"
+	echo "gts7l Arch Linux ARM console" > "$G/strings/0x409/product"
 	/bin/busybox mkdir -p "$G/configs/c.1/strings/0x409"
 	echo "conf1" > "$G/configs/c.1/strings/0x409/configuration"
 	echo 120 > "$G/configs/c.1/MaxPower"
@@ -68,25 +42,47 @@ if [ -d /sys/kernel/config/usb_gadget ]; then
 	UDC=$(/bin/busybox ls /sys/class/udc 2>/dev/null | /bin/busybox head -1)
 	if [ -n "$UDC" ]; then
 		echo "$UDC" > "$G/UDC"
-		echo "=== USB gadget bound to $UDC, waiting for /dev/ttyGS0 ==="
 		i=0
 		while [ ! -e /dev/ttyGS0 ] && [ "$i" -lt 50 ]; do
 			/bin/busybox sleep 0.1
 			i=$((i + 1))
 		done
 		if [ -e /dev/ttyGS0 ]; then
-			echo "=== /dev/ttyGS0 present, spawning a shell on it ==="
+			echo "=== USB gadget console on /dev/ttyGS0 ==="
 			(/bin/busybox setsid /bin/busybox sh -c \
 				'exec /bin/busybox sh </dev/ttyGS0 >/dev/ttyGS0 2>&1') &
-		else
-			echo "=== /dev/ttyGS0 never appeared ==="
 		fi
-	else
-		echo "=== no UDC found under /sys/class/udc ==="
 	fi
-else
-	echo "=== configfs usb_gadget not available ==="
 fi
 
-echo "=== dropping to a shell (ash) on the console ==="
-exec /bin/busybox sh
+echo "=== mounting root (userdata/archroot, /dev/sda37) ==="
+#
+# Not using `blkid -L archroot` here: confirmed on real hardware that
+# busybox's label-scan mode doesn't reach sda37 at all (a plain `blkid`
+# with no args enumerates plenty of other partitions but stops short of
+# it), even though `blkid /dev/sda37` directly reports the label
+# correctly. This device's partition table is fixed by design (the
+# whole-tablet approach in docs/phase5-userspace-scoping.md was chosen
+# specifically to avoid ever touching the GPT), so a hardcoded path is
+# both simpler and no less reliable than fighting that scan quirk -
+# matches this project's own established convention of referencing
+# partitions by their known real device node throughout.
+ROOT_DEV=/dev/sda37
+if [ ! -b "$ROOT_DEV" ]; then
+	echo "!!! $ROOT_DEV not found - dropping to a fallback shell"
+	exec /bin/busybox sh
+fi
+
+echo "=== found root at $ROOT_DEV, mounting ==="
+if ! /bin/busybox mount -t ext4 -o rw "$ROOT_DEV" /newroot; then
+	echo "!!! failed to mount $ROOT_DEV - dropping to a fallback shell"
+	exec /bin/busybox sh
+fi
+
+if [ ! -x /newroot/sbin/init ]; then
+	echo "!!! /sbin/init missing on the new root - dropping to a fallback shell"
+	exec /bin/busybox sh
+fi
+
+echo "=== switching root, handing off to systemd ==="
+exec /bin/busybox switch_root /newroot /sbin/init

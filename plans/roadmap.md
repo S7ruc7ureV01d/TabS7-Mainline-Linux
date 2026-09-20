@@ -1188,10 +1188,15 @@ Exit criteria:
       confirmed, not just assumed.
 - [ ] Cameras (front/rear) working via V4L2, to whatever extent the ISP allows
       under mainline.
-- [ ] Fingerprint reader: **explicitly decide and record** whether the target
-      SKU has one at all before doing any work here — most base Tab S7 units
-      don't (see `PORTING_ANALYSIS.md` §4). If absent, mark this item N/A
-      rather than leaving it unchecked forever.
+- [ ] Fingerprint reader: **confirmed present** (2026-09-20, correcting an
+      earlier kernel-source-only check that wrongly concluded absent) — a
+      Goodix GW3X sensor in the power button, confirmed live on real
+      hardware (`/dev/goodix_fp`, `/sys/class/fingerprint/fingerprint/
+      vendor` = `GOODIX`). The kernel driver is a thin TEE-communication
+      shim with no loadable firmware file, so there's nothing to extract
+      for it - the real work here is a mainline driver for this sensor
+      class, which doesn't exist yet (`libfprint`-style userspace is the
+      likely path, not a kernel driver at all). Real scope, not N/A.
 - [ ] microSD and USB host (storage + HID) working.
 - [ ] USB-C DisplayPort output working, if hardware supports it on this model.
 
@@ -1202,7 +1207,18 @@ Progress log:
 
 ## Phase 5 — Userspace, packaging, and dual boot
 
-**Status:** not started
+**Status:** in progress - **real Arch Linux ARM boot achieved on
+hardware** (2026-09-20). `userdata` reused as a 105 GiB ext4 `archroot`
+partition (whole-tablet approach, zero GPT changes), a minimal console
+rootfs built via `pacstrap`-under-Docker, and a real `switch_root`-based
+initramfs - reached a genuine `archlinux login` prompt and a full
+`systemctl is-system-running` → `running` state, confirmed over a
+dedicated USB-Ethernet-gadget SSH link set up specifically for this
+phase's debugging. See `../docs/kernel-boot-debugging.md`'s "Phase 5:
+first real Arch Linux ARM boot on hardware" section for the two real
+bugs found and fixed along the way (a busybox `blkid` label-scan quirk,
+and a UFS WriteBooster runtime-PM interaction that took a live kernel
+stack trace to actually pin down). KDE Plasma itself not yet attempted.
 
 Goal: turn a hand-booted hacked kernel + rootfs into something installable and
 maintainable, matching the S9 Ultra project's user-facing shape.
@@ -1219,9 +1235,12 @@ touch, GPU/Mesa-Freedreno) is fully reusable regardless of distro, since
 none of it depends on anything Ubuntu/Debian-specific.
 
 Exit criteria:
-- [ ] Arch Linux ARM rootfs build reproducible via `pacstrap`
+- [x] Arch Linux ARM rootfs build reproducible via `pacstrap`
       (or the ALARM bootstrap tarball + `pacman`) + this repo's
-      `packaging/`/`configs/`.
+      `packaging/`/`configs/`. **Done** for a first minimal console
+      build (2026-09-20, via Docker `--platform linux/arm64` +
+      `pacman -Syu --disable-sandbox`) - not yet wired into a tracked
+      `packaging/` directory in this repo, still a manual process.
 - [ ] KDE Plasma (Wayland/KWin) installed and reaching a usable desktop,
       building on the confirmed-working Mesa/Freedreno GPU acceleration
       from Phase 2.
@@ -1235,7 +1254,10 @@ Exit criteria:
       device has a real Book Cover Keyboard with a pogo-pin trackpad
       (`stm,touchpad`) and keypad (`stm,keypad`, labeled `"Tab S7 Book Cover
       Keyboard"` in DT) per `../docs/hardware-inventory.md` — plus dual-boot
-      toggle; drop fingerprint/UDFPS-specific features that don't apply).
+      toggle; **do not** drop fingerprint/UDFPS-specific features — this
+      device does have a fingerprint reader (Goodix GW3X in the power
+      button, confirmed 2026-09-20, see Phase 4) — scope those in once a
+      mainline driver path for that sensor class exists.
 
 Progress log:
 - 2026-09-20: Scoped - `../docs/phase5-userspace-scoping.md`. Read a real,
@@ -1257,7 +1279,27 @@ Progress log:
   a real decision for the owner, not something to default silently.
   `pacstrap` via the same Docker `--platform linux/arm64` QEMU-emulation
   trick already proven this session for the GPU work is the build path.
-  Not yet implemented.
+- 2026-09-20: Real Arch Linux ARM boot achieved - `userdata` reformatted
+  as a 105 GiB ext4 `archroot` partition (GPT untouched), a minimal
+  console rootfs built via `pacstrap`-under-Docker, and
+  `kernel/initramfs/init` rewritten from the Phase 1/2 disposable debug
+  shell into a real `switch_root`-based init. Reached a genuine
+  `archlinux login` prompt and `systemctl is-system-running` →
+  `running`. Two real bugs found and fixed on the way: busybox `blkid
+  -L` doesn't reach every partition on this device (worked around with
+  a hardcoded device path, safe given this device's fixed partition
+  table), and continuous UFS WriteBooster query failures spamming the
+  console every few seconds - root-caused with a live kernel stack
+  trace (not guessing) to runtime-PM autosuspend on the per-LUN SCSI
+  devices (not the platform host controller, the first, wrong guess),
+  fixed with a corrected udev rule. Set up a dedicated USB-Ethernet-
+  gadget SSH link (`172.16.42.1`) specifically to get real remote access
+  for this kind of live debugging, after the bring-up initramfs's own
+  USB-gadget console turned out to only survive up to `switch_root`.
+  Also corrected an earlier wrong finding: this device's fingerprint
+  reader is real (Goodix GW3X in the power button), not absent as an
+  earlier kernel-source-only check had concluded - see Phase 4. Full
+  writeup: `../docs/kernel-boot-debugging.md`. Next: KDE Plasma itself.
 
 ---
 

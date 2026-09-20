@@ -5176,3 +5176,163 @@ enabling the GPU and pointing at the zap shader, matching the same
 "kernel driver correctly enabled and confirmed against real hardware"
 bar every other Phase 2 peripheral has met. `rp`/`ro.bootloader`
 reconfirmed unchanged throughout every flash in this round, as usual.
+
+## Phase 5: first real Arch Linux ARM boot on hardware (2026-09-20)
+
+With display, touch, and GPU all working, moved on to Phase 5 - real
+userspace. Owner decided to gather everything possibly needed for
+future Phase 3/4 driver work (battery, audio, cameras, S Pen, buttons,
+fingerprint reader, Wi-Fi/BT) from the live stock Android system before
+wiping it, per `docs/phase5-userspace-scoping.md`'s recommended
+whole-tablet approach. Full writeup of that dump - and a real
+correction (this device *does* have a Goodix GW3X fingerprint sensor in
+the power button, confirmed live at `/dev/goodix_fp`; an earlier kernel-
+source-only check had wrongly concluded otherwise) - is in that
+scoping doc's own update.
+
+**`userdata` reused for Arch**: unmounted it in TWRP, `mke2fs -t ext4 -L
+archroot /dev/block/sda37` - GPT never touched, matching the
+scoping doc's "whole-tablet" recommendation exactly. 105 GiB, empty,
+mounted clean.
+
+**Step 1 - the rootfs**: `pacstrap`'d via the same Docker
+`--platform linux/arm64` QEMU-emulation trick already proven for the
+GPU/kmscube cross-build this session - imported the official
+`ArchLinuxARM-aarch64-latest.tar.gz` bootstrap as a Docker image, ran
+`pacman-key --init`/`--populate archlinuxarm`, then `pacman -Syu
+--disable-sandbox` (newer pacman's Landlock sandboxing isn't supported
+under QEMU emulation, needs disabling). Removed the bootstrap's own
+`linux-aarch64` kernel package (this project boots its own mainline
+kernel via uniLoader, not Arch's). Installed `sudo`/`nano`/`openssh`/
+`networkmanager` for a minimal console system, enabled `sshd`/
+`NetworkManager`, set hostname `gts7l-arch`, root password (temporary,
+for bring-up only). Staged the already-confirmed-working GPU firmware
+(zap shader + GMU + SQE) at the real paths, and the full stock firmware
+dump at `/root/stock-firmware-dump/` for later phases. `docker export`
+the whole thing (~2GB tarball), `adb push` straight into the mounted
+`archroot` partition (NOT `/data/local/tmp` - that's TWRP's own small
+ramdisk, ran out of space on the first attempt), extracted with
+`tar -xpf`.
+
+**Step 2 - the real init**: rewrote `kernel/initramfs/init` from the
+Phase 1/2 disposable debug shell into a real `switch_root`-based init -
+mount `/proc`/`/sys`/`/dev`, keep the USB gadget ACM console as a second
+debug channel, find and mount the real root, `switch_root` into
+`/sbin/init` (systemd). First real hardware test: `blkid -L archroot`
+came back empty even though `blkid /dev/sda37` directly correctly
+reports the label - a genuine busybox `blkid` quirk (its full-scan
+label-lookup mode doesn't reach every partition on this device, for
+reasons not fully understood, but reliably reproducible). Fixed by
+hardcoding `/dev/sda37` directly - this device's partition table is
+fixed by design (that's the whole point of the whole-tablet approach),
+so a hardcoded path is exactly as reliable as a label lookup here, and
+avoids the busybox bug entirely.
+
+**First successful boot**: real `archlinux login` prompt on the
+physical framebuffer console. A live interactive shell reached over the
+USB gadget console during this same boot looked broken (`/usr/bin/cat:
+not found`, `/bin/busybox: not found`) - this was a red herring, not a
+real failure: that shell process pre-dated `switch_root` (the gadget
+setup runs before it in `init`), and `switch_root`'s "delete everything
+in the old root" step pulls the filesystem out from under any
+still-running process that isn't the newly-exec'd init, leaving it
+looking at deleted dentries. The framebuffer console (a fresh process,
+started by the real systemd after the switch) is the trustworthy
+signal, and it showed a real login prompt.
+
+### Getting real remote access: USB Ethernet gadget + a real bug in the setup script
+
+The bring-up initramfs's own ACM console dies once `switch_root` moves
+past it, so reaching this new environment needed a fresh, real channel.
+Set up a USB Ethernet (ECM) gadget as a systemd service
+(`usb-gadget-ecm.service` + `/usr/local/bin/usb-gadget-ecm.sh`, both
+installed straight onto the `archroot` partition from TWRP): configfs
+gadget with an `ecm.usb0` function, static IPs on a private link
+(device `172.16.42.1`, host `172.16.42.2`), `sshd` configured for
+password root login over that link (`/etc/ssh/sshd_config.d/`),
+`NetworkManager` told to leave `usb0` alone via a `conf.d` drop-in.
+
+**First real test**: `UDC core: g_ecm couldn't find an available UDC or
+it's busy`. Real bug, immediately obvious once seen: `/sys/kernel/config`
+(configfs) is a kernel-internal filesystem, independent of which root is
+currently mounted - `switch_root` doesn't touch it at all. The bring-up
+initramfs's own ACM gadget (from `kernel/initramfs/init`, still running
+earlier in the same boot) was still bound to the one available UDC, and
+a UDC can only have one gadget bound at a time. Fixed by having the ECM
+setup script unbind whatever's already on every configfs gadget it finds
+before creating and binding its own - confirmed working on the next
+real boot: `cdc_ether` registered, host side (`enp0s20f0u3` after this
+particular host's own predictable-naming rename) pinged and SSH'd in
+cleanly once a persistent `nmcli` static-IP connection profile was
+added on the host side too (a bare `ip addr add` kept getting silently
+reset by the host's own NetworkManager reclaiming the interface for
+DHCP).
+
+### A second real hardware bug: continuous UFS WriteBooster query failures
+
+Once actually logged in, the tablet's screen was spamming
+`ufshcd_dev_cmd_completion: unexpected response in Query RSP: fd` /
+`ufshcd_query_attr: ... idn 31 failed ... err = -22` /
+`ufshcd_wb_curr_buff_threshold_check: dCurWriteBoosterBufferSize read
+failed -22` every few seconds, forever. `idn 31` = `0x1F` =
+`QUERY_ATTR_IDN_CURR_WB_BUFF_SIZE` - a WriteBooster (UFS write-cache)
+buffer-size query. The device genuinely advertises WriteBooster support
+during initial probe (a different, successful code path,
+`ufshcd_wb_probe()`), so the kernel keeps trying to use it - this
+specific runtime query just always fails on this device's firmware.
+
+First fix attempt (wrong, but a reasonable first guess): assumed this
+was runtime-PM autosuspend repeatedly forcing a resume-and-recheck
+cycle (`ufshcd_rpm_dev_flush_recheck_work`, scheduled from the tail of
+`ufshcd_suspend()`), and disabled autosuspend via a udev rule targeting
+the UFS host controller's own platform device
+(`1d84000.ufshc`, `ATTR{power/control}="on"`). Confirmed via
+`/sys/.../power/runtime_status` polled every 0.5s for 15s straight,
+staying `active` the whole time, that this **did** stop the platform
+device from ever suspending - but the spam continued regardless,
+proving the real trigger was something else.
+
+**Found the real cause with a live kernel stack trace**, not more
+guessing: added a temporary `dump_stack()` right inside
+`ufshcd_wb_curr_buff_threshold_check()` (`drivers/ufs/core/ufshcd.c`),
+rebuilt just the kernel Image, reflashed, and read the result straight
+over the new SSH link (no more reboot-and-relay-from-the-owner cycle
+needed for this kind of check, now that real remote access exists):
+
+```
+Workqueue: pm pm_runtime_work
+ufshcd_wb_curr_buff_threshold_check
+ufshcd_wb_need_flush
+__ufshcd_wl_suspend
+ufshcd_wl_runtime_suspend
+scsi_runtime_suspend
+...
+scsi_runtime_idle
+rpm_idle
+pm_runtime_work
+```
+
+The real trigger is runtime PM on the **per-LUN SCSI disk devices**
+(`scsi_runtime_idle`/`scsi_runtime_suspend`, through the UFS "well-known
+LUN" wrapper `ufshcd_wl_runtime_suspend`) - a completely different part
+of the device hierarchy from the platform host controller the first fix
+targeted. Confirmed live over SSH, no reboot needed: every
+`/sys/class/scsi_device/*/device` node (all 7 of them - four regular
+LUNs plus three well-known LUNs) still showed `power=auto`; setting all
+seven to `on` by hand stopped the spam immediately (watched
+`journalctl`'s line count stay flat for 20+ seconds afterward, versus
+continuous growth before). Fixed the udev rule for real: `SUBSYSTEM==
+"scsi", KERNELS=="1d84000.ufshc", ATTR{power/control}="on"` -
+`KERNELS` (plural) matches any ancestor in the device tree, so one rule
+reaches the platform device, the SCSI host, and every LUN hanging off
+it. Pushed straight to the live system over `scp`, `udevadm control
+--reload && udevadm trigger` confirmed it re-applies correctly from a
+cold trigger, not just the manual sysfs pokes used to find it.
+
+Removed the temporary `dump_stack()`, rebuilt, reflashed, and confirmed
+on a fully clean boot: `systemctl is-system-running` → `running`,
+zero WriteBooster failures anywhere in that boot's kernel log, all
+seven SCSI devices showing `power=on` automatically via udev with no
+manual intervention. `rp`/`ro.bootloader` reconfirmed unchanged
+throughout every flash in this phase, as usual - `userdata` reuse only
+ever touched that one partition's filesystem content, never the GPT.
