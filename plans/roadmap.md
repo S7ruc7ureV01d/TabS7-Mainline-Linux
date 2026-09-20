@@ -1238,7 +1238,26 @@ Exit criteria:
       toggle; drop fingerprint/UDFPS-specific features that don't apply).
 
 Progress log:
-- (none yet)
+- 2026-09-20: Scoped - `../docs/phase5-userspace-scoping.md`. Read a real,
+  mature reference (`references/ubuntu-galaxy-tab-s9-ultra/`) doing
+  almost exactly this for a sibling Tab S9 Ultra port before writing
+  anything. Good news: this device's boot chain is simpler than S9U's
+  (header v2, single combined `boot.img`, no separate `init_boot`/
+  `vendor_boot`) - the proven uniLoader chain from Phases 1-2 doesn't
+  need to change, only the ramdisk payload (a real `switch_root`-based
+  initramfs instead of today's disposable busybox debug shell). The one
+  real open decision: where the Arch root filesystem lives. Confirmed
+  this device's real numbers (`userdata`/`sda37` is ~107 GiB, the last
+  partition on a 128 GB unit - same layout S9U splits for dual-boot) and
+  recommended starting with S9U's safer "whole-tablet" pattern (reuse
+  `userdata` directly, zero GPT/PIT changes) rather than a real
+  repartition-based dual-boot on the first pass, given this unit's
+  stricter "must stay Odin-flashable to `T875XXU1ATK4` forever"
+  constraint - genuine, irreversible Android user-data loss either way,
+  a real decision for the owner, not something to default silently.
+  `pacstrap` via the same Docker `--platform linux/arm64` QEMU-emulation
+  trick already proven this session for the GPU work is the build path.
+  Not yet implemented.
 
 ---
 
