@@ -986,46 +986,106 @@ Progress log:
 
 ## Phase 2 — Display and input
 
-**Status:** in progress, real hardware bring-up underway (Rounds 38-48,
-2026-09-19, `../docs/kernel-boot-debugging.md`). Added a new panel
-driver entry to mainline's existing `drivers/gpu/drm/panel/
+**Status:** in progress - **real display output achieved** (Rounds
+38-56, 2026-09-19, `../docs/kernel-boot-debugging.md`). Added a new
+panel driver entry to mainline's existing `drivers/gpu/drm/panel/
 panel-novatek-nt36523.c` (already supports this exact chip family via
 Xiaomi's elish, a directly comparable SM8250 tablet - see
 `../docs/phase2-panel-scoping.md`), a new ISL98608 bias IC driver, and a
-board-specific DSI PHY trim override. Five independently-real bugs found
-and fixed on real hardware so far: a missing `refgen` regulator driver,
-wrong PHY analog trim constants (the real PLL now locks cleanly, 5x, no
-failures), `CONFIG_QCOM_GPI_DMA` never loading, the parent QUP wrapper
-devicetree node never being enabled, and a racy backlight callback. The
-bias IC now probes and programs correctly, `DPU` binds both DSI hosts
-and reads a real hardware ID, `fb0` registers. **Still unresolved**: a
-completely deterministic `VIDEO_MDP_FIFO_OVERFLOW` (`dsi_err_worker:
-status=4`) right before the first real frame would display, unchanged
-across all five fixes above - the deepest single bug hit in this
-project so far. Screen is still black/backlight off as of the last
-test.
+board-specific DSI PHY trim override (all three of downstream's
+rescode-offset registers, plus vreg_ctrl_0/str_swi_cal_sel_ctrl).
+
+The deterministic `VIDEO_MDP_FIFO_OVERFLOW` that blocked this phase for
+sixteen rounds is **fixed**: `dsi_timing_setup()`'s bonded-DSI code
+halves the combined DRM mode's horizontal timing for each physical DSI
+controller, on the assumption the combined mode's porches are already
+doubled to represent two links' worth - `gts7l_modes[]` was using the
+panel's real, single-link porch values directly, so mainline's
+automatic halving cut them in half *again*, corrupting every line of
+real HS video streaming while leaving LP-mode commands (backlight,
+panel init) unaffected. Doubling the horizontal porches (168/4/60)
+fixed it, confirmed bit-for-bit against a real hardware register
+readback pulled live off stock Android's own downstream driver while
+it was genuinely streaming real 120Hz video. Owner confirmed on
+hardware: **real display output, full brightness, readable text.**
+
+Also fixed along the way: a missing `refgen` regulator driver, wrong
+PHY analog trim constants, `CONFIG_QCOM_GPI_DMA` never loading, the
+parent QUP wrapper devicetree node never being enabled, an orphaned
+`lcd-buck` regulator silently auto-disabled after boot
+(`regulator-always-on` fix), and a backlight DCS write racing DPU's
+video-engine start (fixed by baking the initial brightness into the
+panel's own prepare()-time init sequence instead of the automatic
+post-enable callback).
+
+Native rate is 96Hz, not this panel's 120Hz default - mainline's
+`dispcc-sm8250.c` MDP core clock frequency table tops out at 460MHz on
+this SoC generation, and real 120Hz needs ~523MHz. 96Hz is a
+first-class downstream-supported DFPS rate for this panel, not a
+workaround, so the first KMS/DRM exit criterion below is met at a
+non-native but fully-supported refresh rate; getting genuine 120Hz
+would need a new, correctly-computed frequency-table entry in
+`disp_cc_mdss_mdp_clk_src` - real, but not blocking further Phase 2
+work.
 
 Goal: get a usable framebuffer and touch input — the minimum for anything
 interactive.
 
 Exit criteria:
-- [ ] DSI panel driver for the **Novatek NT36523** driving the **PPA957DB1**
+- [x] DSI panel driver for the **Novatek NT36523** driving the **PPA957DB1**
       WQXGA LCD panel (confirmed in `../docs/hardware-inventory.md`; reference
       implementation at `references/gts7l/techpack/display/msm/samsung/
       NT36523_PPA957DB1/`, needs a mainline DRM panel driver, not a straight
-      port of that downstream one).
-- [ ] KMS/DRM brings up the native panel resolution at the correct refresh
-      rate.
+      port of that downstream one). **Done** - real display output confirmed
+      on hardware, Round 56.
+- [x] KMS/DRM brings up the native panel resolution at the correct refresh
+      rate. **Done at 1600x2560@96Hz** (not native 120Hz - see note above;
+      a real, panel-supported DFPS rate, not a workaround).
 - [ ] Touchscreen driver working — **same IC as the panel (Novatek NT36523
       TDDI)**, wired in DT as `novatek,nvt-ts`; reference driver at
       `references/gts7l/drivers/input/touchscreen/novatek/nt36523/`. Not
-      Goodix — confirmed, no longer a guess.
+      Goodix — confirmed, no longer a guess. **Next up.**
 - [ ] Adreno 650 GPU acceleration working (Mesa/Turnip or Freedreno, whichever
       mainline supports for this GPU generation).
 - [ ] Basic GNOME/Wayland session reaches a usable desktop on-device.
 
 Progress log:
-- (none yet)
+- 2026-09-19: Rounds 38-56 - real display output achieved on hardware
+  (1600x2560@96Hz, full brightness, readable text). Root cause of the
+  `VIDEO_MDP_FIFO_OVERFLOW` was a bonded-DSI horizontal timing halving
+  mismatch in `dsi_timing_setup()`, proven via a live register readback
+  off stock Android. Next: touchscreen (same NT36523 TDDI IC as the
+  panel, `references/gts7l/drivers/input/touchscreen/novatek/nt36523/`).
+- 2026-09-19: Touchscreen scoped, not yet implemented -
+  `../docs/phase2-touchscreen-scoping.md`. Key findings: touch has no
+  reset GPIO of its own (fully coupled to the panel's existing reset
+  sequencing); firmware download is skippable for first bring-up
+  (downstream's own driver has a `bringup=1` mode that does exactly
+  this, and the chip has persistent internal flash, not a RAM-only
+  firmware need); real protocol is paged/banked I2C addressing
+  (`nvt_ts_set_page` + `0xFF`-prefixed page select), not a match for
+  mainline's existing `novatek-nvt-ts.c` (different, flatly-addressed
+  chip family) - a new driver is needed. I2C address `0x62` on QUP SE5
+  (`i2c5`), parent wrapper `qupv3_id_0` needs `status = "okay"` (same
+  pattern as Round 48's `qupv3_id_1`/i2c8 fix), IRQ on GPIO 15. Next:
+  add the devicetree pieces and confirm the chip enumerates at `0x62`
+  before writing driver logic.
+- 2026-09-20: Touchscreen I2C bus confirmed enumerating on real
+  hardware (`/sys/bus/i2c/devices/5-0062`) -
+  `../docs/kernel-boot-debugging.md` ("Phase 2 touchscreen bring-up
+  begins"). Getting there required finding and fixing a real bug in
+  mainline's `drivers/dma/qcom/gpi.c`, not just adding devicetree nodes:
+  this SoC's shared GPI DMA hardware needs a firmware-configured "EE"
+  register-bank offset that mainline hardcoded wrong for
+  `qcom,sm8250-gpi-dma` (`0x0` instead of the real `0x1000` Samsung's
+  own downstream firmware uses) - proven via live hardware
+  instrumentation (`devm_request_irq()` succeeded but the ISR never
+  fired) and fixed with an optional `qcom,gpi-ee-offset` devicetree
+  override, matching downstream's exact property name. This is a
+  genuine, real mainline driver bug worth upstreaming eventually, not
+  something specific to a devicetree mistake. Next: write the actual
+  `nt36xxx`-protocol touch driver (paged I2C addressing, no firmware
+  download needed - `../docs/phase2-touchscreen-scoping.md`).
 
 ---
 

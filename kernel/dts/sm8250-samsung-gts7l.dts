@@ -26,6 +26,7 @@
 
 #include <dt-bindings/gpio/gpio.h>
 #include <dt-bindings/input/input.h>
+#include <dt-bindings/interrupt-controller/irq.h>
 #include <dt-bindings/phy/phy.h>
 #include "sm8250-samsung-common.dtsi"
 
@@ -908,5 +909,94 @@
 	display_buck@29 {
 		compatible = "isl98608,display_buck";
 		reg = <0x29>;
+	};
+};
+
+/*
+ * Touchscreen - Novatek NT36523 TDDI (the same physical chip as the LCD
+ * panel; see docs/phase2-touchscreen-scoping.md for the full writeup).
+ * QUP I2C instance qupv3_se5_i2c (mainline &i2c5), address 0x62, both
+ * confirmed directly from Samsung's own GPL overlay
+ * (kona-sec-gts7l-eur-overlay-r07.dts fragment@127 + its __fixups__
+ * table), same as every other hardware fact in this file.
+ *
+ * &qupv3_id_0 (geniqup@9c0000, i2c5's parent QUP wrapper) needs the
+ * exact same treatment Round 48 already found for i2c8/qupv3_id_1: it
+ * defaults to `status = "disabled"` in sm8250.dtsi, and a disabled
+ * parent means none of its children - i2c5 included - ever get
+ * instantiated regardless of their own status.
+ *
+ * No separate reset-gpio: this TDDI chip's touch side has no reset
+ * handling of its own at all (confirmed directly in the downstream
+ * driver, references/gts7l/drivers/input/touchscreen/novatek/nt36523/
+ * nt36xxx.c - no "reset-gpio"/"novatek,reset-gpio" property or GPIO
+ * request anywhere) - it's entirely coupled to the panel's own existing
+ * reset sequencing (GPIO 82, nt36523_reset() in
+ * drivers/gpu/drm/panel/panel-novatek-nt36523.c).
+ *
+ * IRQ on GPIO 15 (`interrupts = <0xf 0x0>;` directly on the downstream
+ * node), trigger type from nt36xxx.c's own default
+ * (`IRQF_TRIGGER_LOW`, when no `novatek,irq-gpio` flags are parsed) ->
+ * IRQ_TYPE_LEVEL_LOW here. No driver claims the "novatek,nt36523-ts"
+ * compatible yet - this node alone won't bind to anything, but it
+ * should be enough to confirm the chip enumerates on the bus
+ * (`/sys/bus/i2c/devices/` should show `5-0062`) before any real driver
+ * work starts, the same order Round 47/48 used for the ISL98608 bias
+ * IC.
+ *
+ * First flash of this block only enabled &qupv3_id_0/&i2c5 and hit the
+ * fourth instance of the exact "GPI DMA channel not available" bug this
+ * project already found for i2c8 in Round 47 - confirmed live via
+ * dmesg: `platform 994000.i2c: deferred probe pending: geni_i2c: Failed
+ * to get tx DMA ch`. Unlike i2c8 (whose GENI SE instance has hardware
+ * FIFO mode available and never actually requests a DMA channel - this
+ * board's dts has never needed to touch `&gpi_dma1` for it), i2c5's SE
+ * instance genuinely has no FIFO mode and requires a real, working GPI
+ * DMA channel. `gpi_dma0` (the DMA controller instance i2c5's own
+ * `dmas` property points at - a sibling node of `qupv3_id_0`, not one
+ * of its children, so enabling the QUP wrapper alone doesn't cover it)
+ * defaults to `status = "disabled"` in sm8250.dtsi just like every
+ * other node in this recurring pattern.
+ */
+&qupv3_id_0 {
+	status = "okay";
+};
+
+/*
+ * Confirmed on real hardware: enabling this alone wasn't enough - i2c5
+ * never enumerated at all, and dmesg showed a genuine hardware-level
+ * failure (`gpi 900000.dma-controller: cmd: EV ALLOCATE completion
+ * timeout`), not the usual "module never loaded" pattern. Added
+ * temporary diagnostics directly in drivers/dma/qcom/gpi.c and confirmed
+ * `devm_request_irq()` succeeds (irq=136) but the ISR never fires within
+ * the 250ms timeout - the Linux/GIC side is fine, the hardware itself
+ * never signals completion. Root cause: mainline hardcodes this
+ * hardware's "EE" (execution environment) register-bank offset to 0x0
+ * for the "qcom,sm8250-gpi-dma" compatible, but Samsung's own downstream
+ * devicetree for this exact chip declares
+ * `qcom,gpi-ee-offset = <0x1000>;` on this same node
+ * (references/gts7l/arch/arm64/boot/dts/vendor/qcom/kona.dtsi) - this
+ * offset is a TrustZone/XPU firmware configuration choice, not a fixed
+ * SoC-generation constant, and different OEM firmware on the same SoC
+ * can genuinely disagree. With the wrong offset, every register access
+ * silently targeted the wrong EE's bank - writes didn't fault, but never
+ * reached the real, active hardware, so no completion interrupt ever
+ * fired. Fixed in drivers/dma/qcom/gpi.c to accept this exact devicetree
+ * property as an override (falling back to the existing hardcoded table
+ * for every other board), matching downstream's own property name.
+ */
+&gpi_dma0 {
+	status = "okay";
+	qcom,gpi-ee-offset = <0x1000>;
+};
+
+&i2c5 {
+	status = "okay";
+
+	touchscreen@62 {
+		compatible = "novatek,nt36523-ts";
+		reg = <0x62>;
+		interrupt-parent = <&tlmm>;
+		interrupts = <15 IRQ_TYPE_LEVEL_LOW>;
 	};
 };

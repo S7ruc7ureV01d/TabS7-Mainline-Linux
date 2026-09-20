@@ -4874,3 +4874,120 @@ diffed every affected file against the real `work/linux` tree - all
 identical. The patch chain is now just `0002` (sec_log early console)
 + `0003` (the real Phase 2 display work), both reduced to exactly what
 this project still wants to keep.
+
+## Phase 2 touchscreen bring-up begins: a real mainline `dmaengine/qcom/gpi`
+bug, found and fixed (2026-09-19/20)
+
+With the display working, moved on to the next roadmap goal: the
+touchscreen (same physical Novatek NT36523 TDDI chip as the panel - see
+`docs/phase2-touchscreen-scoping.md` for the full scoping writeup done
+first). Real hardware facts extracted directly from Samsung's own
+overlay (`kona-sec-gts7l-eur-overlay-r07.dts` fragment@127 +
+`__fixups__`): I2C address `0x62` on QUP SE5 (`qupv3_se5_i2c` ->
+mainline's `i2c5` at `0x994000`), IRQ on GPIO 15, no separate reset GPIO
+(fully coupled to the panel's own existing reset sequencing).
+
+Added `kernel/dts/sm8250-samsung-gts7l.dts` devicetree pieces: `&i2c5`
+node with a placeholder `touchscreen@62` (compatible
+`"novatek,nt36523-ts"`, no driver claims it yet - purely to confirm bus
+enumeration before writing any driver code), plus `&qupv3_id_0 { status
+= "okay"; }` for i2c5's parent QUP wrapper - the exact same "enable the
+disabled parent" pattern Round 48 already found for i2c8/qupv3_id_1.
+
+**First real hardware test**: `/sys/bus/i2c/devices/` stayed completely
+empty. dmesg showed a genuinely new failure class - not the "module
+built as `=m`" pattern hit four times before:
+
+```
+geni_i2c 994000.i2c: Bus frequency not specified, default to 100kHz.
+gpi 900000.dma-controller: cmd: EV ALLOCATE completion timeout:2
+gpi 900000.dma-controller: error with cmd:EV ALLOCATE ret:-5
+gpi 900000.dma-controller: error alloc_ev_chan:-5
+geni_i2c 994000.i2c: error -ENODEV: Failed to get tx DMA ch
+```
+
+i2c5's GENI SE instance genuinely needs a working GPI DMA channel
+(unlike i2c8's, which has hardware FIFO mode available and never
+actually requests DMA - meaning `gpi_dma1` had never really been
+end-to-end exercised by this project either, just declared). Added
+`&gpi_dma0 { status = "okay"; };` (the DMA controller i2c5's own `dmas`
+property points at, a sibling of `qupv3_id_0`, not one of its children -
+also defaults to `status = "disabled"` in `sm8250.dtsi`) - same
+deterministic failure persisted afterward, identically.
+
+Cross-checked `sm8250-xiaomi-elish-common.dtsi` (the one other real,
+working dual-DSI mainline SM8250 device this project has leaned on
+throughout) - it enables the exact same three nodes
+(`qupv3_id_0`/`gpi_dma0`/`i2c0`) with no other special properties. Our
+devicetree config wasn't wrong or incomplete relative to a known-working
+reference; this was a genuine, real hardware/driver-level bug, not a
+config gap.
+
+Added temporary diagnostics directly in `drivers/dma/qcom/gpi.c`
+(`gpi_config_interrupts()` printing on successful `devm_request_irq()`,
+and an unconditional print at the very top of `gpi_handle_irq()`, the
+actual ISR) and confirmed, decisively, on real hardware:
+
+```
+gts7l: gpi_config_interrupts requested irq=136 gpii_id=0 ok
+gpi 900000.dma-controller: cmd: EV ALLOCATE completion timeout:2
+```
+
+`gpi_handle_irq fired` never appeared. The Linux/GIC side of interrupt
+handling was completely fine - `devm_request_irq()` genuinely succeeded
+- but the GPI DMA0 hardware itself never asserted the completion
+interrupt within the 250ms window. A real, confirmed hardware-level
+gap, not a software config toggle.
+
+**Root cause, found by booting stock Android and researching there (per
+the owner's suggestion) rather than guessing further**: read
+`gpi_probe()` in `drivers/dma/qcom/gpi.c` directly -
+`gpi_dev->ee_base = gpi_dev->ee_base - ee_offset;`, where `ee_offset`
+comes from a static per-compatible-string table
+(`gpi_of_match[]`: `qcom,sdm845-gpi-dma` -> `0x0`, `qcom,sm6350-gpi-dma`
+-> `0x10000`, **`qcom,sm8250-gpi-dma` -> `0x0`**). "EE" is the hardware's
+execution-environment register-bank selector - GPI DMA hardware on
+Qualcomm SoCs is shared across multiple subsystems (APPS/modem/ADSP
+etc.), each seeing a different offset into the same physical register
+space, configured by TrustZone/XPU firmware - **not a fixed
+SoC-generation constant the way this table assumes**. Checked Samsung's
+own downstream devicetree for this exact chip
+(`references/gts7l/arch/arm64/boot/dts/vendor/qcom/kona.dtsi`) and found
+the real value declared on this exact `gpi_dma0`/`@900000` node:
+`qcom,gpi-ee-offset = <0x1000>;` - not `0x0`. With the wrong offset,
+every single register access in the driver silently targeted the wrong
+EE's bank - writes didn't fault (still comfortably within the mapped
+`0x70000`-byte MMIO region, confirmed by checking the actual register
+offset macros - all `>= 0x20000`, so subtracting a wrong small
+`ee_offset` never produced an out-of-bounds pointer), but never reached
+the real, active hardware register set, so no completion interrupt ever
+had a reason to fire.
+
+**Fix**: extended `gpi_probe()` to accept `qcom,gpi-ee-offset` as an
+optional devicetree override - same property name downstream already
+uses - falling back to the existing hardcoded per-compatible table for
+every other board/SoC using this shared driver, which keeps its exact
+existing (correct, for them) behavior untouched. Set
+`qcom,gpi-ee-offset = <0x1000>;` on `&gpi_dma0` in
+`kernel/dts/sm8250-samsung-gts7l.dts`, matching downstream's declared
+value exactly.
+
+**Confirmed fixed on real hardware**: `gpi_handle_irq fired` now appears
+five times immediately after the IRQ is requested, at the exact same
+boot point that previously produced the `EV ALLOCATE` timeout every
+single time. `/sys/bus/i2c/devices/` now shows `5-0062` and `i2c-5` -
+the touchscreen chip genuinely enumerates on the bus. Stripped the
+temporary `gpi.c` diagnostics once confirmed (kept the real
+`qcom,gpi-ee-offset` fix, which is permanent) and re-verified on
+hardware with them removed - `5-0062` still enumerates cleanly, no
+errors.
+
+This is a real bug in mainline's `dmaengine/qcom/gpi` driver, not
+something specific to a hand-rolled devicetree mistake - worth
+eventually upstreaming (the devicetree-property-override approach keeps
+every other board's behavior byte-identical, so it's a safe, minimal
+addition to propose). No driver code for the touchscreen itself has
+been written yet - this was purely getting the I2C bus underneath it
+working. Next: the actual `nt36xxx`-protocol touch driver (paged I2C
+addressing, no firmware download needed for first bring-up - see
+`docs/phase2-touchscreen-scoping.md`).

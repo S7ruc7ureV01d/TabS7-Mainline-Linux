@@ -53,6 +53,23 @@ stripped now that the real root cause is found and fixed - dsi_host.c,
 dpu_core_perf.c, dpu_encoder_phys_vid.c, and head.S are consequently
 back to pristine mainline and no longer need a diff section at all.
 
+Also: a fix to drivers/dma/qcom/gpi.c for Phase 2's touchscreen
+bring-up (docs/kernel-boot-debugging.md, "Phase 2 touchscreen bring-up
+begins") - this SoC's shared GPI DMA hardware needs a firmware-
+configured "EE" (execution environment) register-bank offset, which
+mainline hardcoded to 0x0 for the "qcom,sm8250-gpi-dma" compatible via
+a static per-compatible-string table. Confirmed via live hardware
+instrumentation (devm_request_irq() succeeded, but the actual ISR never
+fired - a genuine hardware-level bug, not a devicetree config gap) and
+against Samsung's own downstream devicetree for this exact chip
+(references/gts7l/arch/arm64/boot/dts/vendor/qcom/kona.dtsi's
+qcom,gpi-ee-offset = <0x1000>; on this same node) that mainline's
+hardcoded 0x0 is simply wrong for this device's firmware configuration.
+Added qcom,gpi-ee-offset as an optional devicetree override, falling
+back to the existing hardcoded table for every other board - a real bug
+worth upstreaming, not something specific to a hand-rolled devicetree
+mistake.
+
 Applies on top of Linux 7.2 (work/linux's checked-out commit
 8d3ae59288f1e7d58d76558a6ee96d533bc5019f) with 0002 already applied.
 
@@ -68,6 +85,39 @@ index 6f33c4e2f..0eeac63d7 100644
  dtb-$(CONFIG_ARCH_QCOM)	+= sm8250-sony-xperia-edo-pdx203.dtb
  dtb-$(CONFIG_ARCH_QCOM)	+= sm8250-sony-xperia-edo-pdx206.dtb
  dtb-$(CONFIG_ARCH_QCOM)	+= sm8250-xiaomi-elish-boe.dtb
+diff --git a/drivers/dma/qcom/gpi.c b/drivers/dma/qcom/gpi.c
+index a5055a627..0121de480 100644
+--- a/drivers/dma/qcom/gpi.c
++++ b/drivers/dma/qcom/gpi.c
+@@ -2190,6 +2190,28 @@ static int gpi_probe(struct platform_device *pdev)
+ 	}
+ 
+ 	ee_offset = (uintptr_t)device_get_match_data(gpi_dev->dev);
++	/*
++	 * gts7l (docs/kernel-boot-debugging.md): the "EE" register bank
++	 * offset for this shared GPI hardware isn't actually a fixed
++	 * per-SoC-generation constant the way this table assumes - it's a
++	 * TrustZone/XPU firmware configuration choice, and different OEM
++	 * firmware on the same SoC can genuinely disagree. Confirmed
++	 * directly against Samsung's own downstream devicetree for this
++	 * exact SM8250 device (references/gts7l/arch/arm64/boot/dts/
++	 * vendor/qcom/kona.dtsi's `qcom,gpi-ee-offset = <0x1000>;` on this
++	 * same gpi_dma0/@900000 node) and confirmed live on real hardware:
++	 * mainline's hardcoded ee_offset=0x0 for "qcom,sm8250-gpi-dma"
++	 * left GPI DMA0's command registers pointed at the wrong EE's
++	 * register bank entirely - `devm_request_irq()` succeeded (the
++	 * Linux/GIC side was never the problem) but the hardware itself
++	 * never asserted the completion interrupt, since the command was
++	 * never actually written to the real, active register set.
++	 * Allow the devicetree to override the compatible-derived default
++	 * with the same property name downstream uses, so every other
++	 * board/SoC using this shared driver keeps its exact existing
++	 * (correct, for them) behavior untouched.
++	 */
++	of_property_read_u32(gpi_dev->dev->of_node, "qcom,gpi-ee-offset", &ee_offset);
+ 	gpi_dev->ee_base = gpi_dev->ee_base - ee_offset;
+ 
+ 	gpi_dev->ev_factor = EV_FACTOR;
 diff --git a/drivers/gpu/drm/msm/dsi/phy/dsi_phy_7nm.c b/drivers/gpu/drm/msm/dsi/phy/dsi_phy_7nm.c
 index 984a66085..bf5c2fe18 100644
 --- a/drivers/gpu/drm/msm/dsi/phy/dsi_phy_7nm.c
