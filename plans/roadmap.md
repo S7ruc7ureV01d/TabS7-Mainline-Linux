@@ -1051,7 +1051,8 @@ Exit criteria:
       confirmed - Vulkan/Turnip not separately tested). **Done** - real
       sustained 3D rendering (kmscube, 3000 frames at a vsync-locked
       96 fps) confirmed on hardware, 2026-09-20.
-- [ ] Basic GNOME/Wayland session reaches a usable desktop on-device.
+- [ ] Basic KDE Plasma (Wayland/KWin) session reaches a usable desktop
+      on-device.
 
 Progress log:
 - 2026-09-19: Rounds 38-56 - real display output achieved on hardware
@@ -1206,14 +1207,29 @@ Progress log:
 Goal: turn a hand-booted hacked kernel + rootfs into something installable and
 maintainable, matching the S9 Ultra project's user-facing shape.
 
+**Distro choice (updated 2026-09-20): Arch Linux ARM + KDE Plasma**, not
+Ubuntu/GNOME as earlier phases' exit criteria assumed. EndeavourOS itself
+has no official aarch64 build, so the real base is Arch Linux ARM
+(archlinuxarm.org) - a well-trodden path for custom-kernel ARM/SBC
+bring-up - with KDE Plasma installed on top; an EndeavourOS-like feel
+(theming/config) can be layered on manually if wanted, but there's no
+EndeavourOS installer image to build from. This is a userspace/rootfs
+decision only - every Phase 1-4 hardware bring-up result (display,
+touch, GPU/Mesa-Freedreno) is fully reusable regardless of distro, since
+none of it depends on anything Ubuntu/Debian-specific.
+
 Exit criteria:
-- [ ] Ubuntu rootfs build reproducible via `mmdebstrap` + this repo's
+- [ ] Arch Linux ARM rootfs build reproducible via `pacstrap`
+      (or the ALARM bootstrap tarball + `pacman`) + this repo's
       `packaging/`/`configs/`.
+- [ ] KDE Plasma (Wayland/KWin) installed and reaching a usable desktop,
+      building on the confirmed-working Mesa/Freedreno GPU acceleration
+      from Phase 2.
 - [ ] Installer ZIP flashable from TWRP, tested on real hardware.
-- [ ] Dual boot (Android kept alongside Ubuntu) working, with a toggle from
+- [ ] Dual boot (Android kept alongside Arch) working, with a toggle from
       both sides, following the S9 Ultra project's split-storage approach where
       applicable.
-- [ ] Update mechanism (in-place system updates) working.
+- [ ] Update mechanism (in-place system updates via `pacman`) working.
 - [ ] "Tab Companion"-equivalent app scoped down to what actually applies to
       Tab S7 hardware (S Pen settings, keyboard remap — **confirmed**: this
       device has a real Book Cover Keyboard with a pogo-pin trackpad
