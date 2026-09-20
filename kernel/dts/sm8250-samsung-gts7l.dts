@@ -1033,3 +1033,291 @@
 &gpu_zap_shader {
 	firmware-name = "qcom/sm8250/samsung/gts7l/a650_zap.mdt";
 };
+
+/*
+ * Wi-Fi (Phase 3, docs/phase3-wifi-bt-scoping.md): Qualcomm QCA6390
+ * ("Hastings") Wi-Fi 6 + Bluetooth combo, PCIe-attached. No driver of our
+ * own is needed - mainline's `ath11k`/`ath11k_pci` plus the
+ * `qcom,qca6390-pmu` power-sequencing driver (drivers/power/sequencing/
+ * pwrseq-qcom-wcn.c) already fully support this exact chip. Adapted from
+ * a real, shipping mainline board with the identical chip on the
+ * identical SoC (arch/arm64/boot/dts/qcom/sm8250-xiaomi-elish-common.dtsi)
+ * rather than written from scratch.
+ *
+ * The one real per-device fact that had to be pulled from Samsung's own
+ * GPL source rather than copied from elish: this board's real
+ * wlan-enable/bt-enable GPIOs. Downstream's base kona.dtsi (whose WLAN
+ * node this tablet's board overlay attaches at &pcie0_rp, confirmed by
+ * cross-referencing kona.dtsi's own `cnss_pci` sub-node against the
+ * `wil6210` node's *disabled*, unrelated `qcom,pcie-parent = <&pcie1>`
+ * elsewhere in the same file - easy to conflate at a glance) has this
+ * board's real per-revision override for `wlan-en-gpio` at GPIO 90
+ * (references/gts7l/.../kona-sec-gts7l-eur-overlay-r07.dts:11744,
+ * `<0xffffffff 0x5a 0x0>` - 0x5a = 90), not the base tree's generic
+ * GPIO 20 that elish (a different board) happens to also use. The
+ * separate, real (`status = "ok"`), Samsung-specific `bt_qca6390` node in
+ * that same overlay (:7513-7528, `compatible = "qca,qca6390",
+ * "qca,qca6490"`) independently confirms GPIO 76 as `qca,bt-reset-gpio`
+ * and gives this exact chip's real regulator voltage levels
+ * (aon/dig/rfa1/rfa2 all match the separate `wlan` node's own
+ * `vdd-wlan-*-config` values byte-for-byte, confirming both nodes
+ * describe the same physical shared rails) - strong independent
+ * confirmation this is real wiring, not a guess.
+ *
+ * Bluetooth itself is NOT wired up here yet: elish's own DTS (read in
+ * full, not just its wifi@0/qca6390-pmu sections) shows BT actually
+ * rides a separate UART (`&uart6 { bluetooth { compatible =
+ * "qcom,qca6390-bt"; ... }; };`), not the PCIe link at all - a genuinely
+ * different transport needing its own UART-instance research on this
+ * board before it can be wired up. Deferred to a follow-up pass;
+ * `docs/phase3-wifi-bt-scoping.md` needs a correction for this (it
+ * initially concluded, incorrectly, that elish has no separate BT node).
+ * `bt-enable-gpios` on the qca6390-pmu node below is still wired to the
+ * real GPIO 76, since the PMU chip sequences power for both radios
+ * together regardless of which transport BT ends up using.
+ *
+ * Calibration data (`qcom,calibration-variant` in elish) is deliberately
+ * left unset for this first pass - per the scoping doc, the goal right
+ * now is just confirming real PCIe enumeration with generic
+ * linux-firmware.git blobs, before chasing this device's real
+ * calibration data (which needs live-device extraction, same precedent
+ * as the Adreno zap-shader above).
+ */
+&apps_rsc {
+	regulators-0 {
+		compatible = "qcom,pm8150-rpmh-regulators";
+		qcom,pmic-id = "a";
+
+		vdd-l3-l4-l5-l18-supply = <&vreg_s6a_0p95>;
+		vdd-l6-l9-supply = <&vreg_s8c_1p35>;
+		vdd-l7-l12-l14-l15-supply = <&vreg_s5a_1p9>;
+
+		vreg_s5a_1p9: smps5 {
+			regulator-name = "vreg_s5a_1p9";
+			regulator-min-microvolt = <1900000>;
+			regulator-max-microvolt = <2040000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+		};
+
+		vreg_s6a_0p95: smps6 {
+			regulator-name = "vreg_s6a_0p95";
+			regulator-min-microvolt = <950000>;
+			regulator-max-microvolt = <1128000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+		};
+	};
+
+	/*
+	 * PM8150L - this project's DTS already #includes pm8150l.dtsi (for
+	 * &pm8150l_gpios, see the top of this file) but never actually
+	 * defined its RPMH regulator nodes until now, since nothing needed
+	 * one before. "c" as the qcom,pmic-id letter and every voltage
+	 * range below match elish's own regulators-1 block exactly (a real
+	 * PM8150L on the same SoC family) - only the two rails this board
+	 * actually needs right now (smps8 for the WLAN/BT RFA2 rail, ldo5
+	 * for the antenna switch) are given real, gts7l-specific voltage
+	 * targets (from the confirmed downstream config values in the
+	 * comment above); the rest of the block (vreg_bob and the
+	 * vdd-*-supply chain) is structurally required scaffolding for the
+	 * two rails to resolve, kept at elish's own safe range values
+	 * since this project has no device-specific data for them yet.
+	 */
+	regulators-1 {
+		compatible = "qcom,pm8150l-rpmh-regulators";
+		qcom,pmic-id = "c";
+
+		vdd-s1-supply = <&vph_pwr>;
+		vdd-s2-supply = <&vph_pwr>;
+		vdd-s3-supply = <&vph_pwr>;
+		vdd-s4-supply = <&vph_pwr>;
+		vdd-s5-supply = <&vph_pwr>;
+		vdd-s6-supply = <&vph_pwr>;
+		vdd-s7-supply = <&vph_pwr>;
+		vdd-s8-supply = <&vph_pwr>;
+		vdd-l1-l8-supply = <&vreg_s4a_1p8>;
+		vdd-l2-l3-supply = <&vreg_s8c_1p35>;
+		vdd-l4-l5-l6-supply = <&vreg_bob>;
+		vdd-l7-l11-supply = <&vreg_bob>;
+		vdd-l9-l10-supply = <&vreg_bob>;
+		vdd-bob-supply = <&vph_pwr>;
+
+		vreg_bob: bob {
+			regulator-name = "vreg_bob";
+			regulator-min-microvolt = <3350000>;
+			regulator-max-microvolt = <3960000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_AUTO>;
+		};
+
+		vreg_s8c_1p35: smps8 {
+			regulator-name = "vreg_s8c_1p35";
+			regulator-min-microvolt = <1350000>;
+			regulator-max-microvolt = <1400000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+		};
+
+		/* Antenna switch supply (downstream: pm8150a_l5). */
+		vreg_l5c_1p8: ldo5 {
+			regulator-name = "vreg_l5c_1p8";
+			regulator-min-microvolt = <1800000>;
+			regulator-max-microvolt = <2800000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+		};
+	};
+
+	/*
+	 * PM8009 - same situation as PM8150L above: #included for
+	 * &pm8009_gpios (MAX77705 irq) but never had its regulator nodes
+	 * defined. "f" as the pmic-id letter and voltage ranges again match
+	 * elish's own regulators-2 block; smps2 is the only rail this board
+	 * currently needs (WLAN/BT digital core, downstream: pm8009_s2).
+	 */
+	regulators-2 {
+		compatible = "qcom,pm8009-rpmh-regulators";
+		qcom,pmic-id = "f";
+
+		vdd-s1-supply = <&vph_pwr>;
+		vdd-s2-supply = <&vreg_bob>;
+		vdd-l2-supply = <&vreg_s8c_1p35>;
+		vdd-l5-l6-supply = <&vreg_bob>;
+		vdd-l7-supply = <&vreg_s4a_1p8>;
+
+		vreg_s1f_1p2: smps1 {
+			regulator-name = "vreg_s1f_1p2";
+			regulator-min-microvolt = <1200000>;
+			regulator-max-microvolt = <1200000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+		};
+
+		vreg_s2f_0p95: smps2 {
+			regulator-name = "vreg_s2f_0p95";
+			regulator-min-microvolt = <950000>;
+			regulator-max-microvolt = <1100000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+		};
+	};
+};
+
+&tlmm {
+	/*
+	 * Idle/init pinctrl state only - matches elish's own pattern
+	 * exactly (direction + bias set here, the qca6390-pmu driver itself
+	 * drives the GPIO's actual level at runtime via gpiod_set_value()).
+	 * GPIO numbers are this board's real, confirmed values (see the big
+	 * comment above), not elish's GPIO 20/21.
+	 */
+	wlan_en_state: wlan-default-state {
+		pins = "gpio90";
+		function = "gpio";
+		drive-strength = <16>;
+		output-low;
+		bias-pull-up;
+	};
+
+	bt_en_state: bt-default-state {
+		pins = "gpio76";
+		function = "gpio";
+		drive-strength = <16>;
+		output-low;
+		bias-pull-up;
+	};
+};
+
+/ {
+	qca6390-pmu {
+		compatible = "qcom,qca6390-pmu";
+
+		pinctrl-names = "default";
+		pinctrl-0 = <&bt_en_state>, <&wlan_en_state>;
+
+		vddaon-supply = <&vreg_s6a_0p95>;
+		vddpmu-supply = <&vreg_s6a_0p95>;
+		vddrfa0p95-supply = <&vreg_s6a_0p95>;
+		vddrfa1p3-supply = <&vreg_s8c_1p35>;
+		vddrfa1p9-supply = <&vreg_s5a_1p9>;
+		vddpcie1p3-supply = <&vreg_s8c_1p35>;
+		vddpcie1p9-supply = <&vreg_s5a_1p9>;
+		vddio-supply = <&vreg_s4a_1p8>;
+
+		wlan-enable-gpios = <&tlmm 90 GPIO_ACTIVE_HIGH>;
+		bt-enable-gpios = <&tlmm 76 GPIO_ACTIVE_HIGH>;
+
+		regulators {
+			vreg_pmu_rfa_cmn: ldo0 {
+				regulator-name = "vreg_pmu_rfa_cmn";
+			};
+
+			vreg_pmu_aon_0p59: ldo1 {
+				regulator-name = "vreg_pmu_aon_0p59";
+			};
+
+			vreg_pmu_wlcx_0p8: ldo2 {
+				regulator-name = "vreg_pmu_wlcx_0p8";
+			};
+
+			vreg_pmu_wlmx_0p85: ldo3 {
+				regulator-name = "vreg_pmu_wlmx_0p85";
+			};
+
+			vreg_pmu_btcmx_0p85: ldo4 {
+				regulator-name = "vreg_pmu_btcmx_0p85";
+			};
+
+			vreg_pmu_rfa_0p8: ldo5 {
+				regulator-name = "vreg_pmu_rfa_0p8";
+			};
+
+			vreg_pmu_rfa_1p2: ldo6 {
+				regulator-name = "vreg_pmu_rfa_1p2";
+			};
+
+			vreg_pmu_rfa_1p7: ldo7 {
+				regulator-name = "vreg_pmu_rfa_1p7";
+			};
+
+			vreg_pmu_pcie_0p9: ldo8 {
+				regulator-name = "vreg_pmu_pcie_0p9";
+			};
+
+			vreg_pmu_pcie_1p8: ldo9 {
+				regulator-name = "vreg_pmu_pcie_1p8";
+			};
+		};
+	};
+};
+
+/*
+ * PCIe0 - the controller instance gts7l's QCA6390 is really attached to
+ * (confirmed above, not guessed from elish). &pcie0/&pcie0_phy are
+ * defined in sm8250.dtsi already `status = "disabled"` by default - same
+ * recurring "disabled at the SoC-dtsi level" pattern already solved for
+ * &qupv3_id_0/&gpi_dma0 during touchscreen/panel bring-up. PHY analog
+ * supplies reuse the same PM8150 rails already wired to the DSI PHYs
+ * above (vreg_l5a_0p88/vreg_l9a_1p2) - matches elish exactly, and no new
+ * regulator is needed since these are already-confirmed-working rails.
+ */
+&pcie0 {
+	status = "okay";
+};
+
+&pcie0_phy {
+	vdda-phy-supply = <&vreg_l5a_0p88>;
+	vdda-pll-supply = <&vreg_l9a_1p2>;
+	status = "okay";
+};
+
+&pcieport0 {
+	wifi@0 {
+		compatible = "pci17cb,1101";
+		reg = <0x10000 0x0 0x0 0x0 0x0>;
+
+		vddrfacmn-supply = <&vreg_pmu_rfa_cmn>;
+		vddaon-supply = <&vreg_pmu_aon_0p59>;
+		vddwlcx-supply = <&vreg_pmu_wlcx_0p8>;
+		vddwlmx-supply = <&vreg_pmu_wlmx_0p85>;
+		vddrfa0p8-supply = <&vreg_pmu_rfa_0p8>;
+		vddrfa1p2-supply = <&vreg_pmu_rfa_1p2>;
+		vddrfa1p7-supply = <&vreg_pmu_rfa_1p7>;
+		vddpcie0p9-supply = <&vreg_pmu_pcie_0p9>;
+		vddpcie1p8-supply = <&vreg_pmu_pcie_1p8>;
+	};
+};

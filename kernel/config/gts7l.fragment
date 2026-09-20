@@ -211,3 +211,84 @@ CONFIG_TOUCHSCREEN_NT36523_GTS7L=y
 # work/linux/firmware/tsp_novatek/ before building.
 CONFIG_EXTRA_FIRMWARE="tsp_novatek/nt36523_gts7l.bin"
 CONFIG_EXTRA_FIRMWARE_DIR="firmware"
+
+# Phase 3 Wi-Fi/BT, continued: real PCIe enumeration confirmed on
+# hardware (round75-build - QCA6390 shows up as a genuine PCI device,
+# `ath11k_pci` claims it, MHI powers on), failing only on the very last
+# step: ath11k/QCA6390/hw2.0/amss.bin missing. Pulled this exact unit's
+# own real firmware directly off its `vendor` partition (mounted via
+# /dev/block/mapper/vendor in TWRP, same precedent as the Adreno
+# zap-shader) - `/vendor/firmware/qca6390/amss20.bin` (ELF, matches
+# ath11k's own ATH11K_AMSS_FILE expectation directly, just renamed),
+# `m3.bin`/`regdb.bin` (filenames already match ath11k's own
+# ATH11K_M3_FILE/ATH11K_REGDB_FILE_NAME exactly), and
+# `bdwlan.elf` -> `board.bin` (a raw ELF board-data blob, matching
+# ath11k_core_fetch_board_data_api_1()'s plain-bytes single-file
+# fallback format, not the newer multi-variant `board-2.bin`
+# container). All four tracked at kernel/firmware/ath11k/QCA6390/hw2.0/
+# - but, unlike the touch firmware above, deliberately NOT added to
+# CONFIG_EXTRA_FIRMWARE: round76-build tried that and its packaged
+# boot.img came out 825408 bytes (806 KiB) larger than the `boot`
+# partition's real, fixed capacity (confirmed by a real `dd` ENOSPC
+# error on real hardware, boot image safely restored to round75
+# immediately after) - round75's kernel was already filling almost the
+# entire partition with zero headroom left, so baking in ~4.5MB of
+# Wi-Fi firmware the same way touch's firmware was baked in simply
+# doesn't fit. Unlike touch (which needs its firmware at the very
+# first probe, before anything else can even talk to that I2C bus),
+# ath11k probes well after the real Arch rootfs is mounted, so a real
+# /lib/firmware/ath11k/QCA6390/hw2.0/ path on the persistent rootfs
+# works fine timing-wise and doesn't touch the kernel image size at
+# all - install these four tracked files there instead.
+
+# Phase 3 Wi-Fi/BT (docs/phase3-wifi-bt-scoping.md): ATH11K/ATH11K_PCI/
+# MHI_BUS/PCIE_QCOM are all already on via plain defconfig - the one
+# real gap is the QCA6390 PMU power-sequencing driver
+# (drivers/power/sequencing/pwrseq-qcom-wcn.c, compatible
+# "qcom,qca6390-pmu"). Despite `default m if ARCH_QCOM` in its own
+# Kconfig, it wasn't coming on via defconfig alone - stated explicitly
+# here like every other gts7l-specific symbol in this fragment.
+CONFIG_POWER_SEQUENCING_QCOM_WCN=y
+
+# Forced built-in (=y, not defconfig's =m) for this first bring-up test.
+# This project has never loaded a kernel module at runtime - the
+# initramfs (kernel/initramfs/init) has zero modprobe/insmod/depmod
+# infrastructure - so a module here would just silently never load,
+# indistinguishable from "the DTS/hardware path doesn't work at all".
+# Isolates that variable for this first test; real module loading (now
+# that Phase 5 has a persistent Arch rootfs with systemd) is a real,
+# deliberately deferred follow-up per docs/phase3-wifi-bt-scoping.md,
+# not decided yet.
+# CFG80211/MAC80211 are ATH11K's own parent Kconfig deps - a real
+# tristate-ceiling gotcha this project already hit once before
+# (docs/kernel-config-notes.md): requesting a child symbol =y while its
+# parent stays =m from plain defconfig just silently caps the child back
+# down to =m, not an error. Both forced =y too, not just ATH11K itself.
+# CFG80211 itself has a further, one-more-level-removed ceiling:
+# `depends on RFKILL || !RFKILL` evaluates to the *tristate* value of
+# RFKILL when RFKILL=m (m || n = m, not a plain boolean short-circuit),
+# so RFKILL=m (plain defconfig's default) was silently capping CFG80211
+# at =m even with CFG80211=y requested directly here - confirmed by
+# checking .config directly after a first attempt without this line
+# still showed CFG80211=m. RFKILL forced =y too, for the same reason.
+CONFIG_RFKILL=y
+CONFIG_CFG80211=y
+CONFIG_MAC80211=y
+CONFIG_ATH11K=y
+CONFIG_ATH11K_PCI=y
+CONFIG_MHI_BUS=y
+CONFIG_MHI_BUS_PCI_GENERIC=y
+
+# Real hardware test (round74-build) found one more link in the same
+# tristate-ceiling chain: &pcie0's own PHY (phy@1c06000, compatible
+# "qcom,sm8250-qmp-gen3x1-pcie-phy") had NO driver bound at all -
+# CONFIG_PHY_QCOM_QMP_PCIE was still =m from plain defconfig (missed
+# earlier since it's not an ATH11K/CFG80211 dependency at the Kconfig
+# level - it's a *devicetree* supplier link, `1c00000.pcie`'s "phys ="
+# property pointing at this phy, invisible to a plain Kconfig
+# dependency read). Confirmed live via
+# /sys/devices/platform/soc@0/1c06000.phy having no `driver` symlink
+# and `1c00000.pcie` sitting permanently in
+# /sys/kernel/debug/devices_deferred with an empty reason (silently
+# waiting on its phy_get() call, which never printed anything itself).
+CONFIG_PHY_QCOM_QMP_PCIE=y

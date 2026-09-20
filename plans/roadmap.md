@@ -1186,7 +1186,15 @@ Progress log:
 
 ## Phase 3 — Core platform peripherals
 
-**Status:** not started
+**Status:** in progress - **Wi-Fi working on real hardware** (2026-09-20,
+`docs/phase3-wifi-bt-scoping.md`, `docs/kernel-boot-debugging.md`).
+QCA6390 enumerates over PCIe, loads this exact unit's own real
+firmware (pulled from its `vendor` partition, same precedent as the
+Adreno zap-shader), and `wlp1s0` scans and sees real access points -
+confirmed across a genuine cold reboot with zero manual intervention
+via a `wlan-pci-rebind.service` that works around a real boot-time PCI
+probe race. Not yet connected to an actual network or visible in
+Plasma's own UI - see below.
 
 Goal: the tablet is usable as a tablet — power, connectivity, audio, sensors.
 
@@ -1196,9 +1204,15 @@ Exit criteria:
       `references/gts7l/drivers/battery_v2/max77705_charger.c` +
       `max77705_fuelgauge.c`); core PMIC rails are standard Qualcomm
       **PM8150+PM8009**, which mainline `kona` support should already cover.
-- [ ] Wi-Fi working — combo chip confirmed **Qualcomm QCA6390**, targeted by
-      mainline `ath11k`.
-- [ ] Bluetooth working — same QCA6390 combo chip as Wi-Fi.
+- [x] Wi-Fi working — combo chip confirmed **Qualcomm QCA6390**, targeted by
+      mainline `ath11k`. **Kernel-level bring-up done** (real PCIe
+      enumeration, real firmware, real scan results) - remaining work is
+      userspace (NetworkManager/`iwd` + Plasma's network applet, actual
+      association/DHCP) and Bluetooth (a separate UART transport,
+      deferred - see the scoping doc's corrections section).
+- [ ] Bluetooth working — same QCA6390 combo chip as Wi-Fi, but a
+      genuinely separate UART transport from WLAN's PCIe link - not
+      researched yet, deferred per `docs/phase3-wifi-bt-scoping.md`.
 - [ ] Speakers and microphone(s) working.
 - [ ] Volume/power buttons working.
 - [ ] Motion sensors (accelerometer/gyro, rotation) working.
@@ -1207,7 +1221,25 @@ Exit criteria:
       real time for this).
 
 Progress log:
-- (none yet)
+- 2026-09-20: Wi-Fi kernel-level bring-up - full story in
+  `docs/phase3-wifi-bt-scoping.md`'s "Status: Wi-Fi working on real
+  hardware" section. Highlights: corrected an elish-borrowed GPIO
+  assumption with real downstream data (wlan/bt-enable are GPIO 90/76
+  on this board, not elish's 20/21); found a second real bug beyond the
+  DTS work (`CONFIG_PHY_QCOM_QMP_PCIE` silently `=m`, meaning the PCIe0
+  PHY had no driver at all - same "no module loading" class of gotcha
+  as ATH11K/CFG80211/RFKILL's tristate-ceiling chain); pulled this
+  exact unit's real Wi-Fi firmware off its own `vendor` partition and
+  confirmed it genuinely works (`wlp1s0` scans real APs); hit and
+  safely recovered from a real `boot` partition size limit (baking
+  ~4.5MB of firmware into the kernel the same way touch's firmware was
+  baked in doesn't fit - moved to the persistent rootfs's
+  `/lib/firmware` instead, architecturally correct given Wi-Fi probes
+  well after rootfs mount unlike touch); fixed a real boot-time PCI
+  probe race (fires before `switch_root`) with a `wlan-pci-rebind`
+  systemd service, confirmed durable across a genuine cold reboot.
+  Next: get it showing up and connectable from Plasma's own UI
+  (NetworkManager/applet, not just kernel-level `iw scan`).
 
 ---
 
