@@ -1222,9 +1222,15 @@ Exit criteria:
       a separate, real remaining gap**: a genuine USB-PD charger's
       connection state doesn't stay stable in Plasma (icon flashes then
       disappears) - this chip's separate Type-C port-management/MUIC
-      block has never been touched by this project, scoped separately
-      in `../docs/phase3-typec-muic-scoping.md`. Core PMIC rails are
-      standard Qualcomm PM8150+PM8009, unrelated to this chip.
+      block has never been touched by this project, scoped in
+      `../docs/phase3-typec-muic-scoping.md` (finding: **no mainline
+      prior art at all** for this block, unlike the fuel gauge -
+      downstream's real driver is ~7,760 lines, comparable in scope to
+      a full TCPM port. Deliberately not implemented yet - recommended
+      real-world test with a plain non-PD charger first, to see whether
+      this is worth a driver-port investment of that size at all,
+      pending). Core PMIC rails are standard Qualcomm PM8150+PM8009,
+      unrelated to this chip.
 - [x] Wi-Fi working — combo chip confirmed **Qualcomm QCA6390**, targeted by
       mainline `ath11k`. **Kernel-level bring-up done** (real PCIe
       enumeration, real firmware, real scan results) - remaining work is
