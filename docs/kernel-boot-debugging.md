@@ -4090,3 +4090,755 @@ Paused here at the owner's request to record state before continuing -
 this is the deepest, most stubborn single bug hit in this project so
 far, five independently-real fixes deep with no change to this one
 specific symptom.
+
+## Round 49 (2026-09-19, same day): found it - total vertical blanking is
+one line short of SM8250 DPU's own minimum prefill requirement
+
+Researched Round 48's two open theories (MDP core clock/OPP too low vs.
+a subtle panel-init defect) by reading the actual mainline DPU perf-calc
+source (`dpu_core_perf.c`, `dpu_plane.c`) directly rather than guessing
+further, and cross-checking against the one directly comparable real
+device already merged upstream: Xiaomi's elish (`sm8250-xiaomi-elish-
+common.dtsi`), a working SM8250 dual-DSI C-PHY tablet at the *same*
+1600x2560@120Hz. Elish's own computed MDP core clock requirement
+(`_dpu_core_perf_calc_clk()`'s `vtotal * hdisplay * vrefresh`, then
+`sm8250_perf_data.clk_inefficiency_factor = 105`) works out to ~556MHz -
+*higher* than gts7l's own ~523MHz estimate - yet elish is known-working
+on real hardware. That single fact rules out the "MDP core clock/OPP
+table capped too low" theory outright (`disp_cc_mdss_mdp_clk_src`'s
+freq table topping out at 460MHz is a real, shared hardware ceiling on
+this SoC generation, but it isn't what's actually broken here, since
+elish hits the same ceiling and works fine).
+
+Diffed gts7l's devicetree/mode against elish's more carefully instead of
+re-guessing at bandwidth. The `qcom,dual-dsi-mode`/`sync-dual-dsi`/
+`master-dsi` wiring and the DSI1-uses-DSI0's-clocks
+`assigned-clock-parents` override (the actual subtlety in dual-DSI sync)
+were already correctly present on both `&mdss_dsi1` blocks - not the
+difference. The real difference is in the *panel timing itself*:
+`drivers/gpu/drm/msm/disp/dpu1/dpu_hw_catalog.c`'s `sm8250_perf_data`
+declares `.min_prefill_lines = 35` (the DPU's own minimum vertical
+blanking window to safely prefetch/prime its pixel-source FIFO before
+active video starts). `dpu_plane.c`'s `_dpu_plane_calc_bw()` computes
+`vbp + vpw + vfp` from the *actual* mode and explicitly branches when
+that sum is below `hw_latency_lines` (= `min_prefill_lines`) to inflate
+the required bandwidth instead of rejecting the mode outright. gts7l's
+downstream-declared porches (`v-pulse-width=1, v-back-porch=7,
+v-front-porch=26`, transcribed directly into `gts7l_modes[]` in Round
+38) sum to **34** - one line short of 35. Elish's own front porch (60,
+much larger) clears this easily, which is exactly why the same driver
+code path never bites elish. This is a genuinely deterministic,
+byte-for-byte-identical-every-time structural mismatch, not a race -
+consistent with every single capture since Round 43.
+
+Confirmed this is safe to fix by padding the front porch specifically
+(not `vbp`/`vpw`, which are closer to true electrical sync timing):
+Samsung's own downstream dtsi declares
+`qcom,mdss-dsi-pan-fps-update = "dfps_immediate_porch_mode_vfp"` for
+this exact panel - i.e. this panel's own supported DFPS scheme
+(120/96/60/48Hz, `qcom,dsi-supported-dfps-list`) already works by
+varying the vertical front porch alone at runtime. A panel characterized
+to swing its front porch across a 120Hz-to-48Hz range tolerates two
+extra lines trivially.
+
+**Fix**: `gts7l_modes[]` in `drivers/gpu/drm/panel/panel-novatek-
+nt36523.c` - `v-front-porch` padded from 26 to 28 (total vblank 34 → 36,
+two lines of margin above the bare minimum of 35), with `.clock`/
+`.vsync_start`/`.vsync_end`/`.vtotal` recomputed consistently. Refresh
+rate drops by ~0.08% (120.00Hz → ~119.9Hz for the same pixel clock) -
+negligible, well inside this panel's own DFPS tolerance. Updated
+`kernel/patches/0003-phase2-panel-driver-and-misc-drivers.patch` to
+match via a fresh `git diff` of just this file's hunk (the rest of that
+patch was already stale from earlier rounds - left untouched, out of
+scope for this fix). Full kernel rebuild: clean, only the same
+pre-existing unrelated compiler-attribute warnings as always, `Image`
+rebuilt (new content, as expected for a driver source change); DTB
+byte-identical to the previous build (expected - no devicetree change
+this round, the fix lives entirely in the panel driver's compiled-in
+mode table).
+
+Packaged (uniLoader rebuilt, 44,478,464 bytes, same safe address
+margins), repacked onto the stock boot.img (kernel replaced only, dtb/
+ramdisk byte-verified untouched), flashed to `/dev/block/by-name/boot`
+from TWRP, byte-verified on-device via `md5sum`. `rp`/`ro.bootloader`
+reconfirmed unchanged before and after.
+
+### Tested: Round 49 alone had zero effect - confirmed a dead end,
+identical fault down to the byte
+
+Owner's capture: `dsi_err_worker: status=4` and
+`REG_DSI_FIFO_STATUS=0x1ddd1011` fired again, at the same relative
+timing as every capture since Round 43. The min_prefill_lines theory,
+while a real and correctly-reasoned mismatch, was not the (or not the
+whole) cause. Seventh independently-real fix in a row with zero
+measurable effect on this one symptom.
+
+Researched the other Round 48 theory (enable-ordering race between DPU
+kickoff and DSI host readiness) by reading
+`dpu_encoder_phys_vid.c`/`dsi_manager.c` directly: found nothing gts7l-
+specific - the bridge-chain enable sequence and video-engine kickoff
+(`dpu_encoder_phys_vid_handle_post_kickoff`'s `enable_timing()` call,
+gated on `DPU_ENC_ENABLING` and run only after bridges are already
+enabled) is standard, generic mainline sequencing shared with elish, not
+a plausible place for a device-specific bug to hide.
+
+## Round 50 (2026-09-19, same day): real hardware proof - the MDP core
+clock is hard-capped below what 120Hz genuinely requires, and no amount
+of blanking/porch tuning can fix that
+
+With source-level guessing exhausted (seven real fixes, zero effect),
+added actual runtime instrumentation instead of another guess: a
+`pr_err()` in `dpu_core_perf_crtc_update()`
+(`drivers/gpu/drm/msm/disp/dpu1/dpu_core_perf.c`) printing the real
+requested vs. clamped core clock and bandwidth vote, plus timestamped
+markers at the exact moment the panel's 180-command init sequence
+finishes (`nt36523_prepare()`) and the exact moment DPU actually starts
+pushing pixels (`dpu_encoder_phys_vid_handle_post_kickoff()`'s
+`enable_timing(1)` call). Flashed and tested - decisive:
+
+```
+[    1.141176] gts7l: nt36523_prepare init_sequence done, ret=0
+[    1.141330] gts7l: dpu_encoder_phys_vid enable_timing(1), intf=1
+[    1.141335] gts7l: dpu_encoder_phys_vid enable_timing(1), intf=2
+[    0.772152] gts7l: perf update requested_clk=523353600 max_clk=460000000 bw_ctl=0 max_per_pipe_ib=800000
+[    1.141932] gts7l: REG_DSI_FIFO_STATUS raw=0x1ddd1011
+```
+
+`requested_clk` (523,353,600 Hz, i.e. ~523MHz - matches the Round 44/49
+hand calculation exactly: `vtotal(2596) * hdisplay(1600) * fps(120) *
+clk_inefficiency_factor(1.05)`) is clamped to `max_clk` (460,000,000 Hz)
+before `dev_pm_opp_set_rate()` is ever called
+(`dpu_core_perf.c:397`) - a real, measured, on-this-exact-hardware 12%
+clock shortfall. `max_clk` traces to
+`disp_cc_mdss_mdp_clk_src`'s frequency table in
+`drivers/clk/qcom/dispcc-sm8250.c`, which tops out at 460MHz
+(`P_DISP_CC_PLL0_OUT_MAIN` divided by 3) - a real, fixed hardware
+ceiling on this SoC generation, not a devicetree/config gap or
+something a higher OPP table entry could unlock (Round 49's originally-
+considered, since-discarded theory - there's no higher divider entry to
+select via OPP in the first place).
+
+**Proved this is not fixable by blanking/porch tuning at all**, closing
+off the entire direction Round 49 was exploring: `_dpu_core_perf_calc_clk()`'s
+formula (`vtotal * hdisplay * fps`) only ever *increases* with more
+vertical blanking. Even the physically-impossible zero-blanking floor
+(`vtotal = vdisplay = 2560`) at 120Hz already demands `2560 * 1600 * 120
+* 1.05 ≈ 516MHz` - still over the 460MHz ceiling. No arrangement of
+porches can bring 120Hz under this hardware's real clock budget; only a
+lower refresh rate actually reduces the required clock.
+
+**Fix**: dropped native rate from 120Hz to 96Hz in `gts7l_modes[]`
+(`drivers/gpu/drm/panel/panel-novatek-nt36523.c`) - not an invented
+workaround: downstream's own `qcom,dsi-supported-dfps-list = <120 96 60
+48>` already lists 96Hz as a first-class supported rate for this exact
+panel. At 96Hz with Round 49's vtotal (2596), required clock is `2596 *
+1600 * 96 * 1.05 ≈ 419MHz` - comfortably under the 460MHz cap with real
+margin (~9%), so no clamping occurs and the DPU can actually sustain the
+full computed rate. Round 49's vfp=28 padding is kept - fps doesn't
+affect the separate `min_prefill_lines=35` blanking-line-count check,
+so both real constraints (enough blanking lines, and clock within
+budget) need to hold simultaneously.
+
+Kept all Round 49/50 diagnostics in for this test as a confirmation
+signal - if this fix is correct, `requested_clk` should drop to
+~419MHz and stay at or under `max_clk` with no clamping, and the FIFO
+error prints should stop appearing entirely.
+
+Kernel + uniLoader rebuild (same 44,478,464-byte size, same safe address
+margins), packaged via the same proven method (byte-exact verification
+passed), flashed. `rp`/`ro.bootloader` reconfirmed unchanged before and
+after.
+
+### Tested: 96Hz alone had zero effect either - conclusively rules out
+clock/bandwidth as the cause, of any kind, clamped or not
+
+Owner's capture was decisive: `requested_clk=418682880` (matches the
+96Hz hand calculation almost exactly) and `max_clk=460000000` - no
+clamping this time, the DPU genuinely got the full clock it asked for.
+The identical fault fired anyway: `dsi_err_worker: status=4`,
+`REG_DSI_FIFO_STATUS=0x1ddd1011`, same bits. The gap between
+`enable_timing(1)` (1.065293s) and the fault (1.066042s) was ~749us,
+versus Round 49's ~602us at the higher clock - almost exactly the
+523/419 clock ratio (602 * 523/419 ≈ 751), consistent with everything in
+this system scaling off the same mode clock rather than being uniquely
+informative on its own, but the headline result is unambiguous: with a
+real, unclamped, fully-delivered clock, the fault is identical. Eight
+independently-real fixes/theories now falsified by direct hardware
+test - clock and bandwidth, clamped or not, are conclusively not the
+cause.
+
+## Round 51 (2026-09-19, same day): the one code path elish never
+exercises - programmable fetch, engaged only because our back porch is
+small
+
+Comparing against elish yet again, but this time for something never
+previously checked: `dpu_encoder_phys_vid.c`'s
+`programmable_fetch_get_num_lines()` only engages DPU's "programmable
+fetch" prefetch-ahead mechanism (`programmable_fetch_config()`'s
+vsync-counter arithmetic, written to hardware via
+`INTF_PROG_FETCH_START`/`INTF_CONFIG` bit 31 in `dpu_hw_intf.c`) when
+`vbp + vsync_pulse_width < prog_fetch_lines_worst_case` (24 lines for
+SM8250, `dpu_6_0_sm8250.h`). Ours: `vbp(7) + vpw(1) = 8`, well under 24
+- fetch is engaged. Elish's own back porch (168) alone clears the
+24-line threshold outright by itself - **elish never engages this
+mechanism at all**. That means a bug anywhere in this code path would
+be completely invisible when comparing gts7l against elish's known-
+working configuration - explaining, in hindsight, why every previous
+"shared with elish, therefore probably fine" comparison (dual-DSI sync
+wiring, bridge-chain enable order, clock-derivation formulas) correctly
+found nothing: none of those comparisons could ever have caught a bug
+specific to this one mechanism, because the comparison device doesn't
+exercise it.
+
+**Fix**: padded `v-back-porch` from 7 to 30 (`vbp + vpw` = 31 > 24) in
+`gts7l_modes[]`, disabling programmable fetch entirely - matching
+elish's own approach of avoiding this code path altogether, rather than
+trying to out-calculate its counter math ourselves. Verified this
+doesn't reopen either previously-confirmed real constraint: total
+blanking (`vpw+vbp+vfp` = 1+30+28 = 59) stays well above
+`min_prefill_lines`=35 (Round 49), and the required core clock at 96Hz
+(~422MHz) stays comfortably under the 460MHz ceiling (Round 50). Added
+one more temporary diagnostic - a `pr_err()` in
+`programmable_fetch_config()` printing `f.enable`/`vfp_fetch_lines`/
+`fetch_start` - to directly confirm on the next capture whether fetch is
+actually now disabled (`enable=0`) as intended, rather than assuming
+the math is right.
+
+Kernel + uniLoader rebuild (same 44,478,464-byte size, same safe address
+margins), packaged via the same proven method (byte-exact verification
+passed), flashed. `rp`/`ro.bootloader` reconfirmed unchanged before and
+after.
+
+### Tested: programmable fetch confirmed disabled, fault still identical
+- ten real fixes/theories now falsified
+
+Owner's capture confirmed the new diagnostic directly:
+`programmable_fetch_config enable=0 vfp_fetch_lines=0 fetch_start=0` -
+programmable fetch is genuinely, verifiably off, exactly as intended.
+`REG_DSI_FIFO_STATUS=0x1ddd1011` and `dsi_err_worker: status=4` fired
+anyway, at the same relative timing (~832us after `enable_timing(1)`).
+Ten independently-real fixes/theories in a row now falsified by direct
+hardware test: PLL trim, burst mode, backlight race (see Round 52 - this
+one gets a second look), GPI DMA, QUP wrapper, bias IC, min_prefill
+blanking, MDP core clock (clamped and unclamped), and programmable
+fetch.
+
+## Round 52 (2026-09-19, same day): the FIFO error is a proven no-op,
+and Round 46's backlight disable was never reverted after being
+retracted in Round 48
+
+Two findings, read directly from `dsi_host.c`, not inferred:
+
+**The FIFO fault is provably harmless in mainline's own error handling.**
+`dsi_err_worker()` only calls the destructive `dsi_sw_reset()` when
+`err_work_state` includes `DSI_ERR_STATE_MDP_FIFO_UNDERFLOW`, which
+`dsi_fifo_status()` only sets when
+`DSI_FIFO_STATUS_CMD_MDP_FIFO_UNDERFLOW` (bit 7, `0x80`) is present in
+the raw register value. Bit-checked our own observed
+`0x1ddd1011` directly: bit 7 is not set. So for this exact, every-round-
+identical fault, mainline's entire response is a rate-limited log line
+and re-enabling the error interrupt - nothing else. Cross-checked
+Samsung's own downstream `dsi_ctrl_hw_cmn.c` error-decode function
+(`references/gts7l/techpack/display/msm/dsi/`): it doesn't even bother
+decoding bits 0-6 (which includes `VIDEO_MDP_FIFO_OVERFLOW`) into any
+named error at all - downstream doesn't consider this bit worth
+flagging either. Asked the owner to check the physical screen directly
+(not dmesg) to see if this reframing changed anything: still black,
+backlight off - so the FIFO log line, while real and still unexplained,
+is confirmed not itself the reason nothing displays.
+
+**Root cause of "backlight off" specifically: Round 46's fix was never
+undone after Round 48 retracted its own justification.** Round 46 set
+`has_dcs_backlight = false` because `nt36523_bl_update_status()`'s
+automatic initial brightness write landed within 1ms of the FIFO fault,
+theorized as a `dsi->mode_flags` race with the DRM commit path. Round 48
+directly retracted this, in its own words: "the backlight race was a
+coincidental correlation, not the actual cause - both were triggered by
+the same underlying event." Nobody reverted `has_dcs_backlight` back to
+`true` afterward - it stayed `false` through Rounds 47-51 by omission.
+Meanwhile this exact panel's backlight is DCS-controlled by the panel's
+own internal LED driver (downstream's `bl_ctrl_dcs`, register 0x51) -
+not a separate GPIO/PWM rail - so with `has_dcs_backlight = false`,
+`drm_panel_of_backlight()` is called instead (a no-op here, no
+`backlight = <&phandle>;` property), and **nothing has sent a
+brightness-on DCS command in any round since 46**, regardless of
+whatever else was fixed or broken in the DSI/DPU pipeline in the
+meantime.
+
+**Fix**: reverted `has_dcs_backlight` to `true` in `gts7l_desc`
+(`drivers/gpu/drm/panel/panel-novatek-nt36523.c`), restoring the only
+code path that actually turns the backlight on, now that its sole cited
+justification for being off is known-retracted.
+
+Kernel + uniLoader rebuild (same 44,478,464-byte size, same safe address
+margins), packaged via the same proven method (byte-exact verification
+passed), flashed. `rp`/`ro.bootloader` reconfirmed unchanged before and
+after.
+
+### Tested: fetch confirmed disabled, but backlight still off - moved to
+live diagnosis over a real shell instead of guessing again
+
+Owner's capture confirmed `programmable_fetch_config enable=0
+vfp_fetch_lines=0 fetch_start=0` - the fix from Round 51 landed exactly
+as intended. `REG_DSI_FIFO_STATUS=0x1ddd1011` still fired at the same
+relative timing regardless. Screen: still black, backlight still off.
+
+Direct comparison of the FIFO fault's real severity in mainline's own
+error handling (`dsi_err_worker()` only calls the destructive
+`dsi_sw_reset()` for `DSI_ERR_STATE_MDP_FIFO_UNDERFLOW`, gated on
+`DSI_FIFO_STATUS_CMD_MDP_FIFO_UNDERFLOW` (bit 7, `0x80`) - not present
+in our observed value) proved this specific fault is a logged no-op on
+our own hardware, and Samsung's downstream `dsi_ctrl_hw_cmn.c` doesn't
+even decode bits 0-6 into a named error at all. Confirmed with the owner
+directly on the physical screen (not dmesg) that this reframing changed
+nothing - still black, backlight off - meaning the black screen has a
+separate, still-unidentified cause from the FIFO log line.
+
+At this point the owner offered live shell access to the booted (but
+broken-display) kernel instead of continuing to paste dmesg per round -
+turned out to be a real USB CDC-ACM gadget serial console from this
+project's own busybox initramfs (`/dev/ttyACM<N>` on the host, not adb -
+adb only works from TWRP, which has real Android userspace/adbd; this
+custom minimal initramfs doesn't), reachable directly via a scripted
+`stty`+redirect helper against the tty device node. This let real-time,
+interactive diagnosis replace another blind guess-rebuild-reflash-wait
+cycle for the first time this session.
+
+**Confirmed live**: a real `ae94000.dsi.0` backlight class device now
+exists (Round 52's fix registered correctly), `brightness=512` reads
+back, and `dmesg` confirms `nt36523_bl_update_status called,
+brightness=512` /`mipi_dsi_dcs_set_display_brightness_large returned 0`
+- the DCS write genuinely succeeds. Tried forcing `fb0`'s blank state
+(`echo 0 > /sys/class/graphics/fb0/blank`, was `4`/`FB_BLANK_POWERDOWN`
+- expected, since nothing in this minimal environment ever calls
+`FBIOBLANK` to unblank it) and a manually-set, definitely-in-range
+brightness (200, vs. downstream's own declared max of 462 - ruling out
+an out-of-range value being silently clamped) directly via sysfs, live,
+with no rebuild needed. Neither changed anything - screen still black,
+backlight still off, confirmed by the owner looking at the physical
+panel each time.
+
+## Round 53 (2026-09-19, same day): a real hardware rail is silently
+disabled after boot - confirmed via live regulator/GPIO state, not
+inferred
+
+Checked `/sys/kernel/debug/gpio` live: `gpio93` (`lcd-buck`'s enable
+line, `fixed_reg_buck_en` in `kernel/dts/sm8250-samsung-gts7l.dts`)
+reads **"out low"** - disabled - despite `regulator-boot-on` in its
+devicetree node. `/sys/kernel/debug/regulator/lcd-buck` confirms
+directly: `state=disabled`, `num_users=0`. Compare `gpio135` (`lcd-vdd`,
+the panel's `vddio-supply`, which has a real consumer - the panel device
+holds a genuine reference via `regulator_enable(pinfo->vddio)` in
+`nt36523_prepare()`): reads "out high", correctly still enabled.
+
+Read `drivers/regulator/fixed.c` directly to confirm the mechanism, not
+assumed: `regulator-boot-on` only sets `config->enabled_at_boot`, which
+makes the driver request the GPIO as `GPIOD_OUT_HIGH` at *initial probe*
+- it does not exempt the regulator from mainline's own "disable unused
+regulators" late cleanup pass, which switches off any regulator that
+was on at boot but never had a real, counted consumer take a reference
+on it. `fixed_reg_buck_en` has zero consumers anywhere in this
+devicetree - no `*-supply` property references it at all. Checked
+downstream's own `isl98608_hw_i2c.c`
+(`references/gts7l/techpack/display/msm/samsung/NT36523_PPA957DB1/`)
+directly for a `regulator_get()`/`regulator_enable()` call on this
+rail: none - downstream's overlay (`kona-sec-gts7l-eur-overlay-r07.dts`
+fragment@155) declares the identical `regulator-boot-on`-only
+configuration for both rails. This is a genuine behavioral difference
+between kernels, not a transcription error: downstream's kernel
+apparently doesn't (or doesn't need to) run the same unused-regulator
+cleanup mainline does, so a boot-on rail with no consumer stays on
+indefinitely there but not here.
+
+This rail most plausibly feeds the ISL98608 bias IC's own analog input
+supply (separate from its I2C control-logic supply, which is why I2C
+writes to it have reported success every round since 48 despite the
+main power path possibly never actually being live) or another part of
+the panel's real power path - either way, it silently going dark
+sometime after boot, well before Round 48's bias-IC-probe timestamp
+would even be checked in a typical capture, is a fully plausible,
+previously-invisible explanation for "DCS commands succeed, backlight
+device exists and reports success, but nothing physically lights up."
+
+**Fix**: added `regulator-always-on;` to `fixed_reg_buck_en` in
+`kernel/dts/sm8250-samsung-gts7l.dts` - the standard mainline idiom for
+"a rail with no software-managed consumer that must never be switched
+off," which is exactly this situation; not a workaround, but the
+correct way to express downstream's own always-on hardware intent in
+mainline's stricter regulator model. `fixed_reg_lcd_1p8` doesn't need
+the same treatment - it already has a genuine consumer holding it open.
+
+DTB-only rebuild (confirmed via `fdtget`/`fdtdump`:
+`regulator-always-on` present on the `lcd-buck` node, kernel Image
+byte-identical - no driver source changed), uniLoader rebuild (same
+44,478,464-byte size, same safe address margins), packaged via the same
+proven method (byte-exact verification passed).
+
+**Not yet flashed as of writing this entry** - the device is currently
+booted into the real (broken-display) kernel for live diagnosis, not
+TWRP, and TWRP's real Android userspace/adbd is needed to `dd` a new
+`boot.img` - the custom minimal initramfs used for live diagnosis this
+round has no adb of its own, only the USB serial console.
+
+### Tested: lcd-buck genuinely stays enabled now, but screen still black
+- moved to live experiments instead of more guesses
+
+Rebooted into TWRP, flashed, rebooted into the real kernel, reconnected
+the USB serial console. Confirmed directly via
+`/sys/kernel/debug/gpio` (`gpio93` now reads "out high", was "out low")
+and `/sys/class/regulator/regulator.11` (`name=lcd-buck`,
+`state=enabled`, `num_users=1`) that Round 53's fix is real and correct
+- the rail genuinely stays on this time, unlike before. `isl98608`
+bias-register writes and the backlight brightness DCS write both still
+report success. **Screen: still black.** Owner clarified a key fact:
+backlight-on-with-black-content is visually distinguishable from
+backlight-fully-off on this hardware, and what's showing is
+unambiguously the latter, not just "a black image."
+
+Ran two more live experiments directly over the serial console, no
+rebuild needed:
+- Force-unblanked `fb0` (`echo 0 > .../blank`, was `4`/
+  `FB_BLANK_POWERDOWN` - expected, nothing in this minimal environment
+  ever calls `FBIOBLANK`) and manually set a brightness value (200)
+  definitely inside downstream's declared 4-462 range via sysfs,
+  bypassing the automatic callback entirely - no visible change either
+  way.
+- Wrote a full 16MB of `/dev/urandom` directly to `/dev/fb0`, confirmed
+  via `msm_fbdev.c` source (`fbi->screen_buffer = msm_gem_get_vaddr(bo)`
+  - the real GEM scanout buffer's own vaddr, no shadow/deferred-io
+  layer for this driver) to land in exactly what DPU scans out, on a
+  continuously-refreshing video-mode panel with no explicit flip needed
+  for it to appear. Confirmed the write's own record count matched the
+  full requested size this time (first attempt was truncated by an
+  unrelated tool-side timeout, not a real error). Zero visible change.
+
+This rules out "nothing has ever been drawn" as an explanation and
+narrows things down hard: real, definitely-non-black pixel data
+reaches the exact buffer the hardware scans from, and a definitely
+in-range, definitely-successful (per host-side return code) backlight
+command has been sent - yet nothing reaches the physical panel. Combined
+with an earlier, previously under-weighted fact - a DCS *read* attempt
+(`nt36523_bl_get_brightness`) failed outright
+(`msm_dsi_host_cmd_rx:Invalid response cmd`, `wait for video done timed
+out`) - this points at the DSI link itself, not any single register or
+config value: a *write* reporting success only means the host's own
+transmission completed without a bus error, not that the panel actually
+received and applied it, and reads over the same link demonstrably
+don't work at all right now.
+
+## Round 54 (2026-09-19, same day): a real, precedented mainline
+hardware class - some DSI controllers cannot reliably take commands
+once video streaming has started
+
+Asked to research whether other real mainline-Linux bring-up projects
+have hit this same class of symptom. Found a genuine, concrete
+precedent: a real, accepted mainline patch ("skip the wait for video
+mode done if not applicable") documents exactly this hardware
+limitation in its own commit message - "some display controllers cannot
+send DSI commands after starting the video stream... all DSI
+configuration should be done in prepare()/unprepare() callbacks
+instead." Checked our own dmesg timestamps directly against this
+theory: `nt36523_bl_update_status called` fires at `1.056535s`,
+`dpu_encoder_phys_vid enable_timing(1)` fires at `1.056558s`/
+`1.056562s` - within 30 microseconds of each other, essentially
+simultaneous. `devm_backlight_device_register()`'s automatic initial
+`update_status()` call is tied to fb0's own unblank event, which itself
+only happens once the DRM commit reaches the same point where the video
+engine starts - structurally guaranteeing this race on every boot, not
+a one-off timing accident.
+
+The research also surfaced that bonded/dual-DSI PLL/clock init is a
+genuinely fragile, actively-being-reworked area in current mainline (a
+real fix for a bonded-mode PLL bug landed, then got reverted months
+later for breaking the non-bonded case, with the maintainer's own note
+that a better fix was still pending) - confirmed our own `work/linux`
+tree already has the (non-reverted) fix applied, not the regression, so
+this doesn't directly explain our bug, but corroborates that this exact
+hardware topology (bonded C-PHY dual-DSI) is a genuinely less-mature,
+sharper-edged area of mainline than most single-link panels this
+driver already supports.
+
+**Fix**: rather than trust a DCS write racing video-stream start,
+baked a real, non-zero default brightness (462 = `0x01CE`, downstream's
+own declared max) directly into `gts7l_init_sequence()`'s existing
+`0x51` write - which already runs reliably in `prepare()`, before video
+streaming starts, matching every other command in that 180-command
+sequence that has succeeded every round since 38. This sidesteps the
+late, racing runtime write entirely for the initial value, rather than
+trying to fix or reorder the automatic backlight-framework callback
+itself. Left the generic `nt36523_create_backlight()` properties
+(`max_brightness=4095`) untouched - shared code with other panels in
+this driver (elish, j606f), out of scope for a gts7l-specific fix.
+
+Kernel + uniLoader rebuild (same 44,478,464-byte size, same safe address
+margins), packaged via the same proven method (byte-exact verification
+passed).
+
+**Not yet flashed as of writing this entry** - waiting for the tablet to
+be back in TWRP.
+
+### Tested: Round 54 worked - backlight is now genuinely, physically on
+
+Owner's report, verbatim: "It went black and then turned on again and
+now the backlit is on with a black screen." Confirmed live over the
+serial console: `nt36523_prepare init_sequence done, ret=0` still
+succeeds, and the panel now visibly, physically lights up - the exact
+distinction the owner flagged as meaningful in the previous round
+(backlight-on-with-black-content vs. backlight-off) now genuinely
+favors "on." This is the first real, physically-visible change of any
+kind since this bug was first hit around Round 40. The
+prepare()-time-brightness fix, backed by a real documented mainline
+hardware class, is confirmed correct.
+
+`REG_DSI_FIFO_STATUS=0x1ddd1011` still fires, unchanged. Re-ran the
+`/dev/urandom` → `/dev/fb0` full-frame write test from the previous
+round (confirmed full 16MB written, no truncation this time) with the
+backlight now confirmed lit: zero static/noise visible, screen stays
+solid black. This cleanly splits the DSI link into two halves with very
+different health: LP-mode/command transactions (backlight, brightness,
+the whole 180-command init sequence) now demonstrably reach and are
+correctly parsed by the panel; HS-mode video streaming still produces
+nothing visible at all, consistent with the FIFO overflow being a real,
+physical symptom of a genuinely unhealthy HS link - not (as I'd
+concluded from source alone) fully explained by mainline's own error
+handling being a software no-op. LP mode is far more electrically
+tolerant (much slower, self-clocked signaling) than HS mode (near-1GHz
+bit clock, tight timing margins) - a marginal analog PHY trim would
+plausibly break exactly this way: LP keeps working, HS doesn't.
+
+## Round 55 (2026-09-19, same day): a third C-PHY trim register,
+declared downstream, never ported, never written by mainline at all
+
+With the command/LP path now proven healthy and only the analog HS path
+still suspect, re-read downstream's dtsi's PHY trim block in full rather
+than trusting Round 41's original transcription. Found a property never
+ported: `samsung,phy_offset_mid_ctrl = <0x1F>`, declared alongside the
+already-ported `phy_offset_top_ctrl`/`phy_offset_bot_ctrl` (both also
+`0x1F`). Checked mainline directly: `dsi_phy_7nm.xml.h` defines the
+matching register
+(`REG_DSI_7nm_PHY_CMN_GLBL_RESCODE_OFFSET_MID_CTRL`, offset `0xfc`), but
+`dsi_7nm_phy_enable()` never writes to it anywhere - not in the generic
+per-quirk default blocks, not in Round 41's own override. This register
+has been sitting at its hardware power-on-reset value this entire
+project, untouched by any of the previous 54 rounds.
+
+C-PHY's physical layer uses 3-wire "trios" per lane (vs. D-PHY's 2-wire
+differential pairs), so a third, independent resistor-calibration code
+for the third ("mid") wire is a real, physically coherent explanation
+for a marginal-but-not-fully-broken C-PHY analog front end - exactly
+matching the newly-clarified symptom split from Round 54's tests (LP
+survives, HS doesn't).
+
+**Fix**: added `has_rescode_mid_ctrl`/`rescode_mid_ctrl` to
+`dsi_phy_7nm_tuning_cfg` and a new `qcom,phy-rescode-offset-mid-ctrl`
+devicetree property, following the exact existing top/bot pattern
+(`drivers/gpu/drm/msm/dsi/phy/dsi_phy_7nm.c`) - defaults to `0x00`
+(assumed power-on-reset value, matching several of the existing
+per-quirk TOP defaults already in this same function) when the
+devicetree property isn't present, so every other board/panel using
+this shared driver is unaffected. Set `qcom,phy-rescode-offset-mid-ctrl
+= <0x1f>;` on both `&mdss_dsi0_phy`/`&mdss_dsi1_phy` in
+`kernel/dts/sm8250-samsung-gts7l.dts`, matching downstream's declared
+value exactly.
+
+Full kernel rebuild (driver source changed) + DTB rebuild (both clean,
+confirmed via `fdtdump`: `qcom,phy-rescode-offset-mid-ctrl = <0x1f>` on
+both PHY nodes), uniLoader rebuild (same 44,478,464-byte size, same safe
+address margins), packaged via the same proven method (byte-exact
+verification passed).
+
+### Tested: MID trim register also had zero effect - confirmed via
+matched-value readback
+
+Owner's capture: `rescode_mid=0x1f` confirmed applied on both PHYs, but
+`REG_DSI_FIFO_STATUS=0x1ddd1011` fired identically again. Eleven
+independently-real fixes/theories now falsified. Re-checked mainline's
+hardcoded `LANE_CFG0`/`LANE_CFG1` (`0x21`/`0x84`, flagged "TODO: we need
+to calculate this") against downstream's own lane-map computation
+(`dsi_display_parse_lane_map()`'s BIT-encoded default identity mapping,
+`DSI_PHYSICAL_LANE_0..3 = BIT(0..3)`) by hand: `0x21`/`0x84` is the
+*exact*, correct value for identity/`lane_map_0123` once the BIT-encoding
+is accounted for - not a bug, confirming Round 48's original dismissal
+was right after all.
+
+## Round 56 (2026-09-19, same day): the actual bug, proven bit-for-bit
+against a real, live, working register readback pulled directly off the
+device
+
+With every static PHY/DSI/DPU configuration value exhausted and no
+further leads from source comparison alone, got live shell access to
+the device (Owner offered a USB CDC-ACM serial console from this
+project's own busybox initramfs) and ran two decisive experiments:
+
+- Backlight is now confirmed **physically** on (owner: "It went black
+  and then turned on again and now the backlit is on with a black
+  screen" - a real, visible distinction from backlight-off, the first
+  physically-visible change of any kind since Round 40).
+- A full 16MB `/dev/urandom` write straight into `/dev/fb0`, confirmed
+  via `msm_fbdev.c` source to map directly onto the real GEM scanout
+  buffer (`msm_gem_get_vaddr()`, no shadow/deferred-io layer) with no
+  explicit flip needed on a continuously-refreshing video-mode panel,
+  produced zero visible static/noise.
+
+This cleanly split the DSI link: LP-mode/command transactions
+(brightness, WRCTRLD, the whole 180-command init sequence) now
+genuinely work; HS-mode video streaming still produces nothing at all.
+Investigated the DPU dual-pipe/split-display CTL pairing code
+(`dpu_encoder_helper_split_config()`, `dpu_encoder.c`) - fully generic,
+shared with elish, no discrepancy found.
+
+Asked what else could be pulled from the live device, and specifically
+whether the panel could be made to display *anything* real. Realized
+TWRP's own downstream driver wasn't a valid reference - its
+`state_info` debugfs showed `VIDEO_ENGINE = OFF` and a tiny
+`BYTE_CLK=142571428` (~142MHz, nowhere near what this panel's real mode
+needs) even while TWRP's UI was visibly on screen: TWRP relies on
+low-power continuous-splash inherited from the bootloader, the exact
+same trick this project's own uniLoader uses - it never exercises real
+HS video streaming at all, so it couldn't validate anything about this
+bug.
+
+**Temporarily flashed the pristine stock `boot.img`** (saved at
+`work/stock-backup/boot.img` since early in this project) to boot into
+real, normal Android with the real launcher genuinely running - a
+completely different, higher-stakes-sounding but fully reversible
+operation (still only ever touches `/boot`, same partition every round
+already has). Confirmed root via Magisk (`su -c id`), mounted debugfs,
+and read `/sys/kernel/debug/ss_dsi_panel_NT36523_PPA957DB1_WQXGA/
+dsi-ctrl-0/{state_info,reg_dump}` while the real desktop was genuinely
+displaying content this time: `state_info` showed `VIDEO_ENGINE = ON`
+- real streaming, finally a genuine, live, correct reference.
+
+Decoded the real register values:
+- `DSI_VIDEO_MODE_ACTIVE_H = 0x03400020` -> ha_start=32, ha_end=832 ->
+  **active width = 800** (not 1600 - confirms each physical DSI
+  controller is programmed with the per-link half-width, not the
+  combined mode).
+- `DSI_VIDEO_MODE_TOTAL = 0x0a210393` -> h_total=916, v_total=2594.
+- `DSI_VIDEO_MODE_HSYNC = 0x00020000` -> hs_end=2.
+
+Read `dsi_timing_setup()` (`drivers/gpu/drm/msm/dsi/dsi_host.c`)
+directly against these numbers: for bonded DSI it halves `h_total`,
+`hs_end`, `ha_start`, `ha_end`, and `hdisplay` - explicitly because "the
+current DRM mode has the complete width of the panel... the horizontal
+timings have to be split between the two dsi controllers." This
+function *assumes* the combined DRM mode's horizontal porches are
+already doubled (representing two links' worth), so that halving
+recovers the real per-link values. **`gts7l_modes[]` never did this** -
+it put the real, single-link porch values (h-front=84, h-pulse=2,
+h-back=30, transcribed directly from downstream's per-link dtsi
+properties back in Round 38) straight into a 1600-wide combined mode.
+Mainline's automatic halving then cut them in half *again*: each
+physical DSI controller has been running with h_total=858 (42/1/15
+effective porches) instead of the real 916 (84/2/30), on literally
+every line of every frame, since the panel driver was first written.
+
+This is a static, structural, deterministic horizontal-blanking-timing
+violation - not a race, not a bandwidth issue, not a config toggle -
+and it's the one thing that's fundamentally different between LP-mode
+commands (no per-line timing involved at all) and real HS video
+streaming (timed against exactly this per-line horizontal window),
+matching the entire observed symptom split exactly. It explains why
+every other genuinely-real fix this project found (PLL trim, burst
+mode, GPI DMA, QUP wrapper, bias IC, clock budget, programmable fetch,
+MID trim, the backlight race) had zero effect on this one symptom: none
+of them touched horizontal timing at all.
+
+**Fix**: doubled the horizontal porches in `gts7l_modes[]` (h-front
+84->168, h-pulse 2->4, h-back 30->60) so `dsi_timing_setup()`'s halving
+recovers the correct per-link values - confirmed bit-for-bit: running
+the doubled values through the exact same halving formulas reproduces
+the real hardware's `ACTIVE_H=0x03400020`, `TOTAL=0x0a210393`, and
+`HSYNC=0x00020000` precisely.
+
+The same live readback also proved Rounds 49 and 51's *vertical* porch
+padding was chasing a false lead the whole time: real stock Android
+runs this exact panel with `v_total=2594` - vpw=1, vbp=7, vfp=26,
+completely unpadded, one line *under* `min_prefill_lines`=35 the entire
+time. Reverted both back to their original, downstream-declared values.
+Round 50's fps=96 finding stands on its own and is kept - real
+downstream evidently achieves genuine 120Hz by having additional,
+higher frequency-table entries in its own clock driver that mainline's
+`dispcc-sm8250.c` simply doesn't have yet; a separate, valid future
+improvement (extending the MDP core clock's frequency table), out of
+scope for getting a first picture.
+
+Kernel rebuild (driver source changed) + uniLoader rebuild (same
+44,478,464-byte size, same safe address margins), packaged via the same
+proven method (byte-exact verification passed).
+
+Rebooted the device back through TWRP (recovery), flashed, byte-verified
+on-device, `rp`/`ro.bootloader` reconfirmed unchanged before and after.
+
+### Tested: FIXED - real display output, full brightness, readable text
+
+Owner's report, verbatim: **"FINALLY!!! Real display out, full
+brightness and readable text."**
+
+This is Phase 2's core display bring-up goal met: a mainline kernel
+driving this device's real DSI/C-PHY dual-link video-mode LCD, with
+genuine HS video streaming, at real resolution, showing real content -
+not a splash screen, not a solid color, not backlight-only. First real
+picture on this device under a mainline kernel, 56 rounds and one full
+day (2026-09-19) after Round 40 first hit `VIDEO_MDP_FIFO_OVERFLOW`.
+
+**Final working `gts7l_modes[]` configuration**
+(`drivers/gpu/drm/panel/panel-novatek-nt36523.c`):
+- Resolution: 1600x2560 (WQXGA), dual-DSI, 3-lane C-PHY per link.
+- Refresh: 96Hz (not native 120Hz - `dispcc-sm8250.c`'s MDP core clock
+  frequency table tops out at 460MHz on this SoC generation in
+  mainline; real 120Hz needs ~523MHz, which downstream evidently
+  achieves via additional clock-tree divider entries mainline doesn't
+  have yet - a valid, separate future improvement, not required for a
+  working picture).
+- Horizontal: front=168, pulse=4, back=60 (doubled from the panel's
+  real per-link 84/2/30, so `dsi_timing_setup()`'s bonded-DSI halving
+  recovers the correct per-link timing - Round 56, the actual root
+  cause of the entire FIFO overflow saga).
+- Vertical: front=26, pulse=1, back=7 (the panel's real, original,
+  unpadded downstream values - Rounds 49/51's padding was chasing a
+  false lead, reverted in Round 56).
+- Backlight: DCS-controlled, initial brightness baked into the
+  prepare()-time init sequence rather than the automatic post-enable
+  callback (Round 54, a real documented mainline hardware class: some
+  DSI controllers can't reliably take commands once video streaming has
+  started).
+- PHY trim: all four board-specific analog calibration registers
+  (`vreg_ctrl_0`, `str_swi_cal_sel_ctrl`, `rescode_top/bot/mid_ctrl`)
+  ported from downstream (Rounds 41, 55).
+- Plus every other independently-real fix along the way: PLL refgen,
+  DRM_MSM/PHY_QCOM_USB_SNPS_FEMTO_V2 module-vs-builtin, burst-mode
+  traffic flag, GPI DMA, QUP wrapper devicetree enable, the ISL98608
+  bias IC driver, and the `lcd-buck` regulator's `regulator-always-on`
+  fix (Round 53) - none of these were wasted effort; the device
+  wouldn't boot to a picture without all of them either.
+
+**What made the difference in the end**: exhausting source-level
+comparison against downstream and against elish (the one other
+mainline dual-DSI C-PHY device) had reached genuine diminishing
+returns by Round 55. What actually cracked it was getting a live shell
+on the booted device (a USB CDC-ACM serial console from this project's
+own busybox initramfs) for real-time experiments instead of another
+guess-rebuild-reflash-wait cycle, and then - critically - pulling a
+real, live, working hardware register readback directly off stock
+Android's own downstream driver while it was genuinely streaming real
+video, rather than continuing to reason from source code alone. The
+bug was proven, not theorized: doubling the horizontal porches
+reproduces the real hardware's exact register values, bit-for-bit.
+
+**Follow-up items, not blocking this result:**
+- Real 120Hz would need a new, correctly-computed frequency-table entry
+  in `disp_cc_mdss_mdp_clk_src` (`drivers/clk/qcom/dispcc-sm8250.c`),
+  requiring the actual `disp_cc_pll0` VCO rate and a valid HID divider -
+  deferred, real but non-blocking.
+- Temporary diagnostic `pr_err()`s scattered through this session
+  (`dsi_host.c`, `dsi_phy_7nm.c`, `dpu_core_perf.c`,
+  `dpu_encoder_phys_vid.c`, `isl98608-gts7l.c`,
+  `panel-novatek-nt36523.c`) are safe to strip now that the real bug is
+  found and fixed, but not required for correctness - housekeeping for
+  a future round.
+- Touch input, backlight brightness control wired to a real
+  consumer-facing path, and DSI reads (BTA) still returning
+  `Invalid response cmd`/timeouts (worth re-checking now that the real
+  root cause is fixed - it may have been a downstream symptom of the
+  same horizontal timing bug) remain open for future phases.
