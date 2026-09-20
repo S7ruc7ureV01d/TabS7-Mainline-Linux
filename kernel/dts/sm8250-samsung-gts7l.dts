@@ -793,6 +793,14 @@
 	qcom,phy-str-swi-cal-sel-ctrl = <0x04>;
 	qcom,phy-rescode-offset-top-ctrl = <0x1f>;
 	qcom,phy-rescode-offset-bot-ctrl = <0x1f>;
+	/*
+	 * Round 55 (docs/kernel-boot-debugging.md): downstream's dtsi also
+	 * declares `samsung,phy_offset_mid_ctrl = <0x1F>` alongside top/bot
+	 * - missed in Round 41's original transcription. Mainline's
+	 * dsi_7nm_phy_enable() never wrote this register at all before this
+	 * round.
+	 */
+	qcom,phy-rescode-offset-mid-ctrl = <0x1f>;
 };
 
 &mdss_dsi1 {
@@ -822,6 +830,7 @@
 	qcom,phy-str-swi-cal-sel-ctrl = <0x04>;
 	qcom,phy-rescode-offset-top-ctrl = <0x1f>;
 	qcom,phy-rescode-offset-bot-ctrl = <0x1f>;
+	qcom,phy-rescode-offset-mid-ctrl = <0x1f>;
 };
 
 /*
@@ -831,6 +840,27 @@
  * `regulator-boot-on` there too, so no explicit driver-side enable call
  * is needed for either; the regulator core turns them on during boot
  * before any consumer probes.
+ *
+ * Round 53 (docs/kernel-boot-debugging.md): confirmed live on real
+ * hardware via `/sys/kernel/debug/regulator/lcd-buck` (state=disabled,
+ * num_users=0) and `/sys/kernel/debug/gpio` (gpio93 reads "out low") -
+ * "lcd-buck" has ZERO real consumers anywhere in this devicetree (no
+ * `-supply` property references it, and downstream's own
+ * isl98608_hw_i2c.c never calls regulator_get()/enable() on it either -
+ * confirmed by grepping that source directly). `regulator-boot-on` only
+ * marks it as already-on for the regulator core's *initial* accounting;
+ * it does not stop mainline's own "disable unused regulators" late
+ * cleanup pass from switching it back off once boot settles, since
+ * nothing ever takes a real, counted reference on it. `lcd-vdd`
+ * (fixed_reg_lcd_1p8) doesn't have this problem - the panel's own
+ * `vddio-supply` reference keeps a genuine consumer holding it open for
+ * as long as the panel is prepared, confirmed still "out high" on real
+ * hardware well after boot. `lcd-buck` needs `regulator-always-on`
+ * instead - downstream's own overlay has no driver-side enable call for
+ * this rail either, so this is describing the same always-on hardware
+ * intent in the one mainline devicetree idiom built for exactly this
+ * case (a rail with no software-managed consumer that must never be
+ * turned off), not a workaround.
  */
 / {
 	fixed_reg_lcd_1p8: regulator-lcd-vdd {
@@ -847,6 +877,7 @@
 		gpio = <&tlmm 93 GPIO_ACTIVE_HIGH>;
 		enable-active-high;
 		regulator-boot-on;
+		regulator-always-on;
 	};
 };
 
