@@ -45,84 +45,19 @@ static const struct device gts7l_devices[] = {
 };
 
 /*
- * Round 25 debug marker readback (docs/kernel-boot-debugging.md) - this
- * device's TWRP kernel has neither /dev/mem nor /proc/kcore, so there's no
- * way to inspect arbitrary physical RAM from userspace after a hang. Since
- * DRAM survives the warm PS_HOLD reset used to get back into TWRP (the
- * same principle pstore/ramoops already relies on), have uniLoader itself
- * read the fixed marker address and print it on its own splash screen -
- * runs on *every* boot, right after simplefb comes up (late_init, so a
- * console is already registered), before jumping to the kernel again.
- * On the first flash this prints whatever garbage was already there; the
- * meaningful read is whatever shows after a hang+reboot cycle, reflecting
- * what the *previous* boot's kernel (kernel/arch/arm64/kernel/head.S,
- * see kernel/patches/0001-round25-early-dram-debug-marker.patch) left
- * behind - `deadbeef cafec0de` means the kernel's very first instructions
- * genuinely executed; anything else means the jump never got that far.
- * Printed as two 32-bit halves since nanoprintf's large-format (%llx)
- * specifiers are disabled in this build (see lib/console/console.c).
+ * Early-boot memory-address debug markers (Rounds 25/27/29b,
+ * docs/kernel-boot-debugging.md) served their purpose diagnosing the
+ * uniLoader-to-kernel handoff back when the display driver was still
+ * broken - no longer needed now that Phase 2 display bring-up is
+ * working. Left with just a static watermark on the splash screen.
  */
-static void print_marker(const char *label, unsigned long long addr)
-{
-	volatile unsigned long long *p = (volatile unsigned long long *)addr;
-	unsigned long long val = *p;
-	unsigned int hi = (unsigned int)(val >> 32);
-	unsigned int lo = (unsigned int)(val & 0xffffffffU);
-
-	printk(KERN_INFO, "%s:\n", label);
-	printk(KERN_INFO, "%x %x\n", hi, lo);
-}
-
 static int gts7l_late_init(void)
 {
-	/*
-	 * Round 29b (docs/kernel-boot-debugging.md) - the sec_log early
-	 * console (init/main.c) never wrote anything either, same as
-	 * Round 25/26's head.S marker at the kernel's literal first
-	 * instruction. Two independent write points, at two different
-	 * stages, both silent - pointing at the jump from uniLoader to the
-	 * kernel itself, not anything kernel-side. uniLoader is
-	 * position-independent and could be running from a different
-	 * physical address than TEXT_BASE (0x90600000) assumes; if ABL
-	 * actually loads it somewhere overlapping CONFIG_PAYLOAD_ENTRY
-	 * (0x91000000) or CONFIG_RAMDISK_ENTRY (0x94000000), the memcpy()
-	 * in arch_load_kernel() - which runs while uniLoader's own code is
-	 * still executing - could be overwriting uniLoader's own live
-	 * code/stack, corrupting everything from that point on, including
-	 * the jump itself. Print uniLoader's own real runtime execution
-	 * address (via a PC-relative `adr`, not a plain C symbol reference,
-	 * since this build isn't real ELF PIE - a plain `&symbol` would
-	 * just embed the link-time constant) to check directly, cheaply,
-	 * before assuming and fixing blind.
-	 */
-	{
-		unsigned long pc;
-		unsigned int hi, lo;
-
-		asm volatile("adr %0, ." : "=r"(pc));
-		hi = (unsigned int)((unsigned long long)pc >> 32);
-		lo = (unsigned int)((unsigned long long)pc & 0xffffffffU);
-		printk(KERN_INFO, "uniLoader runtime PC:\n");
-		printk(KERN_INFO, "%x %x\n", hi, lo);
-	}
-	/*
-	 * Round 27: moved both markers into unused padding inside the real
-	 * ramoops@9fa00000 carveout - proven, by direct repeated evidence
-	 * throughout this project, to survive the owner's hard-reboot
-	 * recovery combo, unlike Round 25/26's guessed "free" address.
-	 *
-	 * Kernel-written marker (arch/arm64/kernel/head.S primary_entry) -
-	 * deadbeef cafec0de means the kernel's first instructions ran.
-	 */
-	print_marker("kernel marker @ 0x9fac4000", 0x9fac4000ULL);
-	/*
-	 * uniLoader-written canary (arch/aarch64/load-kernel.c,
-	 * arch_load_kernel(), written right before the jump on the
-	 * *previous* boot) - c001babe b00b1e55 here but not on the kernel
-	 * marker proves this memory region is genuinely accessible/writable
-	 * DRAM and isolates the problem to the jump/kernel-entry itself.
-	 */
-	print_marker("uniLoader canary @ 0x9fac5000", 0x9fac5000ULL);
+	printk(KERN_INFO, "\n");
+	printk(KERN_INFO, "\n");
+	printk(KERN_INFO, "make.believe\n");
+	printk(KERN_INFO, "\n");
+	printk(KERN_INFO, "\n");
 	return 0;
 }
 

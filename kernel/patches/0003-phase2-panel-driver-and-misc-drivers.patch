@@ -1,44 +1,60 @@
-Phase 2 panel bring-up (2026-09-19, docs/kernel-boot-debugging.md
-Rounds 38-46, docs/phase2-panel-scoping.md): a new
-"samsung,gts7l-ppa957db1-nt36523" entry in mainline's existing
-drivers/gpu/drm/panel/panel-novatek-nt36523.c (not a new driver from
-scratch - this file already supports the same NT36523 chip family on
-Xiaomi's elish, a directly comparable SM8250 tablet); a small new
-drivers/misc/isl98608-gts7l.c for this device's separate LCD bias IC
-(single fixed register program at probe, matching the downstream
-driver's own behavior exactly); a board-specific PHY analog trim
-override added to drivers/gpu/drm/msm/dsi/phy/dsi_phy_7nm.c (mirroring
-dsi_phy_10nm.c's own existing parse_dt_properties/tuning_cfg precedent),
-since mainline's generic hardcoded trim constants for this SoC
-generation's C-PHY path don't match Samsung's own downstream
-calibration for this exact panel/PHY pairing (confirmed working on real
-hardware - the real PLL locks 5x during the actual modeset with this
-fix, no failures); MIPI_DSI_MODE_VIDEO_BURST on gts7l_desc's mode_flags,
-matching downstream's own qcom,mdss-dsi-traffic-mode = "burst_mode" for
-this exact panel; and (Round 46) has_dcs_backlight = false, since the
-automatic backlight_device registration this flag enables triggers an
-unsynchronized dsi->mode_flags read-modify-write that races the DRM
-commit path and corrupts MIPI_DSI_MODE_VIDEO - a documented mainline
-bug class, confirmed on real hardware to be the direct, repeatable
-cause of "dsi_err_worker: status=4" (DSI_ERR_STATE_FIFO). Also
-registers this project's own DTB in arch/arm64/boot/dts/qcom/Makefile
-(should have been saved earlier, alongside 0001/0002 - the DTS itself
-lives at kernel/dts/sm8250-samsung-gts7l.dts in this repo, synced into
-a working kernel tree before building; this patch covers everything
-else that had to change in the wider kernel source tree).
+Phase 2 display bring-up, final working state (2026-09-19,
+docs/kernel-boot-debugging.md Rounds 38-56): a "samsung,gts7l-ppa957db1-
+nt36523" entry in mainline's existing drivers/gpu/drm/panel/
+panel-novatek-nt36523.c (not a new driver from scratch - this file
+already supports the same NT36523 chip family on Xiaomi's elish, a
+directly comparable SM8250 tablet), with a mode timing that's been
+proven bit-for-bit correct against a real hardware register readback
+pulled live off stock Android's own downstream driver while it was
+genuinely streaming real video (Round 56) - the horizontal porches are
+deliberately doubled (168/4/60, not the panel's real per-link 84/2/30)
+because dsi_timing_setup()'s bonded-DSI code (drivers/gpu/drm/msm/dsi/
+dsi_host.c, unmodified/stock) halves them back down for each physical
+DSI controller, and this was the actual root cause of the
+VIDEO_MDP_FIFO_OVERFLOW that blocked this project for sixteen rounds.
 
-Also includes temporary diagnostic pr_err()s (all tagged "gts7l
-temporary diagnostic" inline) in drivers/gpu/drm/msm/dsi/dsi_host.c
-(raw REG_DSI_FIFO_STATUS value) and dsi_phy_7nm.c (confirming
-dsi_7nm_phy_enable/dsi_pll_7nm_vco_prepare are reached and what trim
-values land) and isl98608-gts7l.c (probe success) - left in as of this
-patch since they're part of what's actually been tested on real
-hardware; safe to strip once display bring-up is fully confirmed
-working, not required for correctness.
+Also: a small drivers/misc/isl98608-gts7l.c for this device's separate
+LCD bias IC (two fixed register writes at probe, matching the
+downstream driver's own behavior exactly); a board-specific PHY analog
+trim override added to drivers/gpu/drm/msm/dsi/phy/dsi_phy_7nm.c
+(mirroring dsi_phy_10nm.c's own existing parse_dt_properties/
+tuning_cfg precedent) covering all three of downstream's declared
+rescode-offset registers (top/bot/mid - "mid" is C-PHY-specific, never
+written by mainline's generic path at all) plus vreg_ctrl_0/
+str_swi_cal_sel_ctrl, since mainline's generic hardcoded trim constants
+for this SoC generation's C-PHY path don't match Samsung's own
+downstream calibration for this exact panel/PHY pairing; and
+MIPI_DSI_MODE_VIDEO_BURST on gts7l_desc's mode_flags, matching
+downstream's own qcom,mdss-dsi-traffic-mode = "burst_mode" for this
+exact panel. has_dcs_backlight is back to true (Round 46 disabled it on
+a since-retracted theory - Round 54 restored it, with the initial
+brightness baked into the panel's own prepare()-time init sequence
+rather than the automatic post-enable callback, since some DSI
+controllers can't reliably take commands once video streaming has
+started - a real, documented mainline hardware class, not a novel
+theory). Native rate is 96Hz, not this panel's 120Hz default -
+dispcc-sm8250.c's MDP core clock frequency table tops out at 460MHz in
+mainline, and real 120Hz needs ~523MHz; 96Hz is a first-class
+downstream-supported DFPS rate for this panel, not an invented
+workaround.
+
+Also registers this project's own DTB in arch/arm64/boot/dts/qcom/
+Makefile (the DTS itself lives at kernel/dts/sm8250-samsung-gts7l.dts
+in this repo, synced into a working kernel tree before building; this
+patch covers everything else that had to change in the wider kernel
+source tree).
+
+All temporary diagnostic pr_err()s added during Rounds 43-56 (in
+dsi_host.c, dpu_core_perf.c, dpu_encoder_phys_vid.c, dsi_phy_7nm.c,
+isl98608-gts7l.c, panel-novatek-nt36523.c, and the arch/arm64/kernel/
+head.S early-boot DRAM marker previously saved as its own patch,
+0001-round25-early-dram-debug-marker.patch, now deleted) have been
+stripped now that the real root cause is found and fixed - dsi_host.c,
+dpu_core_perf.c, dpu_encoder_phys_vid.c, and head.S are consequently
+back to pristine mainline and no longer need a diff section at all.
 
 Applies on top of Linux 7.2 (work/linux's checked-out commit
-8d3ae59288f1e7d58d76558a6ee96d533bc5019f) with 0001/0002 already
-applied.
+8d3ae59288f1e7d58d76558a6ee96d533bc5019f) with 0002 already applied.
 
 diff --git a/arch/arm64/boot/dts/qcom/Makefile b/arch/arm64/boot/dts/qcom/Makefile
 index 6f33c4e2f..0eeac63d7 100644
@@ -52,38 +68,11 @@ index 6f33c4e2f..0eeac63d7 100644
  dtb-$(CONFIG_ARCH_QCOM)	+= sm8250-sony-xperia-edo-pdx203.dtb
  dtb-$(CONFIG_ARCH_QCOM)	+= sm8250-sony-xperia-edo-pdx206.dtb
  dtb-$(CONFIG_ARCH_QCOM)	+= sm8250-xiaomi-elish-boe.dtb
-diff --git a/drivers/gpu/drm/msm/dsi/dsi_host.c b/drivers/gpu/drm/msm/dsi/dsi_host.c
-index 982abaaac..a3a93ddf2 100644
---- a/drivers/gpu/drm/msm/dsi/dsi_host.c
-+++ b/drivers/gpu/drm/msm/dsi/dsi_host.c
-@@ -1629,6 +1629,10 @@ static void dsi_fifo_status(struct msm_dsi_host *msm_host)
- 
- 	/* fifo underflow, overflow */
- 	if (status) {
-+		/* gts7l temporary diagnostic (docs/kernel-boot-debugging.md) -
-+		 * the abstracted DSI_ERR_STATE_FIFO bit alone doesn't say
-+		 * which of REG_DSI_FIFO_STATUS's ~15 bits actually fired. */
-+		pr_err("gts7l: REG_DSI_FIFO_STATUS raw=0x%08x\n", status);
- 		dsi_write(msm_host, REG_DSI_FIFO_STATUS, status);
- 		msm_host->err_work_state |= DSI_ERR_STATE_FIFO;
- 		if (status & DSI_FIFO_STATUS_CMD_MDP_FIFO_UNDERFLOW)
 diff --git a/drivers/gpu/drm/msm/dsi/phy/dsi_phy_7nm.c b/drivers/gpu/drm/msm/dsi/phy/dsi_phy_7nm.c
-index 984a66085..e440deb35 100644
+index 984a66085..bf5c2fe18 100644
 --- a/drivers/gpu/drm/msm/dsi/phy/dsi_phy_7nm.c
 +++ b/drivers/gpu/drm/msm/dsi/phy/dsi_phy_7nm.c
-@@ -493,6 +493,11 @@ static int dsi_pll_7nm_vco_prepare(struct clk_hw *hw)
- 	struct dsi_pll_7nm *pll_7nm = to_pll_7nm(hw);
- 	int rc;
- 
-+	/* gts7l temporary diagnostic - count/trace every real prepare
-+	 * attempt, not just the ones that fail loudly. */
-+	pr_err("gts7l: dsi_pll_7nm_vco_prepare called, phy->id=%d, vco_current_rate=%llu\n",
-+	       pll_7nm->phy->id, pll_7nm->vco_current_rate);
-+
- 	dsi_pll_enable_pll_bias(pll_7nm);
- 	if (pll_7nm->slave)
- 		dsi_pll_enable_pll_bias(pll_7nm->slave);
-@@ -953,6 +958,104 @@ static void dsi_phy_hw_v4_0_lane_settings(struct msm_dsi_phy *phy)
+@@ -953,6 +953,104 @@ static void dsi_phy_hw_v4_0_lane_settings(struct msm_dsi_phy *phy)
  	}
  }
  
@@ -188,25 +177,15 @@ index 984a66085..e440deb35 100644
  static int dsi_7nm_phy_enable(struct msm_dsi_phy *phy,
  			      struct msm_dsi_phy_clk_request *clk_req)
  {
-@@ -967,8 +1070,17 @@ static int dsi_7nm_phy_enable(struct msm_dsi_phy *phy,
+@@ -967,6 +1065,7 @@ static int dsi_7nm_phy_enable(struct msm_dsi_phy *phy,
  	u32 glbl_pemph_ctrl_0;
  	u32 glbl_str_swi_cal_sel_ctrl, glbl_hstx_str_ctrl_0;
  	u32 glbl_rescode_top_ctrl, glbl_rescode_bot_ctrl;
 +	u32 glbl_rescode_mid_ctrl = 0x00;
  	u32 data;
  
-+	/* gts7l temporary diagnostic (docs/kernel-boot-debugging.md) -
-+	 * confirm whether this function (where the board's trim override
-+	 * lives) is actually reached during the real modeset, and whether
-+	 * the tuning_cfg override is actually applied, before guessing at
-+	 * more trim values. */
-+	pr_err("gts7l: dsi_7nm_phy_enable called, phy->id=%d, cphy_mode=%d, bitclk_rate=%lu, tuning_cfg=%p\n",
-+	       phy->id, phy->cphy_mode, clk_req->bitclk_rate, phy->tuning_cfg);
-+
  	DBG("");
- 
- 	if (phy->cphy_mode)
-@@ -1084,6 +1196,30 @@ static int dsi_7nm_phy_enable(struct msm_dsi_phy *phy,
+@@ -1084,6 +1183,24 @@ static int dsi_7nm_phy_enable(struct msm_dsi_phy *phy,
  		glbl_rescode_bot_ctrl = 0x3c;
  	}
  
@@ -228,16 +207,10 @@ index 984a66085..e440deb35 100644
 +			glbl_rescode_mid_ctrl = tuning_cfg->rescode_mid_ctrl;
 +	}
 +
-+	/* gts7l temporary diagnostic - final trim values about to be
-+	 * written to hardware. */
-+	pr_err("gts7l: phy%d trim: vreg_ctrl_0=0x%x str_swi_cal_sel_ctrl=0x%x rescode_top=0x%x rescode_bot=0x%x rescode_mid=0x%x\n",
-+	       phy->id, vreg_ctrl_0, glbl_str_swi_cal_sel_ctrl,
-+	       glbl_rescode_top_ctrl, glbl_rescode_bot_ctrl, glbl_rescode_mid_ctrl);
-+
  	/* de-assert digital and pll power down */
  	data = DSI_7nm_PHY_CMN_CTRL_0_DIGTOP_PWRDN_B |
  	       DSI_7nm_PHY_CMN_CTRL_0_PLL_SHUTDOWNB;
-@@ -1125,6 +1261,8 @@ static int dsi_7nm_phy_enable(struct msm_dsi_phy *phy,
+@@ -1125,6 +1242,8 @@ static int dsi_7nm_phy_enable(struct msm_dsi_phy *phy,
  	       base + REG_DSI_7nm_PHY_CMN_GLBL_RESCODE_OFFSET_TOP_CTRL);
  	writel(glbl_rescode_bot_ctrl,
  	       base + REG_DSI_7nm_PHY_CMN_GLBL_RESCODE_OFFSET_BOT_CTRL);
@@ -246,7 +219,7 @@ index 984a66085..e440deb35 100644
  	writel(0x55, base + REG_DSI_7nm_PHY_CMN_GLBL_LPTX_STR_CTRL);
  
  	/* Remove power down from all blocks */
-@@ -1271,6 +1409,7 @@ const struct msm_dsi_phy_cfg dsi_phy_7nm_cfgs = {
+@@ -1271,6 +1390,7 @@ const struct msm_dsi_phy_cfg dsi_phy_7nm_cfgs = {
  		.save_pll_state = dsi_7nm_pll_save_state,
  		.restore_pll_state = dsi_7nm_pll_restore_state,
  		.set_continuous_clock = dsi_7nm_set_continuous_clock,
@@ -255,7 +228,7 @@ index 984a66085..e440deb35 100644
  	.min_pll_rate = 600000000UL,
  #ifdef CONFIG_64BIT
 diff --git a/drivers/gpu/drm/panel/panel-novatek-nt36523.c b/drivers/gpu/drm/panel/panel-novatek-nt36523.c
-index 226d91daf..525c3f1e2 100644
+index 226d91daf..c1ebf3aa5 100644
 --- a/drivers/gpu/drm/panel/panel-novatek-nt36523.c
 +++ b/drivers/gpu/drm/panel/panel-novatek-nt36523.c
 @@ -57,6 +57,416 @@ static inline struct panel_info *to_panel_info(struct drm_panel *panel)
@@ -874,41 +847,7 @@ index 226d91daf..525c3f1e2 100644
  static const struct drm_display_mode elish_boe_modes[] = {
  	{
  		.clock = (1600 + 60 + 8 + 60) * (2560 + 26 + 4 + 168) * 120 / 1000,
-@@ -1012,6 +1614,12 @@ static int nt36523_prepare(struct drm_panel *panel)
- 		return ret;
- 	}
- 
-+	/* gts7l temporary diagnostic - exact moment the panel's own DCS
-+	 * init sequence finishes successfully, to correlate against when
-+	 * DPU actually starts real HS video streaming and against the
-+	 * FIFO overflow that follows shortly after. */
-+	pr_err("gts7l: nt36523_prepare init_sequence done, ret=%d\n", ret);
-+
- 	return 0;
- }
- 
-@@ -1107,9 +1715,20 @@ static int nt36523_bl_update_status(struct backlight_device *bl)
- 	u16 brightness = backlight_get_brightness(bl);
- 	int ret;
- 
-+	/* gts7l temporary diagnostic (docs/kernel-boot-debugging.md) -
-+	 * every test so far has consistently reported "backlight off,
-+	 * black screen" across completely different DSI/PLL bugs -
-+	 * confirm when this actually fires (probe-time vs. later, e.g.
-+	 * an fbcon blank/unblank notification right as fb0 binds) and
-+	 * whether the DCS write itself succeeds. */
-+	pr_err("gts7l: nt36523_bl_update_status called, brightness=%u\n", brightness);
-+
- 	dsi->mode_flags &= ~MIPI_DSI_MODE_LPM;
- 
- 	ret = mipi_dsi_dcs_set_display_brightness_large(dsi, brightness);
-+
-+	pr_err("gts7l: mipi_dsi_dcs_set_display_brightness_large returned %d\n", ret);
-+
- 	if (ret < 0)
- 		return ret;
- 
-@@ -1253,6 +1872,10 @@ static const struct of_device_id nt36523_of_match[] = {
+@@ -1253,6 +1855,10 @@ static const struct of_device_id nt36523_of_match[] = {
  		.compatible = "xiaomi,elish-csot-nt36523",
  		.data = &elish_csot_desc,
  	},
@@ -919,42 +858,6 @@ index 226d91daf..525c3f1e2 100644
  	{},
  };
  MODULE_DEVICE_TABLE(of, nt36523_of_match);
-diff --git a/drivers/gpu/drm/msm/disp/dpu1/dpu_core_perf.c b/drivers/gpu/drm/msm/disp/dpu1/dpu_core_perf.c
-index 13cc65806..2a4f36f57 100644
---- a/drivers/gpu/drm/msm/disp/dpu1/dpu_core_perf.c
-+++ b/drivers/gpu/drm/msm/disp/dpu1/dpu_core_perf.c
-@@ -394,6 +394,14 @@ int dpu_core_perf_crtc_update(struct drm_crtc *crtc,
- 
- 		trace_dpu_core_perf_update_clk(kms->dev, !crtc->enabled, clk_rate);
- 
-+		/* gts7l temporary diagnostic - real requested vs. clamped core
-+		 * clock and bandwidth vote, to settle (not guess) whether the
-+		 * MDP core clock/bandwidth is actually under-provisioned for
-+		 * this panel's mode. */
-+		pr_err("gts7l: perf update requested_clk=%llu max_clk=%llu bw_ctl=%llu max_per_pipe_ib=%u\n",
-+		       clk_rate, kms->perf.max_core_clk_rate,
-+		       new->bw_ctl, new->max_per_pipe_ib);
-+
- 		clk_rate = min(clk_rate, kms->perf.max_core_clk_rate);
- 		ret = dev_pm_opp_set_rate(&kms->pdev->dev, clk_rate);
- 		if (ret) {
-diff --git a/drivers/gpu/drm/msm/disp/dpu1/dpu_encoder_phys_vid.c b/drivers/gpu/drm/msm/disp/dpu1/dpu_encoder_phys_vid.c
-index ba810f26e..197dd9477 100644
---- a/drivers/gpu/drm/msm/disp/dpu1/dpu_encoder_phys_vid.c
-+++ b/drivers/gpu/drm/msm/disp/dpu1/dpu_encoder_phys_vid.c
-@@ -661,6 +661,12 @@ static void dpu_encoder_phys_vid_handle_post_kickoff(
- 	if (phys_enc->enable_state == DPU_ENC_ENABLING) {
- 		trace_dpu_enc_phys_vid_post_kickoff(DRMID(phys_enc->parent),
- 				    phys_enc->hw_intf->idx - INTF_0);
-+		/* gts7l temporary diagnostic - exact moment DPU actually
-+		 * starts pushing real pixel data onto this INTF, to pin down
-+		 * the real elapsed time vs. the panel init sequence finishing
-+		 * and vs. the FIFO overflow that follows shortly after. */
-+		pr_err("gts7l: dpu_encoder_phys_vid enable_timing(1), intf=%d\n",
-+		       phys_enc->hw_intf->idx - INTF_0);
- 		spin_lock_irqsave(phys_enc->enc_spinlock, lock_flags);
- 		phys_enc->hw_intf->ops.enable_timing(phys_enc->hw_intf, 1);
- 		spin_unlock_irqrestore(phys_enc->enc_spinlock, lock_flags);
 diff --git a/drivers/misc/Kconfig b/drivers/misc/Kconfig
 index 390256ed9..a882f1fc2 100644
 --- a/drivers/misc/Kconfig
@@ -988,10 +891,10 @@ index fed47c767..5b995a9a9 100644
 +obj-$(CONFIG_ISL98608_GTS7L)	+= isl98608-gts7l.o
 diff --git a/drivers/misc/isl98608-gts7l.c b/drivers/misc/isl98608-gts7l.c
 new file mode 100644
-index 000000000..50072e757
+index 000000000..7fd034582
 --- /dev/null
 +++ b/drivers/misc/isl98608-gts7l.c
-@@ -0,0 +1,80 @@
+@@ -0,0 +1,71 @@
 +// SPDX-License-Identifier: GPL-2.0-only
 +/*
 + * ISL98608 LCD bias/boost IC driver, minimal - Samsung Galaxy Tab S7 LTE
@@ -1028,13 +931,6 @@ index 000000000..50072e757
 +{
 +	int ret;
 +
-+	/* gts7l temporary diagnostic (docs/kernel-boot-debugging.md) - every
-+	 * test so far has consistently reported "backlight off, black
-+	 * screen" across completely different underlying DSI/PLL bugs -
-+	 * never actually confirmed this driver probes/writes at all,
-+	 * since it previously only logged on failure. */
-+	pr_err("gts7l: isl98608_gts7l_probe called, i2c addr=0x%02x\n", client->addr);
-+
 +	ret = i2c_smbus_write_byte_data(client, ISL98608_REG_VP, ISL98608_VOLTAGE_5V5);
 +	if (ret)
 +		return dev_err_probe(&client->dev, ret, "failed to program VP bias\n");
@@ -1042,8 +938,6 @@ index 000000000..50072e757
 +	ret = i2c_smbus_write_byte_data(client, ISL98608_REG_VN, ISL98608_VOLTAGE_5V5);
 +	if (ret)
 +		return dev_err_probe(&client->dev, ret, "failed to program VN bias\n");
-+
-+	pr_err("gts7l: isl98608_gts7l_probe: both bias registers written successfully\n");
 +
 +	return 0;
 +}

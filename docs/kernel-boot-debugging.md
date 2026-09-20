@@ -4842,3 +4842,35 @@ reproduces the real hardware's exact register values, bit-for-bit.
   `Invalid response cmd`/timeouts (worth re-checking now that the real
   root cause is fixed - it may have been a downstream symptom of the
   same horizontal timing bug) remain open for future phases.
+
+## Post-fix cleanup (2026-09-19, same day): stripped temporary
+diagnostics now that the real bug is found
+
+Removed every `pr_err("gts7l: ...")` diagnostic added during Rounds
+43-56 (`dsi_host.c`, `dpu_core_perf.c`, `dpu_encoder_phys_vid.c`,
+`dsi_phy_7nm.c`, `isl98608-gts7l.c`, `panel-novatek-nt36523.c`) -
+kernel rebuilt clean with all of them gone. `dsi_host.c`,
+`dpu_core_perf.c`, and `dpu_encoder_phys_vid.c` had no other real
+changes, so they're now back to byte-identical pristine mainline.
+
+Also removed the Round 25/27 early-boot DRAM debug marker
+(`arch/arm64/kernel/head.S`'s `primary_entry()` write of
+`deadbeef cafec0de` to a fixed physical address) - obsolete now that
+the uniLoader-to-kernel handoff has been proven working for many
+rounds. Deleted `kernel/patches/0001-round25-early-dram-debug-marker.patch`
+entirely, since it existed only to reproduce this now-removed code.
+
+Replaced uniLoader's own matching debug-marker readback
+(`kernel/uniloader/board/samsung/board-gts7l.c`'s `print_marker()` and
+the runtime-PC print, both memory-address dumps from the same
+now-obsolete investigation) with a plain static watermark on the
+splash screen - two blank lines, `make.believe`, two blank lines - then
+boot continues exactly as before.
+
+Regenerated `kernel/patches/0003-phase2-panel-driver-and-misc-drivers.patch`
+from scratch against the cleaned-up tree and verified it byte-for-byte:
+applied `0002`+`0003` to a fresh, pristine Linux 7.2 worktree and
+diffed every affected file against the real `work/linux` tree - all
+identical. The patch chain is now just `0002` (sec_log early console)
++ `0003` (the real Phase 2 display work), both reduced to exactly what
+this project still wants to keep.
