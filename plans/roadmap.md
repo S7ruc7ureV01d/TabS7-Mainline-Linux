@@ -1186,15 +1186,22 @@ Progress log:
 
 ## Phase 3 — Core platform peripherals
 
-**Status:** in progress - **Wi-Fi working on real hardware** (2026-09-20,
-`docs/phase3-wifi-bt-scoping.md`, `docs/kernel-boot-debugging.md`).
-QCA6390 enumerates over PCIe, loads this exact unit's own real
+**Status:** in progress - **Wi-Fi and Bluetooth both working on real
+hardware** (2026-09-20, `docs/phase3-wifi-bt-scoping.md`,
+`docs/phase3-bluetooth-scoping.md`, `docs/kernel-boot-debugging.md`).
+QCA6390 Wi-Fi enumerates over PCIe, loads this exact unit's own real
 firmware (pulled from its `vendor` partition, same precedent as the
-Adreno zap-shader), and `wlp1s0` scans and sees real access points -
-confirmed across a genuine cold reboot with zero manual intervention
-via a `wlan-pci-rebind.service` that works around a real boot-time PCI
-probe race. Not yet connected to an actual network or visible in
-Plasma's own UI - see below.
+Adreno zap-shader), `wlp1s0` scans real access points, and the Wi-Fi
+icon shows in Plasma (`plasma-nm` installed). Bluetooth - a completely
+separate UART transport on the same chip - loads real firmware too
+(this time the generic `linux-firmware.git` files worked directly), a
+real BLE mouse pairs and its cursor/clicks work (`CONFIG_UHID` was the
+key missing piece), and `bluedevil` is installed. Both confirmed across
+genuine cold reboots via `wlan-pci-rebind.service`/`bt-uart-rebind.service`,
+which work around the same class of real boot-time firmware-request
+race (fires before `switch_root` mounts the real rootfs). Not yet
+connected to an actual Wi-Fi network (only `iw scan`/real AP visibility
+tested) or tested for audio/A2DP over Bluetooth.
 
 Goal: the tablet is usable as a tablet — power, connectivity, audio, sensors.
 
@@ -1210,9 +1217,12 @@ Exit criteria:
       userspace (NetworkManager/`iwd` + Plasma's network applet, actual
       association/DHCP) and Bluetooth (a separate UART transport,
       deferred - see the scoping doc's corrections section).
-- [ ] Bluetooth working — same QCA6390 combo chip as Wi-Fi, but a
-      genuinely separate UART transport from WLAN's PCIe link - not
-      researched yet, deferred per `docs/phase3-wifi-bt-scoping.md`.
+- [x] Bluetooth working — same QCA6390 combo chip as Wi-Fi, over a
+      genuinely separate UART transport. **Kernel-level bring-up and a
+      real accessory both confirmed** (a BLE mouse pairs and its
+      cursor/clicks work) - remaining work is audio/A2DP (not tested)
+      and the Book Cover Keyboard's own Bluetooth/pogo-pin behavior, if
+      any.
 - [ ] Speakers and microphone(s) working.
 - [ ] Volume/power buttons working.
 - [ ] Motion sensors (accelerometer/gyro, rotation) working.
@@ -1240,6 +1250,31 @@ Progress log:
   systemd service, confirmed durable across a genuine cold reboot.
   Next: get it showing up and connectable from Plasma's own UI
   (NetworkManager/applet, not just kernel-level `iw scan`).
+- 2026-09-20 (later): Plasma Wi-Fi icon fixed (`plasma-nm` was never
+  installed, even though `NetworkManager` itself was already running
+  and correctly saw `wlp1s0`) - confirmed by the owner on the physical
+  screen. Then scoped and implemented Bluetooth the same day - full
+  story in `docs/phase3-bluetooth-scoping.md`'s "Status: Bluetooth
+  working on real hardware" section and
+  `docs/kernel-boot-debugging.md`. Highlights: found the real UART
+  instance via a real, distinctive tell (`qcom,wakeup-byte = <0xFD>`,
+  matching mainline's own QCA wake byte) rather than the more
+  obviously-named but unrelated `qupv3_se12_2uart`; hit and fixed a
+  missing `aliases { serial0 = &uart6; }` (never needed before this
+  project's first UART); caught a real process mistake mid-stream (a
+  DTB rebuild that never got copied back to the tracked file before
+  packaging, so one flash round silently retested the stale pre-fix
+  devicetree - caught by checking the live device tree directly rather
+  than trusting the build log); root-caused `hci0` sitting in the
+  kernel's *unconfigured* controller state (no unique burned-in BD
+  address on this chip) via a raw mgmt-socket query, fixed with a fixed
+  locally-administered `local-bd-address`; and, once a real BLE mouse
+  was tested, found `CONFIG_UHID` was completely unset (needed for
+  BlueZ to bridge BLE HID-over-GATT into the kernel's input subsystem)
+  - confirmed by the owner directly, the mouse now works. Also fixed,
+  unrelated but found the same session: `CONFIG_SECURITY_LANDLOCK` was
+  never enabled, breaking every `pacman` install with a sandbox error.
+  Next: charging/battery telemetry (MAX77705).
 
 ---
 

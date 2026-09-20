@@ -5611,3 +5611,162 @@ further via blind trial-and-error against Samsung's undocumented tuning
 registers.
 
 Full driver diff: `kernel/patches/0004-touchscreen-firmware-flash-fix.patch`.
+
+---
+
+## Phase 3: Wi-Fi bring-up (QCA6390 over PCIe), real hardware confirmed (2026-09-20)
+
+Full research in `docs/phase3-wifi-bt-scoping.md`; this section is the
+short version. Goal: bring up the QCA6390 Wi-Fi 6 combo chip, targeting
+mainline's `ath11k`. Much more tractable than touch - a real, shipping
+mainline board with the identical chip on the identical SoC
+(`sm8250-xiaomi-elish-common.dtsi`, already used for panel/GPU work)
+gave a working pattern to adapt rather than porting a driver from
+scratch.
+
+**DTS work**: enabled `&pcie0`/`&pcie0_phy`, added a `qca6390-pmu`
+power-sequencing node with this board's real `wlan-enable`/
+`bt-enable` GPIOs (90/76 - confirmed via Samsung's downstream overlay,
+*not* assumed from elish's own 20/21, which turned out to be wrong for
+this specific board), and the PM8150/PM8150L/PM8009 RPMH regulator
+rails those GPIOs' supplies needed (previously undefined in this
+project's DTS despite the chips being `#include`d since Phase 1).
+
+**Real bug #1**: `&pcie0`'s own PHY (`phy@1c06000`) had no driver
+bound at all - `CONFIG_PHY_QCOM_QMP_PCIE` was still `=m` from plain
+`defconfig`, invisible at the Kconfig-dependency level since it's a
+devicetree supplier link (`1c00000.pcie`'s `phys =` property), not a
+symbol dependency. Confirmed via `phy@1c06000` having no `driver`
+symlink and `1c00000.pcie` sitting permanently in
+`/sys/kernel/debug/devices_deferred` with an empty reason. Forced `=y`
+- PCIe linked up immediately (`PCIe Gen.2 x1 link up`), QCA6390 shows
+up as a real PCI device (`lspci`: "Qualcomm Technologies, Inc QCA6390
+Wireless Network Adapter").
+
+**Firmware**: pulled this exact unit's own real firmware
+(`amss20.bin`/`m3.bin`/`regdb.bin`/`bdwlan.elf`) off its `vendor`
+partition (`/dev/block/mapper/vendor` in TWRP - dynamic partition, not
+a plain `by-name` symlink), same precedent as the Adreno zap-shader.
+Confirmed genuinely correct by manually rebinding `ath11k_pci` with
+the files present: real Samsung firmware loaded
+(`fw_version 0x10138081`), `wlp1s0` came up and scanned dozens of real
+access points.
+
+**Real bug #2, a size constraint**: baking the ~4.5MB of firmware into
+the kernel image via `CONFIG_EXTRA_FIRMWARE` (the same approach used
+for touch) produced a boot.img 825408 bytes larger than the `boot`
+partition's real, fixed capacity (71303168 bytes exactly) - a genuine
+`dd` `ENOSPC` on real hardware, safely recovered from by immediately
+restoring the last-known-good image. Round75's kernel was already
+filling almost the entire partition. Unlike touch (needed at the very
+first I2C probe), Wi-Fi probes well after the real rootfs mounts, so
+the four firmware files live at `/lib/firmware/ath11k/QCA6390/hw2.0/`
+on the persistent Arch rootfs instead - architecturally correct, not
+just a workaround.
+
+**Real bug #3**: `ath11k_pci`'s very first probe happens before
+`switch_root` swaps in the real rootfs, so its firmware request always
+failed on a cold boot (100% reproducible). A plain PCI unbind/bind
+once the real root is up succeeds every time. Fixed with
+`wlan-pci-rebind.service` (`work/archroot-build/wlan-pci-rebind.{sh,service}`
+- gitignored source, same pattern as the existing
+`usb-gadget-ecm.service`), confirmed durable across a genuine cold
+reboot (`systemctl is-system-running` → `running`, `wlp1s0` present).
+
+**Plasma UI gap, found and fixed**: `NetworkManager` was already
+running and correctly saw `wlp1s0`, but no Wi-Fi icon appeared
+anywhere - `plasma-nm` (the actual applet package, separate from
+`networkmanager` itself) was never installed. Installed it, restarted
+`sddm` for a fresh `plasmashell` - confirmed by the owner directly on
+the physical screen.
+
+Bluetooth (the other half of the same combo chip) turned out to need a
+completely separate UART transport, not this PCIe link at all - see
+the next section.
+
+---
+
+## Phase 3: Bluetooth bring-up (QCA6390 over UART), real hardware confirmed (2026-09-20)
+
+Full research in `docs/phase3-bluetooth-scoping.md`; this section is
+the short version. Same QCA6390 chip as Wi-Fi above, but - confirmed
+directly in elish's own DTS after Wi-Fi bring-up assumed otherwise at
+first - a genuinely separate UART transport (`&uart6`/
+`qcom,qca6390-bt`), not the PCIe link.
+
+**Real UART instance, resolved with real evidence, not a guess**:
+downstream's overlay has two plausible-looking UART instances;
+`qupv3_se6_4uart` (not the more obviously-"hsuart"-named
+`qupv3_se12_2uart`, which turned out to be an unrelated 2-wire debug
+console) is the real one - confirmed via `qcom,wakeup-byte = <0xFD>`
+in its base definition, the exact IBS wake byte mainline's own
+`hci_qca.c` sends to QCA Bluetooth chips. Maps directly onto
+mainline's `uart6` (byte-identical register address), whose default
+pinctrl already matches this board's real pins exactly - zero
+board-specific pin override needed, same situation `&pcie0`'s
+PERST/WAKE GPIOs were in for Wi-Fi. All six regulator supplies reuse
+the same `qca6390-pmu`-internal sub-nodes Wi-Fi's bring-up already
+defined.
+
+**Real bug #1**: `qcom_geni_serial 998000.serial: Invalid line -19` -
+`of_alias_get_id()` needs an `aliases { serialN = ...; }` (or legacy
+`hsuartN`) entry to assign a port "line" number, and no `aliases {}`
+node had ever existed anywhere in this project's devicetree chain -
+never needed before `&uart6` became the first UART this project ever
+turned on. Added `aliases { serial0 = &uart6; };`. **A real process
+mistake caught along the way**: the first attempt (round78) still
+failed identically - traced to forgetting to copy the freshly-rebuilt
+DTB from the `work/linux` build tree back into the tracked
+`kernel/dts/sm8250-samsung-gts7l.dtb` before packaging, so round78
+actually flashed the *stale* pre-fix devicetree. Caught by checking
+`/proc/device-tree/aliases/serial0` directly on the live device rather
+than trusting the build log; fixed properly as round79.
+
+**Real bug #2**: `hci0` registered and loaded real firmware
+successfully (`qca/htbtfw20.tlv`/`qca/htnv20.bin` - the *generic*
+`linux-firmware.git` files worked directly, no live-device extraction
+needed here unlike Wi-Fi), chip identified itself correctly over UART
+(`QCA SOC Version 0x400a0200`, real ROM/patch versions), but
+`bluetoothctl`/`btmgmt` reported zero controllers regardless. Root
+cause found via a raw `AF_BLUETOOTH`/`HCI_CHANNEL_CONTROL` mgmt-socket
+query in Python (not guessed): `hci0` was sitting in the kernel's
+*unconfigured* controller index list. This chip has no unique
+burned-in BD address - it reports a well-known QCA placeholder
+instead, which `btqca.c`'s `qca_check_bdaddr()` detects and sets
+`HCI_QUIRK_USE_BDADDR_PROPERTY` for, requiring a real
+`local-bd-address` devicetree property before the kernel promotes the
+controller to configured/usable - normal, expected behavior for this
+chip family on a hobbyist build with no factory address provisioning,
+not a bug. Fixed with a fixed, locally-administered address
+(`e6:2e:8b:7a:ca:29`) in the DTS. Confirmed: `bluetoothctl show` then
+reported a real, powered controller at that exact address.
+
+**Real bug #3, found by the owner testing a real accessory**: with
+`hci0` finally usable, a real BLE mouse ("Mi Mouse3C") paired and
+showed `Connected: yes` with full GATT service discovery, but did
+nothing at all. Root cause: `CONFIG_UHID` was completely unset.
+BlueZ's `input` plugin needs `/dev/uhid` to bridge BLE HID-over-GATT
+(HOGP) devices - like this mouse, which only advertises the GATT HID
+service, not the classic BR/EDR profile - into the kernel's real input
+subsystem. Without it, `bluetoothd` completes the BLE connection fine
+but has no path to deliver actual input events. Forced `CONFIG_UHID=y`
+(plus `CONFIG_BT_HIDP=y`, another `=m`-despite-being-forced-elsewhere
+tristate-ceiling case, for classic BR/EDR HID devices this device's
+own Book Cover Keyboard trackpad might need later, and
+`CONFIG_HIDRAW=y`). **Confirmed by the owner directly**: the mouse
+moves the cursor and clicks work.
+
+A `bt-uart-rebind.service` (same shape as Wi-Fi's
+`wlan-pci-rebind.service`, `/sys/bus/serial/drivers/hci_uart_qca/
+{unbind,bind}` on `serial0-0`) was added preventively for the same
+class of pre-`switch_root` firmware-request race, confirmed working
+across a genuine cold reboot. `bluedevil` (KDE's Bluetooth applet)
+was installed *before* first hardware test this time, avoiding a
+repeat of Wi-Fi's "kernel works, nothing shows in Plasma" surprise.
+
+**Bonus fix, unrelated to Bluetooth, found during the same real-use
+session**: `pacman` was failing every install with `"switching to
+sandbox user 'alpm' failed!"` - `CONFIG_SECURITY_LANDLOCK` (pacman
+7.x's own install-time sandboxing mechanism) was never enabled. Added
+- a plain `bool` depending only on the already-`=y` `CONFIG_SECURITY`,
+no tristate-ceiling gotcha this time, just never added before now.

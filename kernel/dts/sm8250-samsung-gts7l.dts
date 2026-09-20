@@ -1321,3 +1321,88 @@
 		vddpcie1p8-supply = <&vreg_pmu_pcie_1p8>;
 	};
 };
+
+/*
+ * Bluetooth (docs/phase3-bluetooth-scoping.md) - same QCA6390 combo
+ * chip as Wi-Fi above, but a genuinely separate UART transport, not
+ * the PCIe link. Real UART instance confirmed two independent ways
+ * (not guessed from the more obviously-named but unrelated
+ * qupv3_se12_2uart): downstream's qupv3_se6_4uart carries
+ * `qcom,wakeup-byte = <0xFD>`, the exact IBS wake byte mainline's own
+ * hci_qca.c sends to QCA Bluetooth chips, and it's real 4-wire
+ * (CTS/RTS/TX/RX) hardware flow control, unlike SE12's 2-wire
+ * debug-console-shaped wiring. SE6 maps directly onto mainline's
+ * &uart6 (byte-identical register address, sm8250.dtsi:1699), whose
+ * default pinctrl state (GPIOs 16/17/18/19) already matches this
+ * board's real pins exactly - no per-board pin override needed, same
+ * "already correct at the SoC-reference-design level" situation
+ * &pcie0's PERST/WAKE GPIOs were in. All six regulator supplies below
+ * are the same qca6390-pmu-internal sub-nodes the Wi-Fi node above
+ * already defines - copied from a real, shipping mainline board with
+ * the same chip (sm8250-xiaomi-elish-common.dtsi) essentially
+ * verbatim, since nothing here is gts7l-specific once the UART
+ * instance itself is right.
+ *
+ * Real hardware test (round77-build) found one more real gap this
+ * project had never needed before: qcom_geni_serial's probe()
+ * requires an `aliases { serialN = ... }` entry (or a legacy
+ * `hsuartN` one) to get a port "line" number at all -
+ * `of_alias_get_id()` returning -ENODEV for both otherwise, logged as
+ * the not-very-descriptive "qcom_geni_serial 998000.serial: Invalid
+ * line -19". No `aliases { }` node existed anywhere in this project's
+ * devicetree chain until now (confirmed by grepping this file and
+ * sm8250-samsung-common.dtsi, neither has one) - never needed before
+ * since &uart6 is the first UART this project has ever turned on.
+ * elish has the exact same `serial0 = &uart6;` alias for the exact
+ * same reason.
+ */
+/ {
+	aliases {
+		serial0 = &uart6;
+	};
+};
+
+&uart6 {
+	status = "okay";
+
+	bluetooth {
+		compatible = "qcom,qca6390-bt";
+
+		vddrfacmn-supply = <&vreg_pmu_rfa_cmn>;
+		vddaon-supply = <&vreg_pmu_aon_0p59>;
+		vddbtcmx-supply = <&vreg_pmu_btcmx_0p85>;
+		vddrfa0p8-supply = <&vreg_pmu_rfa_0p8>;
+		vddrfa1p2-supply = <&vreg_pmu_rfa_1p2>;
+		vddrfa1p7-supply = <&vreg_pmu_rfa_1p7>;
+
+		/*
+		 * Real hardware test (round79-build) found hci0 registers
+		 * and loads real firmware successfully, but never becomes
+		 * usable - stuck in the kernel's HCI_UNCONFIGURED state
+		 * (confirmed via a raw mgmt-socket "Read Unconfigured
+		 * Controller Index List" query, since bluetoothd's own
+		 * "Controllers: 0" only checks the *configured* list).
+		 * Root cause, found by reading btqca.c directly: this
+		 * chip has no unique burned-in BD address - it reports a
+		 * well-known QCA placeholder/default one instead
+		 * (drivers/bluetooth/btqca.c's qca_check_bdaddr(),
+		 * comparing against a hardcoded default and setting
+		 * HCI_QUIRK_USE_BDADDR_PROPERTY when it matches), and
+		 * mainline's own hci_core (net/bluetooth/hci_sync.c's
+		 * hci_dev_get_bd_addr_from_property()) requires a real
+		 * `local-bd-address` devicetree property before it'll
+		 * treat the controller as configured/usable at all - a
+		 * completely normal, expected situation for this chip
+		 * family, not a bug. No real per-unit address exists to
+		 * use (this isn't a factory-provisioned build), so this is
+		 * a fixed, locally-administered address (bit 1 of the
+		 * first octet set, per the standard IEEE local/universal
+		 * bit - human-readable e6:2e:8b:7a:ca:29, stored
+		 * byte-reversed per hci_dev_get_bd_addr_from_property()'s
+		 * direct bacpy() into the LSB-first bdaddr_t - matches the
+		 * byte order shown in the nxp,88w8987-bt.yaml binding
+		 * example) rather than a real vendor-assigned one.
+		 */
+		local-bd-address = [29 ca 7a 8b 2e e6];
+	};
+};

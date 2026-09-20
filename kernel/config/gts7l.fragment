@@ -292,3 +292,43 @@ CONFIG_MHI_BUS_PCI_GENERIC=y
 # /sys/kernel/debug/devices_deferred with an empty reason (silently
 # waiting on its phy_get() call, which never printed anything itself).
 CONFIG_PHY_QCOM_QMP_PCIE=y
+
+# Bluetooth (docs/phase3-bluetooth-scoping.md) - same tristate-ceiling
+# gotcha class as ATH11K/CFG80211/RFKILL/PHY_QCOM_QMP_PCIE above, hit a
+# third time. CONFIG_SERIAL_QCOM_GENI (the &uart6 controller itself)
+# was already =y from defconfig; these three were still =m despite
+# CONFIG_BT_HCIUART_QCA (the actual QCA-protocol glue) already being
+# on.
+CONFIG_BT=y
+CONFIG_BT_QCA=y
+CONFIG_BT_HCIUART=y
+
+# Real hardware test (round80-build, local-bd-address fix already
+# landed and confirmed working - a real BLE mouse pairs and shows
+# "Connected: yes" in bluetoothctl) found the actual remaining gap:
+# CONFIG_UHID was completely unset. BlueZ's own "input" plugin bridges
+# BLE HID-over-GATT (HOGP) devices - like this mouse, which only
+# advertises the "Human Interface Device" GATT service, not the
+# classic BR/EDR HID profile - into the kernel's real input subsystem
+# via /dev/uhid, injecting synthetic HID reports read over GATT.
+# Without it, bluetoothd completes the BLE connection and GATT
+# discovery fine (hence "Connected: yes"), but has no path at all to
+# deliver actual mouse movement/click events - exactly matching the
+# real symptom reported ("says connected but doesn't work"). Also
+# forcing CONFIG_BT_HIDP=y (was =m, same tristate-ceiling pattern -
+# needed for classic BR/EDR HID devices, e.g. this device's own Book
+# Cover Keyboard trackpad might use it) and CONFIG_HIDRAW=y (was unset;
+# commonly needed by userspace HID tooling, harmless to include) while
+# already in this area.
+CONFIG_UHID=y
+CONFIG_BT_HIDP=y
+CONFIG_HIDRAW=y
+
+# Phase 5 follow-up: real hardware use found `pacman` fails every
+# single install with "switching to sandbox user 'alpm' failed!" -
+# pacman 7.x sandboxes its download/extract step with Landlock, and
+# CONFIG_SECURITY_LANDLOCK was never enabled (plain defconfig doesn't
+# turn it on, and nothing in this project's own fragment had touched
+# it before now). A pure bool, only depends on the already-`=y`
+# CONFIG_SECURITY - no tristate-ceiling gotcha here, just never added.
+CONFIG_SECURITY_LANDLOCK=y
