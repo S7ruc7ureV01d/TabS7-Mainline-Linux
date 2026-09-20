@@ -1016,3 +1016,383 @@ index 000000000..7fd034582
 +
 +MODULE_DESCRIPTION("ISL98608 LCD bias IC driver for Samsung Galaxy Tab S7 LTE");
 +MODULE_LICENSE("GPL");
+
+diff --git a/drivers/input/touchscreen/Kconfig b/drivers/input/touchscreen/Kconfig
+index 9b9ae8ac3..69e562e5c 100644
+--- a/drivers/input/touchscreen/Kconfig
++++ b/drivers/input/touchscreen/Kconfig
+@@ -1414,4 +1414,17 @@ config TOUCHSCREEN_HIMAX_HX83112B
+ 	  To compile this driver as a module, choose M here: the
+ 	  module will be called himax_hx83112b.
+ 
++config TOUCHSCREEN_NT36523_GTS7L
++	tristate "Novatek NT36523 TDDI touchscreen support (Galaxy Tab S7 LTE)"
++	depends on I2C
++	help
++	  Minimal driver for the Novatek NT36523 TDDI touch+display chip as
++	  wired on the Samsung Galaxy Tab S7 LTE (SM-T875, "gts7l") - the
++	  same physical chip as the LCD panel. Reads raw touch reports from
++	  the chip's already-resident, factory-flashed firmware; no reset
++	  handling of its own (coupled to the panel's reset sequencing) and
++	  no firmware download.
++
++	  Say Y here if you have this device.
++
+ endif
+diff --git a/drivers/input/touchscreen/Makefile b/drivers/input/touchscreen/Makefile
+index bfd9de833..aaf1b2486 100644
+--- a/drivers/input/touchscreen/Makefile
++++ b/drivers/input/touchscreen/Makefile
+@@ -119,3 +119,4 @@ obj-$(CONFIG_TOUCHSCREEN_IQS5XX)	+= iqs5xx.o
+ obj-$(CONFIG_TOUCHSCREEN_IQS7211)	+= iqs7211.o
+ obj-$(CONFIG_TOUCHSCREEN_ZINITIX)	+= zinitix.o
+ obj-$(CONFIG_TOUCHSCREEN_HIMAX_HX83112B)	+= himax_hx83112b.o
++obj-$(CONFIG_TOUCHSCREEN_NT36523_GTS7L)	+= nt36523-gts7l.o
+diff --git a/drivers/input/touchscreen/nt36523-gts7l.c b/drivers/input/touchscreen/nt36523-gts7l.c
+new file mode 100644
+index 000000000..7e936cae1
+--- /dev/null
++++ b/drivers/input/touchscreen/nt36523-gts7l.c
+@@ -0,0 +1,342 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * Novatek NT36523 TDDI touchscreen driver - Samsung Galaxy Tab S7 LTE
++ * (SM-T875, "gts7l").
++ *
++ * This is the same physical chip as the LCD panel
++ * (drivers/gpu/drm/panel/panel-novatek-nt36523.c) - a "TDDI" part where
++ * touch and display logic live in one die. Protocol and register layout
++ * ported from Samsung's own downstream driver
++ * (references/gts7l/drivers/input/touchscreen/novatek/nt36523/nt36xxx.c),
++ * stripped down to what a first mainline bring-up actually needs - see
++ * docs/phase2-touchscreen-scoping.md for the full scoping writeup this
++ * is based on:
++ *
++ *  - No reset GPIO of any kind: confirmed directly in the downstream
++ *    driver (grepped for "reset-gpio"/"novatek,reset-gpio" - nothing).
++ *    The touch side of this chip has no reset handling of its own at
++ *    all; it's entirely coupled to the panel's own existing reset
++ *    sequencing (GPIO 82, nt36523_reset() in the panel driver above).
++ *    By the time this probes, the chip is already out of reset and
++ *    running with whatever firmware Samsung's factory already flashed
++ *    to its internal, persistent flash.
++ *  - No firmware download: downstream's own driver has a purpose-built
++ *    "bringup" mode that skips firmware flashing entirely
++ *    (nvt_ts_firmware_update_on_probe()'s `bringup == 1` check) for
++ *    exactly this situation - this chip has real non-volatile storage,
++ *    not a RAM-only firmware need, so there's nothing to push from the
++ *    host for a first driver to work.
++ *  - Real protocol is paged/banked I2C addressing, not a match for
++ *    mainline's existing novatek-nvt-ts.c (a different, flatly-
++ *    addressed Novatek chip family): the "address" the downstream
++ *    driver's own i2c helpers take is actually which I2C slave address
++ *    to target (0x62 for normal touch-mode register access, 0x01 for
++ *    firmware/event-buffer access), and real register offsets are
++ *    selected by writing 0xFF followed by a 3-byte page address before
++ *    the actual read/write.
++ */
++
++#include <linux/delay.h>
++#include <linux/i2c.h>
++#include <linux/input.h>
++#include <linux/input/mt.h>
++#include <linux/input/touchscreen.h>
++#include <linux/interrupt.h>
++#include <linux/module.h>
++
++/*
++ * "FW" mode I2C address (references/gts7l/.../nt36xxx.h:
++ * I2C_FW_Address/I2C_BLDR_Address) - used for the event buffer and
++ * everything else beyond static register access at the chip's normal
++ * 0x62 enumeration address (I2C_HW_Address, this driver's own `reg`).
++ */
++#define NT36523_I2C_FW_ADDR		0x01
++
++/*
++ * EVENT_BUF_ADDR from the NT36523 entry in
++ * references/gts7l/.../nt36xxx_mem_map.h's per-chip memory map table.
++ * Low byte is 0x00, so every touch-report read below always starts
++ * from register offset 0 within this same, never-changing page.
++ */
++#define NT36523_EVENT_BUF_ADDR		0x02fe00
++
++#define NT36523_POINT_DATA_LEN		108
++#define NT36523_MAX_TOUCHES		10
++#define NT36523_MAX_WIDTH		1600
++#define NT36523_MAX_HEIGHT		2560
++
++/* Per-finger record: touch_id (1-based) in the top 5 bits, status in
++ * the bottom 3 - references/gts7l/.../nt36xxx.c's nvt_ts_event_handler().
++ */
++#define NT36523_FINGER_ID(b)		((b) >> 3)
++#define NT36523_FINGER_STATUS(b)	((b) & 0x07)
++#define NT36523_STATUS_FINGER_ENTER	0x01
++#define NT36523_STATUS_FINGER_MOVING	0x02
++#define NT36523_STATUS_PALM_TOUCH	0x05
++#define NT36523_STATUS_GLOVE_TOUCH	0x06
++
++struct nt36523_ts {
++	struct i2c_client *client;
++	struct input_dev *input;
++	struct touchscreen_properties prop;
++	u8 buf[NT36523_POINT_DATA_LEN + 1];
++};
++
++static int nt36523_i2c_write(struct i2c_client *client, u16 addr,
++			      const u8 *buf, u16 len)
++{
++	struct i2c_msg msg = {
++		.addr = addr,
++		.len = len,
++		.buf = (u8 *)buf,
++	};
++	int ret;
++
++	ret = i2c_transfer(client->adapter, &msg, 1);
++	if (ret != 1)
++		return ret < 0 ? ret : -EIO;
++
++	return 0;
++}
++
++static int nt36523_i2c_read(struct i2c_client *client, u16 addr, u8 *buf,
++			     u16 len)
++{
++	struct i2c_msg msgs[2] = {
++		{
++			.addr = addr,
++			.len = 1,
++			.buf = &buf[0],
++		},
++		{
++			.addr = addr,
++			.flags = I2C_M_RD,
++			.len = len - 1,
++			.buf = &buf[1],
++		},
++	};
++	int ret;
++
++	ret = i2c_transfer(client->adapter, msgs, 2);
++	if (ret != 2)
++		return ret < 0 ? ret : -EIO;
++
++	return 0;
++}
++
++static int nt36523_set_page(struct i2c_client *client, u16 addr, u32 page)
++{
++	u8 buf[3] = {
++		0xff,
++		(page >> 16) & 0xff,
++		(page >> 8) & 0xff,
++	};
++
++	return nt36523_i2c_write(client, addr, buf, sizeof(buf));
++}
++
++/*
++ * gts7l (docs/kernel-boot-debugging.md): the first read from this chip
++ * after boot genuinely NACKs at the bus level (confirmed via a gpi.c
++ * completion-event decode: status=0x8042, bit 0x40 = downstream's own
++ * I2C_NACK bit in i2c-qcom-geni.c's gi2c_gsi_cb_err()) - this isn't a
++ * driver/DMA bug, the chip just isn't ready to answer yet. Downstream's
++ * own driver (nvt_ts_check_fw_reset_state() in nt36xxx.c) handles this
++ * exact situation the same way: poll with msleep(10) between attempts,
++ * up to 100 times, before treating the chip as usable.
++ *
++ * Two things a real-hardware boot log (docs/kernel-boot-debugging.md)
++ * showed a plain retry-with-msleep() loop still gets wrong:
++ *
++ * 1. msleep() this early in probe (before the tick/timekeeping is
++ *    fully settled) doesn't reliably sleep anywhere near its requested
++ *    duration - consecutive retries landed ~0.3ms apart, not ~10ms,
++ *    burning the whole retry budget in well under 100ms instead of the
++ *    intended ~2s. mdelay() (a real busy-wait, independent of the
++ *    scheduler tick) does not have this problem.
++ * 2. This chip is the same physical TDDI die as the panel
++ *    (panel-novatek-nt36523.c) and has no reset handling of its own -
++ *    it's the *panel's* reset sequencing, run once DPU/DSI component
++ *    binding completes, that actually resets it. That happens well
++ *    after this driver's own probe() in boot order (confirmed: DPU
++ *    logs "bound ae94000.dsi"/"bound ae96000.dsi" at t=0.707s, then the
++ *    first touch read failure lands 3ms later at t=0.710s) - so a
++ *    single early successful read (this driver saw one at t=0.328s,
++ *    long before that reset) is a false positive, not real readiness;
++ *    the panel's own reset invalidates it moments later. Requiring
++ *    several *consecutive* successful reads, spread over a real-time
++ *    window sized to run past that reset (comfortably covering both
++ *    the observed ~0.7s reset point and stock Android's own ~1.5s
++ *    post-reset settle time before its first successful chip read),
++ *    means a mid-window reset just fails one of the attempts and
++ *    restarts the consecutive-success count, instead of latching onto
++ *    a stale early success.
++ */
++#define NT36523_READY_RETRIES		300
++#define NT36523_READY_RETRY_DELAY_MS	10
++#define NT36523_READY_CONSECUTIVE	5
++
++static int nt36523_wait_ready(struct i2c_client *client)
++{
++	u8 buf[NT36523_POINT_DATA_LEN + 1];
++	int consecutive = 0;
++	int ret = -ETIMEDOUT;
++	int i;
++
++	for (i = 0; i < NT36523_READY_RETRIES; i++) {
++		buf[0] = 0x00;
++		ret = nt36523_i2c_read(client, NT36523_I2C_FW_ADDR, buf,
++					sizeof(buf));
++		if (!ret) {
++			if (++consecutive >= NT36523_READY_CONSECUTIVE)
++				return 0;
++		} else {
++			consecutive = 0;
++		}
++
++		mdelay(NT36523_READY_RETRY_DELAY_MS);
++	}
++
++	return ret ?: -ETIMEDOUT;
++}
++
++static irqreturn_t nt36523_irq(int irq, void *dev_id)
++{
++	struct nt36523_ts *ts = dev_id;
++	u8 *data = ts->buf;
++	unsigned int i;
++	int ret;
++
++	data[0] = 0x00;
++	ret = nt36523_i2c_read(ts->client, NT36523_I2C_FW_ADDR, data,
++				NT36523_POINT_DATA_LEN + 1);
++	if (ret) {
++		dev_err_ratelimited(&ts->client->dev,
++				    "failed to read touch report: %d\n", ret);
++		return IRQ_HANDLED;
++	}
++
++	for (i = 0; i < NT36523_MAX_TOUCHES; i++) {
++		unsigned int pos = 1 + 6 * i;
++		unsigned int id, status, x, y;
++
++		id = NT36523_FINGER_ID(data[pos]);
++		if (!id || id > NT36523_MAX_TOUCHES)
++			continue;
++		id--;
++
++		status = NT36523_FINGER_STATUS(data[pos]);
++		if (status != NT36523_STATUS_FINGER_ENTER &&
++		    status != NT36523_STATUS_FINGER_MOVING &&
++		    status != NT36523_STATUS_PALM_TOUCH &&
++		    status != NT36523_STATUS_GLOVE_TOUCH)
++			continue;
++
++		x = (data[pos + 1] << 4) | (data[pos + 3] >> 4);
++		y = (data[pos + 2] << 4) | (data[pos + 3] & 0x0f);
++
++		input_mt_slot(ts->input, id);
++		input_mt_report_slot_state(ts->input, MT_TOOL_FINGER, true);
++		touchscreen_report_pos(ts->input, &ts->prop, x, y, true);
++	}
++
++	/* Any slot not reported above this frame is dropped automatically
++	 * (INPUT_MT_DROP_UNUSED, set at input_mt_init_slots() time).
++	 */
++	input_mt_sync_frame(ts->input);
++	input_sync(ts->input);
++
++	return IRQ_HANDLED;
++}
++
++static int nt36523_probe(struct i2c_client *client)
++{
++	struct device *dev = &client->dev;
++	struct nt36523_ts *ts;
++	int ret;
++
++	if (!client->irq)
++		return dev_err_probe(dev, -EINVAL, "no irq specified\n");
++
++	ts = devm_kzalloc(dev, sizeof(*ts), GFP_KERNEL);
++	if (!ts)
++		return -ENOMEM;
++
++	ts->client = client;
++	i2c_set_clientdata(client, ts);
++
++	ts->input = devm_input_allocate_device(dev);
++	if (!ts->input)
++		return -ENOMEM;
++
++	ts->input->name = "Novatek NT36523 Touchscreen";
++	ts->input->id.bustype = BUS_I2C;
++
++	input_set_abs_params(ts->input, ABS_MT_POSITION_X, 0,
++			      NT36523_MAX_WIDTH - 1, 0, 0);
++	input_set_abs_params(ts->input, ABS_MT_POSITION_Y, 0,
++			      NT36523_MAX_HEIGHT - 1, 0, 0);
++	touchscreen_parse_properties(ts->input, true, &ts->prop);
++
++	ret = input_mt_init_slots(ts->input, NT36523_MAX_TOUCHES,
++				   INPUT_MT_DIRECT | INPUT_MT_DROP_UNUSED);
++	if (ret)
++		return dev_err_probe(dev, ret, "failed to init mt slots\n");
++
++	input_set_drvdata(ts->input, ts);
++
++	/*
++	 * Point the chip's paged register window at its event buffer once
++	 * here; every interrupt below just reads from offset 0 within this
++	 * same page, relying on nothing else ever re-paging this client
++	 * (true for this minimal driver - it never touches any other
++	 * register).
++	 */
++	ret = nt36523_set_page(client, NT36523_I2C_FW_ADDR,
++				NT36523_EVENT_BUF_ADDR);
++	if (ret)
++		return dev_err_probe(dev, ret,
++				     "failed to select event buffer page\n");
++
++	ret = nt36523_wait_ready(client);
++	if (ret)
++		return dev_err_probe(dev, ret,
++				     "chip did not become ready\n");
++
++	ret = devm_request_threaded_irq(dev, client->irq, NULL, nt36523_irq,
++					 IRQF_ONESHOT, client->name, ts);
++	if (ret)
++		return dev_err_probe(dev, ret, "failed to request irq\n");
++
++	ret = input_register_device(ts->input);
++	if (ret)
++		return dev_err_probe(dev, ret,
++				     "failed to register input device\n");
++
++	return 0;
++}
++
++static const struct of_device_id nt36523_of_match[] = {
++	{ .compatible = "novatek,nt36523-ts" },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, nt36523_of_match);
++
++static const struct i2c_device_id nt36523_i2c_id[] = {
++	{ "nt36523-ts" },
++	{ }
++};
++MODULE_DEVICE_TABLE(i2c, nt36523_i2c_id);
++
++static struct i2c_driver nt36523_driver = {
++	.driver = {
++		.name = "nt36523-gts7l",
++		.of_match_table = nt36523_of_match,
++	},
++	.probe = nt36523_probe,
++	.id_table = nt36523_i2c_id,
++};
++module_i2c_driver(nt36523_driver);
++
++MODULE_DESCRIPTION("Novatek NT36523 TDDI touchscreen driver for Samsung Galaxy Tab S7 LTE");
++MODULE_LICENSE("GPL");

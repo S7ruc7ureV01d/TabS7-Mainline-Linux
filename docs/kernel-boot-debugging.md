@@ -4991,3 +4991,88 @@ been written yet - this was purely getting the I2C bus underneath it
 working. Next: the actual `nt36xxx`-protocol touch driver (paged I2C
 addressing, no firmware download needed for first bring-up - see
 `docs/phase2-touchscreen-scoping.md`).
+
+## Touchscreen driver written and working on real hardware (2026-09-20)
+
+Wrote `drivers/input/touchscreen/nt36523-gts7l.c` per the scoping in
+`docs/phase2-touchscreen-scoping.md`: paged I2C addressing (write
+`0xFF` + 3-byte page address, then read/write the low byte as an
+intra-page offset), pointed once at the event-buffer page
+(`0x02fe00`) in `probe()`, and a threaded IRQ handler that reads a
+108-byte point-data block and reports up to 10 fingers via
+`input_mt`. `probe()` succeeded immediately and registered the input
+device, but the very first real touch-report read failed with
+`-EIO`, underneath: `gpi 900000.dma-controller: Error in Transaction`
+/ `geni_i2c 994000.i2c: DMA txn failed:3` / `GPI transfer failed: -5`.
+
+**Decoding the failure**: added a temporary diagnostic in `gpi.c`
+printing the raw `xfer_compl_event` fields on
+`MSM_GPI_TCE_UNEXP_ERR`, getting a consistent `status=0x8042`. A
+research pass decoded this against downstream's own bit-decode table
+(`i2c-qcom-geni.c`'s `gi2c_gsi_cb_err()`: `cb->status &
+(BIT(GP_IRQ1) << 5)`, i.e. bit `0x40`) - `0x8042 & 0x40` is set, while
+the BUS_PROTO (`0x100`) and ARB_LOST (`0x200`) bits are clear. This is
+a genuine I2C NACK from the chip, not a driver/DMA bug - writes to
+this exact address always succeeded, only reads failed.
+
+**Root cause, found by booting stock Android (per the owner's
+suggestion) and reading downstream's own driver rather than guessing
+further**: `dmesg` on stock showed roughly a 1.5s gap between the I2C
+bus coming up and the chip's first successful read
+(`nvt-ts 4-0062: [sec_input]IC version: ...` at t=2.304s vs.
+`i2c_geni 994000.i2c: Bus frequency not specified...` at t=0.799s).
+`references/gts7l/.../nt36xxx.c`'s `nvt_ts_check_fw_reset_state()`
+confirmed this isn't incidental - downstream polls with
+`msleep(10)` between attempts, up to 100 times, before trusting the
+chip is usable.
+
+First fix attempt: a `nt36523_wait_ready()` retry loop in `probe()`
+(200 attempts, `msleep(10)` between them) before registering the IRQ.
+This made `probe()` succeed (input device registered at t=0.328s on
+the next real-hardware test), but the IRQ handler's own reads still
+failed forever afterward, in what looked like an interrupt storm
+(level-triggered IRQ, never cleared, refiring every ~0.3-0.4ms with no
+real gap). Two things this exposed, found by reading the actual
+serial log line-by-line:
+
+1. **`msleep()` doesn't reliably sleep this early in boot.**
+   Consecutive retries in the diagnostic-added `gpi.c` error log
+   landed ~0.3ms apart, not ~10ms - the whole 200-attempt budget burned
+   through in well under 100ms instead of the intended ~2s, before the
+   timekeeping/tick subsystem was fully settled enough for `msleep()`
+   to behave as requested.
+2. **This chip's real reset happens later than this driver's own
+   probe.** This is the same physical TDDI die as the panel and has no
+   reset handling of its own - it's the *panel's* reset sequencing,
+   run once DPU/DSI component binding completes, that resets it.
+   Confirmed directly in the serial log: `msm_dpu ae01000.display-
+   controller: bound ae94000.dsi`/`bound ae96000.dsi` at t=0.707s,
+   then the first touch-report read failure at t=0.710s - 3ms later.
+   The driver's own probe-time read succeeded at t=0.328s, *before*
+   that real reset - a false-positive readiness signal that the panel's
+   own reset promptly invalidated.
+
+**Real fix**: `nt36523_wait_ready()` now uses `mdelay()` (a real
+busy-wait, independent of the scheduler tick) instead of `msleep()`,
+and requires 5 *consecutive* successful reads (not just one) over a
+300-attempt/~3s budget - sized to run past both the observed ~0.7s
+panel-reset point and stock Android's own ~1.5s post-reset settle
+time. A reset landing mid-window just fails one attempt and restarts
+the consecutive-success count, instead of latching onto a stale early
+success.
+
+**Confirmed fixed on real hardware**: rebuilt, repackaged (uniLoader +
+`magiskboot repack` onto the round48 template, byte-verified at every
+transfer/flash step as usual), and reflashed. This time only 10 read
+failures occurred right at the panel's reset point (down from an
+unbounded storm), then nothing further - the level IRQ cleared once a
+read finally succeeded. Live-tested via a real screen touch, captured
+straight from `/dev/input/event0` (attached to the owner's existing,
+detached `screen` session on the serial console rather than opening a
+second competing reader): genuine `EV_ABS`/`ABS_MT_TRACKING_ID`/
+`ABS_MT_POSITION_X`/`ABS_MT_POSITION_Y`/`BTN_TOUCH` events streamed for
+real, multi-touch-tracked finger contacts.
+
+Stripped the temporary `gpi.c` diagnostic (the real `qcom,gpi-ee-
+offset` fix from the previous round stays). Touch and display are both
+now working on real hardware.

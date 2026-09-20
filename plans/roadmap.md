@@ -986,8 +986,9 @@ Progress log:
 
 ## Phase 2 — Display and input
 
-**Status:** in progress - **real display output achieved** (Rounds
-38-56, 2026-09-19, `../docs/kernel-boot-debugging.md`). Added a new
+**Status:** done - **real display output and working touchscreen input**
+(Rounds 38-56 + touchscreen bring-up, 2026-09-19/20,
+`../docs/kernel-boot-debugging.md`). Added a new
 panel driver entry to mainline's existing `drivers/gpu/drm/panel/
 panel-novatek-nt36523.c` (already supports this exact chip family via
 Xiaomi's elish, a directly comparable SM8250 tablet - see
@@ -1041,10 +1042,11 @@ Exit criteria:
 - [x] KMS/DRM brings up the native panel resolution at the correct refresh
       rate. **Done at 1600x2560@96Hz** (not native 120Hz - see note above;
       a real, panel-supported DFPS rate, not a workaround).
-- [ ] Touchscreen driver working — **same IC as the panel (Novatek NT36523
-      TDDI)**, wired in DT as `novatek,nvt-ts`; reference driver at
-      `references/gts7l/drivers/input/touchscreen/novatek/nt36523/`. Not
-      Goodix — confirmed, no longer a guess. **Next up.**
+- [x] Touchscreen driver working — **same IC as the panel (Novatek NT36523
+      TDDI)**, wired in DT as `novatek,nt36523-ts`
+      (`drivers/input/touchscreen/nt36523-gts7l.c`, new driver - not a match
+      for mainline's existing, flatly-addressed `novatek-nvt-ts.c`). **Done** -
+      real multi-touch input confirmed on hardware, 2026-09-20.
 - [ ] Adreno 650 GPU acceleration working (Mesa/Turnip or Freedreno, whichever
       mainline supports for this GPU generation).
 - [ ] Basic GNOME/Wayland session reaches a usable desktop on-device.
@@ -1086,6 +1088,20 @@ Progress log:
   something specific to a devicetree mistake. Next: write the actual
   `nt36xxx`-protocol touch driver (paged I2C addressing, no firmware
   download needed - `../docs/phase2-touchscreen-scoping.md`).
+- 2026-09-20: Touchscreen driver (`drivers/input/touchscreen/nt36523-
+  gts7l.c`) written and confirmed working on real hardware - see
+  `../docs/kernel-boot-debugging.md` ("Touchscreen driver written and
+  working on real hardware"). Found a second real timing bug beyond the
+  GPI DMA one: this chip's actual reset is the *panel's* reset
+  sequencing (same physical TDDI die, no reset of its own), which runs
+  well after this driver's own probe - a single early successful
+  readiness read was a false positive the panel's reset promptly broke.
+  Fixed by requiring 5 consecutive successful reads (not one) using
+  `mdelay()` (not `msleep()`, which doesn't reliably sleep this early in
+  boot) over a budget sized to run past the real reset point. Live-
+  tested via real finger touches read from `/dev/input/event0` -
+  correct multi-touch tracking IDs, position, and touch/release.
+  **Phase 2's display and touch goals are both done.**
 
 ---
 

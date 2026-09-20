@@ -179,3 +179,14 @@ the ISL98608 bias IC in Round 47/48. Then write a minimal driver that
 does nothing but page to `EVENT_BUF_ADDR`, read the 108-byte report,
 and log it - get real touch-event bytes flowing before wiring up the
 full `input_mt`/slot-tracking report parser.
+
+## Status: done, working on real hardware (2026-09-20)
+
+The devicetree pieces, the driver (`nt36523-gts7l.c`), and the real
+readiness-timing bug this chip's shared-with-the-panel reset caused
+are all done - see the "Touchscreen driver written and working on real
+hardware" section in `docs/kernel-boot-debugging.md` for the full
+story. Live-tested via real finger touches read straight from
+`/dev/input/event0`: multi-touch tracking IDs, position, and
+touch/release all report correctly. Nothing left open from this
+scoping document.

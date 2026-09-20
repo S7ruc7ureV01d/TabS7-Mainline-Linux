@@ -192,3 +192,9 @@ CONFIG_REGULATOR_QCOM_REFGEN=y
 # since both are new additions for this device.
 CONFIG_DRM_PANEL_NOVATEK_NT36523=y
 CONFIG_ISL98608_GTS7L=y
+
+# This device's own NT36523 TDDI touchscreen driver
+# (drivers/input/touchscreen/nt36523-gts7l.c, compatible
+# "novatek,nt36523-ts") - same physical chip as the panel above, new
+# addition for this device, not in defconfig.
+CONFIG_TOUCHSCREEN_NT36523_GTS7L=y
