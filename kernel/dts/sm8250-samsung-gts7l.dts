@@ -533,10 +533,22 @@
  *     muic-*, pd-*, usbc-* etc.) all live and firing on the running stock
  *     kernel, confirming this is the real, active charger/PD/MUIC chip.
  *
- * TODO(phase3): mainline has no "maxim,max77705" driver - this is a
- * Samsung/Maxim combo IC (charger + fuel gauge + MUIC + haptic + USB-PD)
- * that will need real driver work, not just a devicetree node. VDD supply
- * rail not yet identified.
+ * Correction (docs/phase3-battery-scoping.md): the TODO above was
+ * wrong - mainline gained a real "maxim,max77705" driver since this
+ * comment was written (CONFIG_MFD_MAX77705, drivers/mfd/max77705.c,
+ * compatible string matches downstream byte-for-byte) plus
+ * CONFIG_CHARGER_MAX77705 (drivers/power/supply/max77705_charger.c)
+ * for charging status (plugged in / charging / not). No fuel-gauge
+ * sub-device exists in mainline's max77705_devs[] cell list at all
+ * though - battery-percentage reporting is a real, separate,
+ * from-scratch driver port (comparable in scope to the touchscreen
+ * driver), deliberately out of scope here; this is charging-status
+ * only. I2C bus confirmed this session: downstream's fixup table maps
+ * this chip's fragment to `qupv3_se0_i2c`, i.e. mainline's `i2c0`
+ * (`&qupv3_id_0`/`&gpi_dma0`, both already enabled for touch above).
+ * `monitored-battery` is nominally `required` by the charger binding
+ * but the driver only reports online/status, not capacity - omitted
+ * for now; add a `simple-battery` node if probe rejects its absence.
  */
 &pm8150l_gpios {
 	max77705_int_gts7l: max77705-int-state {
@@ -545,6 +557,82 @@
 		power-source = <0>;
 		input-enable;
 		bias-pull-up;
+	};
+};
+
+/*
+ * Real hardware test (round84-build) found two more real gaps beyond
+ * the DTS/Kconfig work above, neither guessed at:
+ *
+ * 1. Rev.0x2 rejected by mainline's own MFD probe (drivers/mfd/
+ *    max77705.c only accepted MAX77705_PASS3) - this unit's real
+ *    silicon is PASS2, confirmed via a clean regmap read of the
+ *    revision register, and Samsung's own downstream driver
+ *    (references/gts7l/drivers/mfd/max77705*.c) treats PASS2 as a
+ *    fully normal, supported revision throughout - patched mainline
+ *    to accept it too (see the patched drivers/mfd/max77705.c itself
+ *    for the full comment).
+ *
+ * 2. The charger doesn't actually bind as an MFD sub-cell of pmic@66
+ *    at all, despite mainline's own binding *example* nesting it that
+ *    way in nt36xxx.c... no, in maxim,max77705.yaml - its driver
+ *    (drivers/power/supply/max77705_charger.c) is a genuine
+ *    `module_i2c_driver`, needing a real, separate i2c_client of its
+ *    own, not a platform_device the MFD framework creates. Confirmed
+ *    live: the MFD-nested `charger {}` sub-node created a real
+ *    platform_device (visible in sysfs, correct modalias) but with
+ *    *no* driver ever bound to it - `max77705-charger` never even
+ *    appeared under `/sys/bus/platform/drivers/`, because
+ *    `module_i2c_driver` registers on the I2C bus, not the platform
+ *    bus. The *charger power-supply* binding's own example
+ *    (maxim,max77705.yaml, not the MFD one) shows exactly this: a
+ *    sibling `charger@69` node directly under the i2c bus, not nested
+ *    under `pmic@66`. `0x69` independently confirmed real for this
+ *    exact chip via downstream's own `I2C_ADDR_CHG = (0xD2 >> 1)`
+ *    (references/gts7l/drivers/mfd/max77705.c:45) - byte-for-byte the
+ *    same address mainline's own doc example uses, not a coincidence.
+ *
+ * `monitored-battery` really is required at runtime, not just by the
+ * DT schema - `max77705_charger_initialize()` calls
+ * `power_supply_get_battery_info()` unconditionally and bails the
+ * whole probe on failure. A minimal `simple-battery` node (no real
+ * capacity/voltage data - this pass is charging-status only, not fuel
+ * gauge) satisfies it.
+ */
+/ {
+	battery: simple-battery {
+		compatible = "simple-battery";
+	};
+};
+
+&i2c0 {
+	status = "okay";
+
+	max77705_pmic: pmic@66 {
+		compatible = "maxim,max77705";
+		reg = <0x66>;
+		interrupt-parent = <&pm8150l_gpios>;
+		interrupts = <11 IRQ_TYPE_LEVEL_LOW>;
+		interrupt-controller;
+		#interrupt-cells = <1>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&max77705_int_gts7l>;
+	};
+
+	charger@69 {
+		compatible = "maxim,max77705-charger";
+		reg = <0x69>;
+		monitored-battery = <&battery>;
+		/*
+		 * Interrupt 0 out of pmic@66's own interrupt-controller,
+		 * per the binding's own documented mapping
+		 * ("0 - charger", Documentation/devicetree/bindings/mfd/
+		 * maxim,max77705.yaml) - the charger driver's probe()
+		 * needs a real i2c->irq to set up its own regmap IRQ chip
+		 * (devm_regmap_add_irq_chip()), not left optional.
+		 */
+		interrupt-parent = <&max77705_pmic>;
+		interrupts = <0>;
 	};
 };
 

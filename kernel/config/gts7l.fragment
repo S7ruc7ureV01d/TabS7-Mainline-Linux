@@ -332,3 +332,13 @@ CONFIG_HIDRAW=y
 # it before now). A pure bool, only depends on the already-`=y`
 # CONFIG_SECURITY - no tristate-ceiling gotcha here, just never added.
 CONFIG_SECURITY_LANDLOCK=y
+
+# Charging status (docs/phase3-battery-scoping.md) - charger/status
+# only, not battery-percentage/fuel-gauge (mainline has no driver for
+# that at all for this chip - a much bigger, deliberately deferred
+# task). Both depend on the already-satisfied I2C core; no
+# tristate-ceiling chain expected here, but forced =y anyway to match
+# this project's established policy (no module-loading
+# infrastructure) rather than trusting defconfig's default.
+CONFIG_MFD_MAX77705=y
+CONFIG_CHARGER_MAX77705=y

@@ -1,0 +1,53 @@
+Phase 3 charging bring-up (2026-09-20, docs/phase3-battery-scoping.md,
+docs/kernel-boot-debugging.md): mainline's MAX77705 MFD probe
+(drivers/mfd/max77705.c) only accepted MAX77705_PASS3 silicon,
+rejecting anything else as "Rev.0x%x is not tested". This project's
+real Samsung Galaxy Tab S7 LTE unit reports PASS2 (confirmed via a
+clean regmap read of the revision register - a genuine I2C success,
+not a mis-wiring or bus problem).
+
+Samsung's own downstream driver (references/gts7l/drivers/mfd/
+max77705.c and max77705-irq.c) treats PASS2 as a fully normal,
+supported revision throughout - every switch-case that branches on
+chip revision handles PASS2 identically to PASS3, never as a rejected
+or special-cased stepping. This confirms the upstream gate is simply
+more conservative than real shipped hardware (most likely because
+whoever wrote/tested the mainline driver only had PASS3 silicon on
+hand), not evidence of a genuine incompatibility.
+
+Relaxes the check to accept both PASS2 and PASS3, rather than
+disabling or bypassing the revision check entirely - keeps the
+protection against a genuinely wrong/unexpected chip revision while
+allowing this project's real hardware to probe. Same precedent as this
+project's existing drivers/dma/qcom/gpi.c patch (0003): a small,
+well-justified upstream driver change for a real, confirmed hardware
+fact, not a workaround for a DTS mistake.
+
+Applies on top of Linux 7.2 with 0002-0004 already applied.
+
+diff --git a/drivers/mfd/max77705.c b/drivers/mfd/max77705.c
+index e98c76d6b..dac60dd95 100644
+--- a/drivers/mfd/max77705.c
++++ b/drivers/mfd/max77705.c
+@@ -104,8 +104,20 @@ static int max77705_i2c_probe(struct i2c_client *i2c)
+ 	if (ret < 0)
+ 		return -ENODEV;
+
++	/*
++	 * gts7l (docs/phase3-battery-scoping.md, docs/kernel-boot-debugging.md):
++	 * real hardware (Samsung Galaxy Tab S7 LTE) reports PASS2 here, not
++	 * PASS3 - confirmed via a clean regmap read (this project's chip
++	 * genuinely is PASS2, not a mis-wiring). Samsung's own downstream
++	 * driver (references/gts7l/drivers/mfd/max77705.c/-irq.c) treats
++	 * PASS2 as a fully normal, supported revision throughout (handled
++	 * identically to PASS3 in every switch-case seen), not a rejected
++	 * or unsupported stepping - this upstream check is simply more
++	 * conservative than real shipped hardware, not evidence of a real
++	 * incompatibility.
++	 */
+ 	pmic_rev = pmic_rev_value & MAX77705_REVISION_MASK;
+-	if (pmic_rev != MAX77705_PASS3)
++	if (pmic_rev != MAX77705_PASS2 && pmic_rev != MAX77705_PASS3)
+ 		return dev_err_probe(dev, -ENODEV, "Rev.0x%x is not tested\n", pmic_rev);
+
+ 	/* Active Discharge Enable */

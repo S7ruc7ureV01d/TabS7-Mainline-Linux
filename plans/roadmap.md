@@ -1206,11 +1206,17 @@ tested) or tested for audio/A2DP over Bluetooth.
 Goal: the tablet is usable as a tablet — power, connectivity, audio, sensors.
 
 Exit criteria:
-- [ ] Charging + battery telemetry — charger/fuel-gauge/MUIC IC is confirmed
-      **Maxim MAX77705** (`../docs/hardware-inventory.md`; reference driver at
-      `references/gts7l/drivers/battery_v2/max77705_charger.c` +
-      `max77705_fuelgauge.c`); core PMIC rails are standard Qualcomm
-      **PM8150+PM8009**, which mainline `kona` support should already cover.
+- [x] Charging status — charger IC confirmed **Maxim MAX77705**
+      (`../docs/hardware-inventory.md`). **Kernel-level bring-up done**:
+      real, live telemetry (`POWER_SUPPLY_STATUS`/`ONLINE`/charge
+      current-voltage) confirmed on real hardware, `upower` correctly
+      enumerates it. **Battery percentage (fuel gauge) is a separate,
+      much bigger task** - mainline has no fuel-gauge driver for this
+      chip at all, scoped separately in
+      `../docs/phase3-fuelgauge-scoping.md` - this is why no icon shows
+      in Plasma's tray yet (a real, structural gap, not a missing
+      package). Core PMIC rails are standard Qualcomm PM8150+PM8009,
+      unrelated to this chip.
 - [x] Wi-Fi working — combo chip confirmed **Qualcomm QCA6390**, targeted by
       mainline `ath11k`. **Kernel-level bring-up done** (real PCIe
       enumeration, real firmware, real scan results) - remaining work is
@@ -1274,7 +1280,31 @@ Progress log:
   - confirmed by the owner directly, the mouse now works. Also fixed,
   unrelated but found the same session: `CONFIG_SECURITY_LANDLOCK` was
   never enabled, breaking every `pacman` install with a sandbox error.
-  Next: charging/battery telemetry (MAX77705).
+- 2026-09-20 (later): Charging status (MAX77705) - full story in
+  `docs/phase3-battery-scoping.md`'s "Status: charging status working
+  on real hardware" section and `docs/kernel-boot-debugging.md`.
+  Highlights: mainline's MFD probe only accepted `MAX77705_PASS3`
+  silicon, this unit's real chip is PASS2 - patched
+  `drivers/mfd/max77705.c` to accept it too, same precedent as this
+  project's existing `gpi.c` patch; found the charger doesn't bind as
+  an MFD sub-cell at all (its driver is a genuine `module_i2c_driver`
+  needing its own real I2C address, `0x69`, independently confirmed
+  via downstream's own `I2C_ADDR_CHG`) - moved it to a proper sibling
+  `charger@69` node, wired its IRQ through the parent's own
+  interrupt-controller domain, and added a minimal `simple-battery`
+  node (`monitored-battery` turned out to be a real runtime
+  requirement, not just schema). Confirmed: real, live charging
+  telemetry straight from the chip, `upower` correctly enumerates it.
+  No Plasma tray icon yet - a real, structural gap this time (`upower`
+  correctly classifies this as line-power, not battery, since there's
+  no fuel-gauge driver at all for this chip in mainline), not a
+  missing-package surprise like Wi-Fi/Bluetooth hit. Battery percentage
+  scoped separately, `docs/phase3-fuelgauge-scoping.md` - checking
+  first whether real prior art (a submitted mainline patch, another
+  community project, or register-compatibility with the
+  already-mainlined MAX17042 family) exists before committing to a
+  from-scratch port. Next: implement the fuel gauge once that scoping
+  pass reports back.
 
 ---
 

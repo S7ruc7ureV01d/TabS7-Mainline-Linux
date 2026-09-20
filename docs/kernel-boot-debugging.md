@@ -5770,3 +5770,59 @@ sandbox user 'alpm' failed!"` - `CONFIG_SECURITY_LANDLOCK` (pacman
 7.x's own install-time sandboxing mechanism) was never enabled. Added
 - a plain `bool` depending only on the already-`=y` `CONFIG_SECURITY`,
 no tristate-ceiling gotcha this time, just never added before now.
+
+---
+
+## Phase 3: charging status (MAX77705), real hardware confirmed (2026-09-20)
+
+Full research in `docs/phase3-battery-scoping.md`; this section is the
+short version. Goal: charging status (plugged in / charging / not),
+deliberately scoped separately from battery percentage (mainline has
+no fuel-gauge driver for this chip at all - a much bigger task, see
+`docs/phase3-fuelgauge-scoping.md`).
+
+**DTS work**: `&i2c0` (already covered by `&qupv3_id_0`/`&gpi_dma0`,
+both enabled since touch bring-up) plus `pmic@66`
+(`compatible = "maxim,max77705"`, IRQ on PM8150L GPIO 11 - all already
+known from a Phase 1 comment block, confirmed two independent ways
+back then: the GPL overlay and a live `/proc/interrupts` capture off
+stock Android showing real, firing `max77705` interrupts).
+
+**Real bug #1**: mainline's MFD probe only accepted `MAX77705_PASS3`
+silicon; this unit's real chip is PASS2 (confirmed via a clean regmap
+read, not a wiring failure). Samsung's own downstream driver treats
+PASS2 as fully normal throughout. Patched `drivers/mfd/max77705.c` to
+accept it too - same precedent as this project's existing `gpi.c`
+patch for real hardware needing a real upstream driver change.
+
+**Real bug #2**: the charger doesn't bind as an MFD sub-cell at all,
+despite the MFD binding's own example nesting it that way -
+`drivers/power/supply/max77705_charger.c` is a genuine
+`module_i2c_driver` needing its own real `i2c_client`. Confirmed live:
+an MFD-nested `charger {}` sub-node created a real platform device in
+sysfs with the right modalias, but zero driver ever bound to it -
+`max77705-charger` never appeared under `/sys/bus/platform/drivers/`
+at all. The *charger* binding's own example (a different file from the
+MFD one) shows the real shape: `charger@69`, a sibling I2C node, not
+nested. `0x69` independently confirmed via downstream's own
+`I2C_ADDR_CHG = (0xD2 >> 1)`. Also needed: the charger's IRQ routed
+through the parent's own interrupt-controller domain (irq 0, "charger"
+per the documented mapping), and a minimal `simple-battery` node -
+`monitored-battery` is a real runtime requirement
+(`power_supply_get_battery_info()` is called unconditionally and bails
+the whole probe without it), not just a DT-schema nicety.
+
+**Confirmed on real hardware**: `/sys/class/power_supply/max77705-charger`
+exists with real, live telemetry straight from the chip
+(`STATUS=Full`, `ONLINE=1`, real charge current/voltage numbers).
+`upower` correctly enumerates it. No icon appears in Plasma's tray -
+not a missing-package gap this time (unlike Wi-Fi/`plasma-nm` and
+Bluetooth/`bluedevil`), but a structural one: `upower` correctly
+classifies this as a `line-power` device (no capacity to report), and
+Plasma's battery widget needs a real `Battery`-type device to render
+anything - exactly the deliberately-deferred fuel-gauge gap.
+
+**Bonus, unrelated fix confirmed working in this same round**:
+`CONFIG_SECURITY_LANDLOCK` (added the same session, for `pacman`'s own
+install-time sandboxing) - `pacman -Sy` completed with zero sandbox
+errors on this boot.
