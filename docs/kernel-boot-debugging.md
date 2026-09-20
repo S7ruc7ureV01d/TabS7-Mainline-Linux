@@ -5466,3 +5466,148 @@ aren't installed yet, no real keyboard/mouse input beyond touch), but
 the actual milestone - Wayland, KWin, Mesa/Freedreno, and Plasma's shell
 all working together on this mainline kernel - is real and reproducible.
 `rp`/`ro.bootloader` unaffected throughout, as always.
+
+---
+
+## Touch debugging: firmware flash, CRC-reboot loop, and a real regression (2026-09-20)
+
+Once real interactive use of the Plasma desktop above started, the owner
+reported the touchscreen was "very weird": a large delay between pressing
+and it registering, Plasma appearing to think a finger was held down when
+it wasn't, and swipe-scrolling not working in Settings at all.
+
+**Diagnostic path.** `evtest` (installed via `pacman`, now that real
+internet access exists per the USB-Ethernet link above) captured raw
+kernel input events directly: a single tap showed a 719ms gap between
+touch-down and touch-up, and a drag test showed position updates arriving
+only every ~150-350ms (not the expected ~10ms) with a non-monotonic Y
+trajectory that reversed direction mid-drag - strong evidence some reads
+were outright corrupted, not just slow. `/proc/interrupts` showed a
+continuous ~88-93 interrupts/sec on the touch IRQ line even with zero
+finger contact, completely unaffected by later GPIO bias experiments.
+`gpiomon`/`bpftrace` were both unavailable (the GPIO is already owned by
+the kernel driver as an IRQ line; this kernel has no `CONFIG_KPROBES`), so
+a temporary rate-limited raw-byte diagnostic print in `nt36523_irq()` was
+the deciding piece of evidence: every idle-time interrupt's read was
+returning literal all-`0xFF`, not zeroed/uninitialized memory (the struct
+is `devm_kzalloc`'d, so that's not an artifact) - something real was
+producing this pattern on the wire.
+
+**A real, independent bug found and fixed along the way, but ruled out as
+the storm's cause**: the touchscreen's own `nvt_ts_int_gts7l` pinctrl
+state (`bias-disable`, matching Samsung's downstream `attn_irq` node
+exactly) had been correctly defined in the DTS since Phase 2 but never
+actually *referenced* by the `touchscreen@62` node - no
+`pinctrl-names`/`pinctrl-0` properties - leaving GPIO 15 (the touch IRQ,
+active-low) at the SoC's reset-default `bias-pull-down`. Confirmed live via
+`/sys/kernel/debug/gpio` (`pull down` → `no pull` after wiring it up).
+Tested `bias-pull-up` too as a further check. **The interrupt storm rate
+was completely unchanged (~88-89/sec) under all three bias settings**,
+conclusively ruling out an electrical/floating-line explanation. Kept the
+correct `bias-disable` value regardless, since it's real and matches
+Samsung's own hardware configuration independent of this bug.
+
+**The real root cause**, found by reading Samsung's downstream driver
+directly rather than continuing to guess (per the owner's explicit
+request to research first): `nvt_ts_check_chip_ver_trim()`/
+`nvt_ts_stop_crc_reboot()` in
+`references/gts7l/drivers/input/touchscreen/novatek/nt36523/nt36xxx.c`
+describes exactly this failure mode by name - the NT36523 has an internal
+firmware-integrity CRC check that, when it fails, makes the chip
+continuously reboot internally. Any I2C read during this state returns
+garbage (`0xFF 0xFF 0xFF` or `0xFC`), but `i2c_transfer()` itself reports
+success (correct byte count), which is why this looked like "corrupted
+reads" rather than an outright bus error. Ported the exact detection/
+recovery register sequence from downstream (page `0x01F600` offset `0x4E`
+to detect, `0x00/0xA5` reset-idle + page `0x03F100` offset `0x35`
+CRC-flag-clear to recover) into a probe-time
+`nt36523_stop_crc_reboot()`/`nt36523_in_crc_reboot_loop()` pair. This
+correctly detected and cleared the condition (confirmed via the exact log
+line matching downstream's own wording), but **did not fix the underlying
+problem** - the storm and garbage reads persisted afterward, unchanged.
+
+**A regression, caught and reverted before landing**: the next attempt
+re-ran the same CRC check on every single IRQ (not just at probe), on the
+theory that the condition could recur during runtime. Flashed, and the
+owner reported "touch doesn't work now" - a clear regression. Root cause,
+confirmed via `journalctl` showing the exact log line firing on ~160
+consecutive interrupts in the same second: the heuristic
+(`data[1]==data[2]==data[3]==0xFF`) was being applied to the *point-data*
+buffer, where an all-`0xFF` pattern is simply the normal, benign "no
+active touch" idle report (the existing finger-parsing loop already
+handles this correctly via its own `id > NT36523_MAX_TOUCHES` check) - not
+the CRC page's own signature at all, a completely different register.
+Since idle reports dominate, this new guard was firing on nearly every
+interrupt, running a disruptive reset sequence each time, and returning
+before ever reaching the finger-parsing loop - breaking touch entirely.
+Reverted immediately (the guard block deleted, probe-time-only CRC check
+kept).
+
+**The actual fix**: reading further into downstream's `nt36xxx.c`,
+`nvt_ts_probe()` unconditionally calls
+`nvt_ts_firmware_update_on_probe()` (`nt36xxx_fw_update.c`) right after
+chip identification, before ever requesting the IRQ - this chip needs
+firmware pushed to its internal flash on *every single boot* via
+`request_firmware()`, not just once at the factory. This mainline driver
+never implemented that at all, on the (wrong) assumption that real
+non-volatile flash meant nothing needed pushing from the host for a first
+bring-up. Ported the flash sequence (init-bootloader, resume-PD, erase,
+256-byte-page program with per-page checksum, 64KB-block verify, then a
+bootloader reset and wait for `RESET_STATE_INIT`) register-for-register
+from `nt36xxx_fw_update.c` into a new `nt36523_update_firmware()` and its
+helpers, called unconditionally at every probe (deliberately no
+version-check-and-skip fast path like downstream has - always reflashing
+trades a couple of extra boot-time seconds for not needing to get a
+checksum-compare short-circuit bug-for-bug right on a one-of-a-kind piece
+of hardware). The exact firmware blob
+(`kernel/firmware/tsp_novatek/nt36523_gts7l.bin`, sourced from
+`references/gts7l/firmware/tsp_novatek/` - a same-named but different
+file also exists under `references/kernel_samsung_sm8250/`, not used,
+since it doesn't match this exact devicetree/overlay) is bundled directly
+into the kernel binary via `CONFIG_EXTRA_FIRMWARE`, not a userspace
+`/lib/firmware` path, so `request_firmware()` never depends on rootfs
+mount timing.
+
+**Confirmed on real hardware**: touch report read errors dropped from a
+continuous storm to 10 total, all transient right at boot (probe-time
+settling), nothing ongoing afterward. `evtest` during a real drag showed a
+clean, monotonic trajectory with no more reversals or garbage - the
+corruption is genuinely fixed. Owner confirmed: "still choppy touch but it
+does work."
+
+**Remaining choppiness - investigated, not resolved.** Even with clean
+data, real position updates land only every ~150-700ms despite the IRQ
+itself still firing at a constant ~88Hz. Live register reads during this
+exact behavior (via a small raw ioctl-based I2C helper script,
+`/tmp/nt_i2c.py`, using `python3`'s `ctypes`/`fcntl` directly against
+`/dev/i2c-5` since `i2ctransfer` refuses the low FW-mode slave address
+`0x01`) directly ruled out two plausible theories:
+- **Stuck in a low-power/calibration state**: `EVENT_MAP_RESET_COMPLETE`
+  (offset `0x60`) read back `0xA3` (`RESET_STATE_NORMAL_RUN`) live during
+  the choppy behavior - the chip believes it's fully initialized and
+  running normally.
+- **Active noise-avoidance throttling** (plausible for a TDDI chip sharing
+  silicon with the display, run without any display-vsync/noise-sync
+  wiring): `EVENT_MAP_FUNCT_STATE` (offset `0x5C`) masked with
+  `NOISE_MASK` (`0x2000`) read back `0`, meaning the chip doesn't consider
+  itself in a noise-degraded state either.
+
+Reviewed both Samsung's downstream `nt36xxx_sec_fn.c` (~2500 lines of
+sysfs/debugfs-driven tuning - sensitivity, edge rejection, a "game mode"
+toggle that's an opt-in gaming feature, not a default-on report-rate
+fix) and a real, in-flight mainline Linux driver submission for this
+exact chip family (`nt36xxx.c`, submitted to LKML October 2024 by
+AngeloGioacchino Del Regno, mirrored at
+`github.com/pundiramit/linux/blob/2b3a18a82289cbb2fada7fc0ed1480cae233c9e9/drivers/input/touchscreen/nt36xxx.c`,
+thread at `lore.kernel.org/r/20241015-nt36xxx-v1-2-3919d0bffee6@gmail.com`).
+That driver's page/offset addressing scheme matches ours exactly
+(cross-confirms the protocol understanding is correct), uses the same
+`IRQF_ONESHOT` threaded-IRQ approach, and has no "increase report rate" or
+"enter active scan mode" step anywhere - meaning there's no publicly known
+fix being missed here, just an unexplained real characteristic of this
+specific chip/firmware combination under a minimal driver. Left as a known,
+documented open issue (`plans/roadmap.md` Phase 2) rather than pursued
+further via blind trial-and-error against Samsung's undocumented tuning
+registers.
+
+Full driver diff: `kernel/patches/0004-touchscreen-firmware-flash-fix.patch`.

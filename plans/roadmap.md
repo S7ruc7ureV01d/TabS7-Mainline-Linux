@@ -1046,7 +1046,18 @@ Exit criteria:
       TDDI)**, wired in DT as `novatek,nt36523-ts`
       (`drivers/input/touchscreen/nt36523-gts7l.c`, new driver - not a match
       for mainline's existing, flatly-addressed `novatek-nvt-ts.c`). **Done** -
-      real multi-touch input confirmed on hardware, 2026-09-20.
+      real multi-touch input confirmed on hardware, 2026-09-20. **Known
+      open issue, not blocking**: touch is clean and functional (no more
+      corruption/phantom-hold after `kernel/patches/
+      0004-touchscreen-firmware-flash-fix.patch`) but still feels choppy
+      under real use - real position updates land only every ~150-700ms
+      even though the IRQ itself fires continuously at ~90Hz. Investigated
+      at length (live register reads ruled out low-power/stuck-calibration
+      and noise-avoidance modes; reviewed Samsung's downstream `sec_fn.c`
+      and the real in-flight mainline NT36xxx driver submission, neither
+      shows a documented fix) with no root cause found - see
+      `../docs/kernel-boot-debugging.md` "touch debugging" section. Left
+      for a future session rather than more blind trial-and-error.
 - [x] Adreno 650 GPU acceleration working (kernel driver + Mesa/Freedreno
       confirmed - Vulkan/Turnip not separately tested). **Done** - real
       sustained 3D rendering (kmscube, 3000 frames at a vsync-locked
@@ -1145,6 +1156,31 @@ Progress log:
   `last-fence == retired-fence` (submitted work genuinely executed and
   retired, not just queued). **Phase 2's GPU goal is done** - only a
   basic desktop session remains for this phase.
+- 2026-09-20: **Touchscreen real-hardware follow-up fix** (post-Plasma
+  bring-up, once real interactive use exposed problems the initial
+  bring-up smoke test hadn't). Found and fixed the real cause of
+  reported "very laggy, phantom-holding-down, no swipe-scroll" touch:
+  the chip needs firmware flashed to it on every boot (a fact missed in
+  the original 0003 scoping - see
+  `kernel/patches/0004-touchscreen-firmware-flash-fix.patch` for the
+  full story), without which it gets stuck in its own bootROM's
+  CRC-fail auto-reboot loop. An intermediate attempt at re-running the
+  CRC-check on every IRQ (rather than just at probe) was tried, caused
+  touch to stop working entirely, and was reverted before the real fix
+  (firmware flashing) was found and confirmed. Also fixed a real,
+  independent DTS bug found along the way: the touchscreen's own
+  already-correct `nvt_ts_int_gts7l` pinctrl state was never actually
+  referenced by the `touchscreen@62` node, leaving GPIO 15 at the SoC's
+  reset-default pull-down on an active-low IRQ line. **Result**: touch
+  is now clean and functional (no more corruption), confirmed via
+  `evtest` (monotonic drag trajectories, error count down from a
+  continuous storm to 10 transient boot-time reads). **One open issue
+  intentionally left unresolved** - real position updates still only
+  land every ~150-700ms despite ~90Hz IRQs; researched at length
+  (downstream `sec_fn.c`, live register reads, and the real in-flight
+  mainline NT36xxx driver submission) with no known fix found. Recorded
+  as a real, known issue in this phase's exit criteria above rather
+  than silently left out. Full story: `../docs/kernel-boot-debugging.md`.
 
 ---
 

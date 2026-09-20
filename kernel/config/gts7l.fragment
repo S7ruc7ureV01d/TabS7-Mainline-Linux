@@ -198,3 +198,16 @@ CONFIG_ISL98608_GTS7L=y
 # "novatek,nt36523-ts") - same physical chip as the panel above, new
 # addition for this device, not in defconfig.
 CONFIG_TOUCHSCREEN_NT36523_GTS7L=y
+
+# 0004-touchscreen-firmware-flash-fix.patch: this chip needs its
+# firmware flashed at every boot (real, vendor-confirmed CRC-fail
+# auto-reboot behavior without it - see the patch and
+# docs/kernel-boot-debugging.md). Built directly into the kernel image
+# rather than relying on a userspace /lib/firmware path, so
+# request_firmware() never depends on rootfs mount timing - copy
+# kernel/firmware/tsp_novatek/nt36523_gts7l.bin (tracked in this repo;
+# the gts7l-specific one - a same-named but different file also exists
+# under references/kernel_samsung_sm8250/, not used) into
+# work/linux/firmware/tsp_novatek/ before building.
+CONFIG_EXTRA_FIRMWARE="tsp_novatek/nt36523_gts7l.bin"
+CONFIG_EXTRA_FIRMWARE_DIR="firmware"

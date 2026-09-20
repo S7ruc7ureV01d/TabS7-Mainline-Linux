@@ -1,0 +1,696 @@
+Touchscreen bring-up follow-up, real-hardware fix (2026-09-20,
+docs/kernel-boot-debugging.md "touch debugging" section): the touch
+driver added in 0003 worked well enough for a bring-up smoke test but
+was unusable under sustained real interactive load - Plasma reported
+constant phantom "holding down" state, no swipe-scrolling, and evtest
+showed a continuous ~90Hz interrupt storm (regardless of finger
+presence) with most reads returning all-0xFF.
+
+Root cause, found by reading Samsung's downstream driver
+(references/gts7l/drivers/input/touchscreen/novatek/nt36523/
+nt36xxx_fw_update.c) rather than continuing to guess: this NT36523
+needs firmware flashed to its internal flash on every single boot
+(nvt_ts_firmware_update_on_probe(), called from downstream's own
+probe() right after chip-ID, before the IRQ is ever requested) - our
+0003 driver never did this at all, on the wrong assumption that real
+non-volatile storage meant nothing needed pushing from the host. The
+chip was actually stuck in its own bootROM's CRC-fail auto-reboot
+loop the whole time; the all-0xFF reads were exactly what that failure
+mode looks like at the I2C level (a real ACK, garbage content).
+
+Two fixes landed together:
+
+1. A probe-time nt36523_stop_crc_reboot()/nt36523_in_crc_reboot_loop()
+   pair, ported register-for-register from downstream's
+   nvt_ts_stop_crc_reboot() - detects and clears the CRC-fail flag
+   before anything else runs. This alone was NOT sufficient (the
+   underlying missing firmware just let the chip re-enter the same
+   state) - documented here because an earlier attempt at also
+   re-running this check on every single IRQ was tried and reverted
+   (it misfired on ordinary "no active touch" idle reports, which
+   naturally read as 0xFF in the point-data buffer for unrelated
+   reasons, and made touch stop working entirely rather than fixing
+   the choppiness - a real regression caught and undone before landing
+   here).
+
+2. The actual fix: nt36523_update_firmware() and its helpers
+   (nt36523_erase_flash/nt36523_write_flash/nt36523_verify_flash/etc.),
+   ported from nt36xxx_fw_update.c's erase/program/verify sequence,
+   run unconditionally at every probe (no version-check-and-skip fast
+   path, unlike downstream - deliberately always reflashes rather than
+   risk getting a checksum-compare short-circuit subtly wrong on a
+   one-of-a-kind piece of hardware). The firmware blob itself is now
+   tracked at kernel/firmware/tsp_novatek/nt36523_gts7l.bin (the
+   gts7l-specific one, originally sourced from
+   references/gts7l/firmware/tsp_novatek/ - a same-named but different
+   file also exists under references/kernel_samsung_sm8250/, not used)
+   and bundled directly into the kernel binary via CONFIG_EXTRA_FIRMWARE
+   (this patch's kernel/config/gts7l.fragment addition, copied into
+   work/linux/firmware/tsp_novatek/ at build time) rather than relying
+   on a userspace /lib/firmware path, so request_firmware() never
+   depends on rootfs mount timing.
+
+Confirmed on real hardware: touch report read errors dropped from a
+continuous storm to 10 total (all transient, right at boot) across a
+full session, and evtest showed a clean, monotonic drag trajectory
+with no more phantom reversals/corruption. One known remaining issue,
+NOT fixed by this patch and left for later: real position updates
+still only land every ~150-700ms even though the IRQ itself still
+fires at ~90Hz - live register reads during this behavior directly
+ruled out both an obvious low-power/stuck-in-calibration state
+(RESET_COMPLETE reads back 0xA3, RESET_STATE_NORMAL_RUN) and an
+active noise-avoidance mode (FUNCT_STATE's noise_mode bit reads 0),
+and reviewing both Samsung's downstream sec_fn.c and the real,
+in-flight mainline NT36xxx driver submission
+(github.com/pundiramit/linux, lore.kernel.org/r/
+20241015-nt36xxx-v1-2-3919d0bffee6@gmail.com) turned up no documented
+"increase report rate" step being missed - this looks like this
+chip/firmware's actual default report cadence, not a bug with a known
+fix. See docs/kernel-boot-debugging.md for the full investigation.
+
+Also fixed in kernel/dts/sm8250-samsung-gts7l.dts (tracked directly in
+this repo, not part of this patch): the touchscreen@62 node never
+actually referenced its own already-correctly-defined nvt_ts_int_gts7l
+pinctrl state (bias-disable, matching Samsung's downstream attn_irq
+node) - missing pinctrl-names/pinctrl-0 properties left GPIO 15 at the
+SoC's reset-default bias-pull-down on an active-low IRQ line. Wired up
+and confirmed live via /sys/kernel/debug/gpio. This was investigated
+as a possible cause of the interrupt storm above and ruled out (storm
+rate was identical under pull-down/no-pull/pull-up), but is kept since
+it's a real, independently-correct fix matching Samsung's own hardware
+configuration.
+
+Applies on top of Linux 7.2 with 0002 and 0003 already applied.
+
+diff --git a/drivers/input/touchscreen/nt36523-gts7l.c b/drivers/input/touchscreen/nt36523-gts7l.c
+index 7e936ca..c006e8c 100644
+--- a/drivers/input/touchscreen/nt36523-gts7l.c
++++ b/drivers/input/touchscreen/nt36523-gts7l.c
+@@ -20,12 +20,20 @@
+  *    By the time this probes, the chip is already out of reset and
+  *    running with whatever firmware Samsung's factory already flashed
+  *    to its internal, persistent flash.
+- *  - No firmware download: downstream's own driver has a purpose-built
+- *    "bringup" mode that skips firmware flashing entirely
+- *    (nvt_ts_firmware_update_on_probe()'s `bringup == 1` check) for
+- *    exactly this situation - this chip has real non-volatile storage,
+- *    not a RAM-only firmware need, so there's nothing to push from the
+- *    host for a first driver to work.
++ *  - Firmware IS flashed at every probe, unconditionally: an earlier
++ *    version of this driver skipped it (mirroring downstream's
++ *    `bringup == 1` mode), on the assumption that this chip's real
++ *    non-volatile flash meant there was nothing to push for a first
++ *    driver to work. Real hardware testing under sustained interactive
++ *    load showed that assumption was wrong - the chip was actually
++ *    stuck in its own bootROM's CRC-fail auto-reboot loop the whole
++ *    time (nvt_ts_stop_crc_reboot() below only ever cleared the
++ *    symptom, never the cause), which is exactly what downstream's
++ *    firmware-update-on-probe step (nvt_ts_firmware_update_on_probe()
++ *    in nt36xxx_fw_update.c) exists to fix. Ported that flash sequence
++ *    (see nt36523_update_firmware() below) rather than continuing to
++ *    special-case around a chip that was simply missing working
++ *    firmware.
+  *  - Real protocol is paged/banked I2C addressing, not a match for
+  *    mainline's existing novatek-nvt-ts.c (a different, flatly-
+  *    addressed Novatek chip family): the "address" the downstream
+@@ -37,11 +45,13 @@
+  */
+ 
+ #include <linux/delay.h>
++#include <linux/firmware.h>
+ #include <linux/i2c.h>
+ #include <linux/input.h>
+ #include <linux/input/mt.h>
+ #include <linux/input/touchscreen.h>
+ #include <linux/interrupt.h>
++#include <linux/minmax.h>
+ #include <linux/module.h>
+ 
+ /*
+@@ -135,6 +145,543 @@ static int nt36523_set_page(struct i2c_client *client, u16 addr, u32 page)
+ 	return nt36523_i2c_write(client, addr, buf, sizeof(buf));
+ }
+ 
++/*
++ * gts7l (docs/kernel-boot-debugging.md): under real interactive load
++ * (not just the bring-up smoke test), this chip was found firing its
++ * IRQ line continuously (~90Hz, regardless of finger presence) with
++ * every read returning all-0xFF - and neither the GPIO's pull
++ * configuration nor re-selecting the paged register window on every
++ * read changed that at all, ruling out an electrical/floating-line
++ * explanation. Downstream's own driver
++ * (nvt_ts_check_chip_ver_trim()/nvt_ts_stop_crc_reboot() in nt36xxx.c)
++ * checks for exactly this pattern (buf[1]==0xFC, or
++ * buf[1]==buf[2]==buf[3]==0xFF) at a specific register and identifies
++ * it explicitly as "IC is in CRC fail reboot loop" - this chip has an
++ * internal firmware-integrity auto-reboot feature that, once it starts
++ * misfiring, needs to be actively stopped by the host; it doesn't clear
++ * itself. Ported downstream's exact recovery sequence (same page/offset
++ * values, same reset-idle + CRC_ERR_FLAG-clear writes) rather than
++ * guessing at a new one - this is real, vendor-confirmed chip behavior,
++ * not something to reverse-engineer from scratch.
++ */
++#define NT36523_CRC_CHECK_PAGE		0x01f600
++#define NT36523_CRC_CHECK_OFFSET	0x4e
++#define NT36523_CRC_CLEAR_PAGE		0x03f100
++#define NT36523_CRC_CLEAR_OFFSET	0x35
++#define NT36523_CRC_STOP_RETRIES	5
++
++static bool nt36523_in_crc_reboot_loop(struct i2c_client *client)
++{
++	u8 buf[4];
++	int ret;
++
++	ret = nt36523_set_page(client, NT36523_I2C_FW_ADDR,
++				NT36523_CRC_CHECK_PAGE);
++	if (ret)
++		return false;
++
++	buf[0] = NT36523_CRC_CHECK_OFFSET;
++	ret = nt36523_i2c_read(client, NT36523_I2C_FW_ADDR, buf, sizeof(buf));
++	if (ret)
++		return false;
++
++	return buf[1] == 0xfc || (buf[1] == 0xff && buf[2] == 0xff && buf[3] == 0xff);
++}
++
++static int nt36523_stop_crc_reboot(struct i2c_client *client)
++{
++	u8 buf[2];
++	int ret;
++	int i;
++
++	if (!nt36523_in_crc_reboot_loop(client))
++		return 0;
++
++	dev_warn(&client->dev,
++		 "chip is in a CRC fail auto-reboot loop, stopping it\n");
++
++	for (i = 0; i < NT36523_CRC_STOP_RETRIES; i++) {
++		/* Reset-idle, written twice (matches downstream exactly). */
++		buf[0] = 0x00;
++		buf[1] = 0xa5;
++		nt36523_i2c_write(client, client->addr, buf, sizeof(buf));
++		nt36523_i2c_write(client, client->addr, buf, sizeof(buf));
++		mdelay(1);
++
++		ret = nt36523_set_page(client, NT36523_I2C_FW_ADDR,
++					NT36523_CRC_CLEAR_PAGE);
++		if (ret)
++			continue;
++
++		buf[0] = NT36523_CRC_CLEAR_OFFSET;
++		buf[1] = 0xa5;
++		nt36523_i2c_write(client, NT36523_I2C_FW_ADDR, buf, sizeof(buf));
++
++		ret = nt36523_set_page(client, NT36523_I2C_FW_ADDR,
++					NT36523_CRC_CLEAR_PAGE);
++		if (ret)
++			continue;
++
++		buf[0] = NT36523_CRC_CLEAR_OFFSET;
++		ret = nt36523_i2c_read(client, NT36523_I2C_FW_ADDR, buf, 2);
++		if (!ret && buf[1] == 0xa5)
++			return 0;
++	}
++
++	dev_err(&client->dev, "failed to stop CRC auto-reboot loop\n");
++	return -ETIMEDOUT;
++}
++
++/*
++ * gts7l (docs/kernel-boot-debugging.md): the CRC-reboot condition above
++ * turned out to be a symptom, not the disease. Downstream's own driver
++ * (nt36xxx_fw_update.c) unconditionally flashes firmware to this chip's
++ * internal flash on every single boot, before ever requesting the IRQ
++ * (nvt_ts_firmware_update_on_probe(), called from nvt_ts_probe() right
++ * after chip-ID). This mainline driver never did that at all - the chip
++ * was limping along on whatever was left in its flash, which is exactly
++ * what an NT36523 bootROM's own CRC-fail auto-reboot condition looks
++ * like when the app firmware doesn't verify. The fix is to actually push
++ * firmware, the same way downstream does: erase, program, verify, then
++ * a bootloader reset and wait for the chip to report RESET_STATE_INIT.
++ * Ported register-for-register from nt36xxx_fw_update.c rather than
++ * re-deriving it - this is real, vendor-confirmed protocol, not
++ * something to guess at. Unlike downstream, there's no
++ * check-version-then-skip fast path here: this always reflashes on
++ * every boot, trading a couple of extra seconds at probe time for not
++ * having to get a checksum-compare short-circuit bug-for-bug right on a
++ * one-of-a-kind piece of hardware.
++ */
++#define NT36523_FW_NAME		"tsp_novatek/nt36523_gts7l.bin"
++
++/* RW_FLASH_DATA_ADDR / READ_FLASH_CHECKSUM_ADDR from the NT36523 entry
++ * in references/gts7l/.../nt36xxx_mem_map.h (same table EVENT_BUF_ADDR
++ * above came from).
++ */
++#define NT36523_RW_FLASH_DATA_ADDR	0x024002
++#define NT36523_READ_FLASH_CHECKSUM_ADDR 0x024000
++
++#define NT36523_FLASH_SECTOR_SIZE	4096
++#define NT36523_FLASH_END_FLAG_LEN	3
++#define NT36523_FLASH_BLOCK_SIZE	65536
++#define NT36523_FLASH_BLOCK_COUNT	4
++
++#define NT36523_EVENT_MAP_RESET_COMPLETE 0x60
++#define NT36523_RESET_STATE_INIT	0xa0
++#define NT36523_RESET_STATE_MAX	0xaf
++
++static void nt36523_sw_reset_idle(struct i2c_client *client)
++{
++	u8 buf[2] = { 0x00, 0xa5 };
++
++	nt36523_i2c_write(client, client->addr, buf, sizeof(buf));
++	msleep(15);
++}
++
++static void nt36523_bootloader_reset(struct i2c_client *client)
++{
++	u8 buf[2] = { 0x00, 0x69 };
++
++	nt36523_i2c_write(client, client->addr, buf, sizeof(buf));
++	msleep(35);
++}
++
++static int nt36523_check_fw_reset_state(struct i2c_client *client,
++					  u8 reset_state)
++{
++	u8 buf[6];
++	int ret;
++	int i;
++
++	for (i = 0; i <= 100; i++) {
++		msleep(10);
++
++		buf[0] = NT36523_EVENT_MAP_RESET_COMPLETE;
++		ret = nt36523_i2c_read(client, NT36523_I2C_FW_ADDR, buf,
++					sizeof(buf));
++		if (!ret && buf[1] >= reset_state &&
++		    buf[1] <= NT36523_RESET_STATE_MAX)
++			return 0;
++	}
++
++	return -ETIMEDOUT;
++}
++
++/* Polls the 2-byte "0xAA" bootloader command-ack pattern used by nearly
++ * every flash step below.
++ */
++static int nt36523_poll_ack(struct i2c_client *client, unsigned int retries,
++			     unsigned int delay_ms)
++{
++	u8 buf[2];
++	int ret;
++	unsigned int i;
++
++	for (i = 0; i < retries; i++) {
++		mdelay(delay_ms);
++
++		buf[0] = 0x00;
++		ret = nt36523_i2c_read(client, client->addr, buf, 2);
++		if (!ret && buf[1] == 0xaa)
++			return 0;
++	}
++
++	return -ETIMEDOUT;
++}
++
++/* "Read Status" step: write the read-status command, then poll for
++ * buf[1]==0xAA && buf[2]==0x00 (idle/ready, no error).
++ */
++static int nt36523_wait_flash_status(struct i2c_client *client,
++				      unsigned int retries)
++{
++	u8 buf[3];
++	int ret;
++	unsigned int i;
++
++	for (i = 0; i < retries; i++) {
++		mdelay(5);
++
++		buf[0] = 0x00;
++		buf[1] = 0x05;
++		ret = nt36523_i2c_write(client, client->addr, buf, 2);
++		if (ret)
++			continue;
++
++		buf[0] = 0x00;
++		ret = nt36523_i2c_read(client, client->addr, buf, 3);
++		if (!ret && buf[1] == 0xaa && buf[2] == 0x00)
++			return 0;
++	}
++
++	return -ETIMEDOUT;
++}
++
++static int nt36523_init_bootloader(struct i2c_client *client)
++{
++	u8 buf[3];
++	int ret;
++
++	nt36523_sw_reset_idle(client);
++
++	buf[0] = 0x00;
++	buf[1] = 0x00;
++	buf[2] = NT36523_I2C_FW_ADDR;
++	ret = nt36523_i2c_write(client, client->addr, buf, 3);
++	if (ret)
++		return ret;
++
++	ret = nt36523_poll_ack(client, 20, 1);
++	if (ret)
++		return ret;
++
++	msleep(20);
++	return 0;
++}
++
++static int nt36523_resume_pd(struct i2c_client *client)
++{
++	u8 buf[2] = { 0x00, 0xab };
++	int ret;
++
++	ret = nt36523_i2c_write(client, client->addr, buf, sizeof(buf));
++	if (ret)
++		return ret;
++
++	ret = nt36523_poll_ack(client, 20, 1);
++	if (ret)
++		return ret;
++
++	msleep(10);
++	return 0;
++}
++
++static int nt36523_erase_flash(struct i2c_client *client, size_t write_size)
++{
++	u8 buf[8];
++	int ret;
++	unsigned int count, i;
++
++	buf[0] = 0x00;
++	buf[1] = 0x06;
++	ret = nt36523_i2c_write(client, client->addr, buf, 2);
++	if (ret)
++		return ret;
++	ret = nt36523_poll_ack(client, 20, 1);
++	if (ret)
++		return ret;
++
++	buf[0] = 0x00;
++	buf[1] = 0x01;
++	buf[2] = 0x00;
++	ret = nt36523_i2c_write(client, client->addr, buf, 3);
++	if (ret)
++		return ret;
++	ret = nt36523_poll_ack(client, 20, 1);
++	if (ret)
++		return ret;
++
++	ret = nt36523_wait_flash_status(client, 100);
++	if (ret)
++		return ret;
++
++	count = DIV_ROUND_UP(write_size, NT36523_FLASH_SECTOR_SIZE);
++	for (i = 0; i < count; i++) {
++		u32 addr = i * NT36523_FLASH_SECTOR_SIZE;
++
++		buf[0] = 0x00;
++		buf[1] = 0x06;
++		ret = nt36523_i2c_write(client, client->addr, buf, 2);
++		if (ret)
++			return ret;
++		ret = nt36523_poll_ack(client, 20, 1);
++		if (ret)
++			return ret;
++
++		buf[0] = 0x00;
++		buf[1] = 0x20;
++		buf[2] = (addr >> 16) & 0xff;
++		buf[3] = (addr >> 8) & 0xff;
++		buf[4] = addr & 0xff;
++		ret = nt36523_i2c_write(client, client->addr, buf, 5);
++		if (ret)
++			return ret;
++		ret = nt36523_poll_ack(client, 20, 1);
++		if (ret)
++			return ret;
++
++		ret = nt36523_wait_flash_status(client, 100);
++		if (ret)
++			return ret;
++	}
++
++	return 0;
++}
++
++static int nt36523_write_flash(struct i2c_client *client, const u8 *data,
++				size_t write_size)
++{
++	u8 buf[34];
++	int ret;
++	unsigned int count, i, j, k;
++
++	ret = nt36523_set_page(client, NT36523_I2C_FW_ADDR,
++				NT36523_RW_FLASH_DATA_ADDR);
++	if (ret)
++		return ret;
++
++	count = DIV_ROUND_UP(write_size, 256);
++	for (i = 0; i < count; i++) {
++		u32 addr = i * 256;
++		size_t page_len = min_t(size_t, write_size - addr, 256);
++		unsigned int csum;
++		u8 status;
++
++		buf[0] = 0x00;
++		buf[1] = 0x06;
++		ret = nt36523_i2c_write(client, client->addr, buf, 2);
++		if (ret)
++			return ret;
++		ret = nt36523_poll_ack(client, 20, 1);
++		if (ret)
++			return ret;
++
++		for (j = 0; j < page_len; j += 32) {
++			size_t chunk = min_t(size_t, page_len - j, 32);
++
++			buf[0] = (NT36523_RW_FLASH_DATA_ADDR + j) & 0xff;
++			for (k = 0; k < chunk; k++)
++				buf[1 + k] = data[addr + j + k];
++
++			ret = nt36523_i2c_write(client, NT36523_I2C_FW_ADDR,
++						 buf, 1 + chunk);
++			if (ret)
++				return ret;
++		}
++
++		if (write_size - addr >= 256)
++			csum = (addr >> 16) + ((addr >> 8) & 0xff) +
++			       (addr & 0xff) + 255;
++		else
++			csum = (addr >> 16) + ((addr >> 8) & 0xff) +
++			       (addr & 0xff) + (write_size - addr - 1);
++		for (k = 0; k < page_len; k++)
++			csum += data[addr + k];
++		csum = (u8)(255 - csum + 1);
++
++		buf[0] = 0x00;
++		buf[1] = 0x02;
++		buf[2] = (addr >> 16) & 0xff;
++		buf[3] = (addr >> 8) & 0xff;
++		buf[4] = addr & 0xff;
++		buf[5] = 0x00;
++		buf[6] = page_len - 1;
++		buf[7] = csum;
++		ret = nt36523_i2c_write(client, client->addr, buf, 8);
++		if (ret)
++			return ret;
++
++		ret = nt36523_poll_ack(client, 20, 1);
++		if (ret)
++			return ret;
++		buf[0] = 0x00;
++		ret = nt36523_i2c_read(client, client->addr, buf, 2);
++		if (ret)
++			return ret;
++		status = buf[1];
++		if (status == 0xea)
++			return -EIO;
++
++		ret = nt36523_wait_flash_status(client, 100);
++		if (ret)
++			return ret;
++	}
++
++	return 0;
++}
++
++static int nt36523_verify_flash(struct i2c_client *client, const u8 *data,
++				 size_t write_size)
++{
++	u8 buf[8];
++	int ret;
++	unsigned int i, k;
++
++	for (i = 0; i < NT36523_FLASH_BLOCK_COUNT; i++) {
++		u32 block_off = i * NT36523_FLASH_BLOCK_SIZE;
++		size_t len_in_blk;
++		u16 wr_csum, rd_csum;
++
++		if (write_size <= block_off)
++			continue;
++
++		len_in_blk = min_t(size_t, write_size - block_off,
++				    NT36523_FLASH_BLOCK_SIZE);
++
++		wr_csum = i + (((len_in_blk - 1) >> 8) & 0xff) +
++			  ((len_in_blk - 1) & 0xff);
++		for (k = 0; k < len_in_blk; k++)
++			wr_csum += data[block_off + k];
++		wr_csum = 65535 - wr_csum + 1;
++
++		buf[0] = 0x00;
++		buf[1] = 0x07;
++		buf[2] = i;
++		buf[3] = 0x00;
++		buf[4] = 0x00;
++		buf[5] = ((len_in_blk - 1) >> 8) & 0xff;
++		buf[6] = (len_in_blk - 1) & 0xff;
++		ret = nt36523_i2c_write(client, client->addr, buf, 7);
++		if (ret)
++			return ret;
++
++		ret = nt36523_poll_ack(client, 5, 80);
++		if (ret)
++			return ret;
++
++		ret = nt36523_set_page(client, NT36523_I2C_FW_ADDR,
++					NT36523_READ_FLASH_CHECKSUM_ADDR);
++		if (ret)
++			return ret;
++
++		buf[0] = NT36523_READ_FLASH_CHECKSUM_ADDR & 0xff;
++		ret = nt36523_i2c_read(client, NT36523_I2C_FW_ADDR, buf, 3);
++		if (ret)
++			return ret;
++
++		rd_csum = (buf[2] << 8) | buf[1];
++		if (wr_csum != rd_csum) {
++			dev_err(&client->dev,
++				"firmware verify failed on block %u\n", i);
++			return -EIO;
++		}
++	}
++
++	return 0;
++}
++
++/* Scans backward from the end of the file for the "NVT" 3-byte flag
++ * that marks the real end of firmware content in this .bin (there's
++ * padding after it) - references/gts7l/.../nt36xxx_fw_update.c's
++ * nvt_get_fw_need_write_size().
++ */
++static int nt36523_fw_need_write_size(const struct firmware *fw,
++				       size_t *write_size)
++{
++	int i;
++
++	for (i = fw->size / NT36523_FLASH_SECTOR_SIZE; i > 0; i--) {
++		size_t off = i * NT36523_FLASH_SECTOR_SIZE -
++			     NT36523_FLASH_END_FLAG_LEN;
++
++		if (!memcmp(&fw->data[off], "NVT", NT36523_FLASH_END_FLAG_LEN)) {
++			*write_size = i * NT36523_FLASH_SECTOR_SIZE;
++			return 0;
++		}
++	}
++
++	return -EINVAL;
++}
++
++static int nt36523_flash_firmware(struct i2c_client *client,
++				   const struct firmware *fw)
++{
++	size_t write_size;
++	int ret;
++
++	ret = nt36523_fw_need_write_size(fw, &write_size);
++	if (ret) {
++		dev_err(&client->dev, "firmware end flag not found\n");
++		return ret;
++	}
++
++	nt36523_stop_crc_reboot(client);
++
++	ret = nt36523_init_bootloader(client);
++	if (ret)
++		return ret;
++
++	ret = nt36523_resume_pd(client);
++	if (ret)
++		return ret;
++
++	ret = nt36523_erase_flash(client, write_size);
++	if (ret)
++		return ret;
++
++	ret = nt36523_write_flash(client, fw->data, write_size);
++	if (ret)
++		return ret;
++
++	ret = nt36523_verify_flash(client, fw->data, write_size);
++	if (ret)
++		return ret;
++
++	nt36523_bootloader_reset(client);
++
++	return nt36523_check_fw_reset_state(client, NT36523_RESET_STATE_INIT);
++}
++
++static int nt36523_update_firmware(struct i2c_client *client)
++{
++	const struct firmware *fw;
++	int ret;
++
++	ret = request_firmware(&fw, NT36523_FW_NAME, &client->dev);
++	if (ret) {
++		dev_err(&client->dev, "failed to load firmware %s: %d\n",
++			NT36523_FW_NAME, ret);
++		return ret;
++	}
++
++	ret = nt36523_flash_firmware(client, fw);
++	if (ret)
++		dev_err(&client->dev, "firmware flash failed: %d\n", ret);
++
++	release_firmware(fw);
++	return ret;
++}
++
+ /*
+  * gts7l (docs/kernel-boot-debugging.md): the first read from this chip
+  * after boot genuinely NACKs at the bus level (confirmed via a gpi.c
+@@ -285,12 +832,17 @@ static int nt36523_probe(struct i2c_client *client)
+ 
+ 	input_set_drvdata(ts->input, ts);
+ 
++	ret = nt36523_update_firmware(client);
++	if (ret)
++		return dev_err_probe(dev, ret, "failed to flash firmware\n");
++
+ 	/*
+-	 * Point the chip's paged register window at its event buffer once
+-	 * here; every interrupt below just reads from offset 0 within this
+-	 * same page, relying on nothing else ever re-paging this client
+-	 * (true for this minimal driver - it never touches any other
+-	 * register).
++	 * Point the chip's paged register window at its event buffer;
++	 * every interrupt below just reads from offset 0 within this same
++	 * page, relying on nothing else ever re-paging this client (true
++	 * for this minimal driver - it never touches any other register
++	 * outside of the firmware flash above, which leaves the chip freshly
++	 * reset by the time it gets here).
+ 	 */
+ 	ret = nt36523_set_page(client, NT36523_I2C_FW_ADDR,
+ 				NT36523_EVENT_BUF_ADDR);

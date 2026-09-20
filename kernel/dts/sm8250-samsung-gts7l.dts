@@ -998,6 +998,8 @@
 		reg = <0x62>;
 		interrupt-parent = <&tlmm>;
 		interrupts = <15 IRQ_TYPE_LEVEL_LOW>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&nvt_ts_int_gts7l>;
 	};
 };
 
