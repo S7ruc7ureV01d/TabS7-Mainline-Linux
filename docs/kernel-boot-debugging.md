@@ -6116,3 +6116,27 @@ Also: this device is still running the pseudo-NMI trial kernel
 the "Crash #4" recommendation above, revert this once the investigation is
 considered closed - it costs ~5% steady-state and didn't end up answering
 the deeper freeze question.
+
+### Crash #5 (real Minecraft, 2026-09-21): Crash #4's total-freeze mode confirmed to recur
+
+With the three synthetic modules above all clean, ran the real Minecraft
+repro once more with heartbeat logging in place
+(`tools/loadtest/watch_minecraft.sh` + host-side `monitor_from_host.sh`,
+full detail in `docs/load-test-modules.md`). Froze again quickly (~61s),
+last-alive timestamp corroborated two independent ways to the same second
+(`2026-09-21T02:35:26 UTC`).
+
+**Pstore captured nothing** - confirmed via both the normal
+`/sys/fs/pstore/console-ramoops-0` path and a full raw `mmap()` recovery
+of the 1MB ramoops region, `strings`-searched for
+`panic|NMI|lockup|watchdog|RCU stall` with zero hits anywhere in the
+buffer. Pseudo-NMI was confirmed active the whole time (`GICv3: Pseudo-NMIs
+enabled` present at the very start of this boot's own dmesg). This is the
+same signature as Crash #4 above (total freeze, SSH/display both die, no
+hardlockup-detector message, no panic, nothing self-recovers) - **now
+confirmed to recur on a second independent real repro**, not a one-off.
+Strengthens Crash #4's own conclusion rather than reopening it: whatever
+hangs is below where even a real per-CPU NMI-capable detector ever gets a
+chance to fire, on both occasions this specific failure mode has been
+caught. Status unchanged: unresolved, not further actionable with the
+tools this project has without real UART/JTAG-level hardware debug access.

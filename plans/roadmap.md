@@ -1614,3 +1614,11 @@ decisions, scope changes) goes here instead of being forced into a phase log.
   remains unresolved; device is still on the pseudo-NMI trial kernel and
   that bootarg should be reverted once this line of investigation is
   considered closed.
+- 2026-09-21 (later, same day): Ran a real Minecraft repro once more with
+  heartbeat logging in place - froze again in ~61s, corroborated
+  last-alive timestamp two independent ways. Pstore captured nothing
+  (full raw `mmap()` recovery, zero panic/NMI/lockup strings anywhere),
+  same as the earlier "Crash #4" total-freeze signature - **now confirmed
+  to recur on a second independent real repro**, not a one-off. See
+  `../docs/kernel-boot-debugging.md` ("Crash #5") and
+  `../docs/load-test-modules.md`. Still unresolved.

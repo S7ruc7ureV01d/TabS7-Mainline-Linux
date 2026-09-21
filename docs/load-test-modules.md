@@ -109,3 +109,49 @@ round) - per the recommendation in `docs/kernel-boot-debugging.md`
 ("Crash #4"), this should be reverted once the freeze investigation is
 considered closed, since it costs ~5% steady-state and didn't end up
 answering the deeper freeze question.
+
+## Real Minecraft repro, same session (2026-09-21)
+
+Since all three synthetic modules survived, ran the actual Minecraft repro
+one more time with `watch_minecraft.sh` (heartbeat-only logging, no
+synthetic load) plus the host-side monitor running, specifically to get a
+precise, corroborated timestamp and to check pstore while the pseudo-NMI
+detector was confirmed active and pstore was confirmed empty beforehand.
+
+**Froze again, quickly** (~61s after starting the watch script/launching
+Minecraft). Last-alive timestamp confirmed two independent ways within a
+second of each other:
+- Host monitor (`monitor_from_host.sh`): last `OK` at `2026-09-20T23:35:26
+  -03:00`, first `UNREACHABLE` one second later.
+- On-device heartbeat log (survived the reset - `/root/loadtest/` is on
+  persistent storage): last line `1789958126.458` = `2026-09-21T02:35:26.458
+  UTC` - the same moment, converted.
+
+**Pstore result: nothing captured, again** - same outcome as "Crash #4" in
+`docs/kernel-boot-debugging.md`, not the earlier softer RCU-stall/NMI-panic
+mode from Bugs 1/2. `dmesg`/`console-ramoops-0` after reboot showed only
+(a) this fresh boot's own early console output (had already overwritten
+the start of the 1MB ring buffer within its first ~41s at `loglevel=15`)
+and (b) old stale stock-Android HIDL/battery-monitor fragments at the tail
+- the same "leftover from an old stock boot" gotcha documented for Crash
+#4. A full raw `mmap()` recovery (`docs/dev-environment-quickref.md`
+recipe) and a `strings` search for `panic|NMI|lockup|watchdog|RCU stall`
+across the entire 1MB region came up completely empty. Pseudo-NMI was
+confirmed active this whole time (`GICv3: Pseudo-NMIs enabled` present at
+this boot's own start, and confirmed working in the original Crash #4
+round) - **the freeze is, again, happening at a level the NMI-capable
+hardlockup detector never gets to fire at all**, consistent with Crash
+#4's own conclusion (something lower than a schedulable-CPU hard lockup -
+bus/memory-controller livelock, a stuck SMC/EL3 trap, or similar) rather
+than contradicting it. Two independent real Minecraft freezes now show
+this same "nothing fires, nothing captured" signature; this looks like the
+freeze's normal/default behavior at this point, not a one-off.
+
+Also: booting into TWRP after a manual power-cycle recovery (as happened
+partway through this session) was **deliberate this time**, not an
+automatic side-effect of the crash/reset path - don't read anything into
+it. `androidboot.boot_recovery=1` was seen once but the user confirmed
+they navigated there on purpose; worth re-checking if it ever happens
+*without* the user doing so on purpose, since `param` being pinned to
+force-recovery was a real, separate historical issue in this project
+(Phase 1 Round 7/13) - not reopened here, just flagged as a thing to watch.
