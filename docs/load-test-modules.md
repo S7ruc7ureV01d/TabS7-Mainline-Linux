@@ -423,3 +423,58 @@ adaptive trigger that takes an immediate heavy sample the moment any
 core exceeds ~95% for a couple of consecutive light samples, instead of
 waiting for the fixed cadence - specifically to catch which thread is on
 the pinned core.
+
+## Major pivot: the GPU deadlock theory was very likely a red herring - `storage_load.sh` (2026-09-21)
+
+The owner ran a plain `dd if=/dev/zero ... bs=1G count=10 conv=fdatasync`
+against `~/Documents` by hand, completely unrelated to the GPU/Minecraft
+investigation - **and the device froze immediately.** Wrapped it as
+`tools/loadtest/storage_load.sh` (same invocation, on `/root/loadtest/`)
+and reproduced it with full logging in under 10 seconds - by far the
+fastest, cleanest repro of the entire investigation, a huge improvement
+over booting Minecraft every time.
+
+`capture_watch.log` shows exactly what happens, and it has nothing to do
+with the GPU:
+
+- A routine GPU hangcheck/recover cycle appears in the log, but
+  **before** the storage test even started (confirmed against
+  `session.log`'s start marker) - direct proof these cycles are just
+  constant background noise on this hardware, unrelated to whatever
+  workload happens to be running, not a symptom of it.
+- Once the `dd` starts, `MemFree` collapses from ~2.7GB to ~1GB in under
+  a second (real dirty-page/writeback pressure from the 10GB write).
+- **`cpu7` pins at exactly 100% and stays there, unchanging, for over
+  2.5 continuous seconds** (50+ consecutive 50ms samples) while every
+  other core sits near-idle.
+- The heavy-cycle process breakdown catches the actual culprit directly,
+  twice: **`kworker/7:2+events` (a generic per-CPU workqueue worker
+  pinned to CPU 7 - that's what the `kworker/7:` name means) consuming
+  219 ticks in one single ~2s window** - essentially the entire core.
+- **The GPU itself is verified idle and healthy throughout**: the `gpu
+  ring` read during this exact window shows `rptr=68 wptr=68` (fully
+  drained, matching exactly) and `gpu irq delta: 0`.
+- `jbd2/sda37-8` (the root filesystem's own journaling thread) and
+  `kworker/0:1H-kblockd` (block-layer workqueue) both appear in the same
+  window with minimal ticks - present in the picture, not the ones stuck.
+
+**This strongly suggests the GPU fault/recover cascade chased through
+most of this investigation was a correlated symptom, not the root
+cause** - Minecraft's heavy asset loading generates real memory/storage
+pressure as a side effect of loading, which is probably what was
+actually triggering the freeze the whole time, with the GPU hangcheck
+messages just being incidental background activity that happened to be
+visible in captures taken during real usage. The `CONFIG_QCOM_ICC_BWMON`
+fix and the `fault_coredump_done` bounded-wait fix (`kernel/patches/
+0006-...`) are both still worth keeping, but neither should be expected
+to fix this - the real target is now a stuck generic workqueue worker
+under memory/writeback pressure, not anything GPU-specific.
+
+Added a stuck-core kernel-stack capture to `capture_watch.py` (the
+moment any core is >=95% busy for 4 consecutive light samples, snapshot
+exactly which thread is `RUNNING` there via a live `/proc` scan and dump
+its real kernel stack from `/proc/<pid>/task/<tid>/stack`) - not yet
+exercised on a real crash, since this improvement landed after this
+particular repro already completed. Next test should show the exact
+kernel function `kworker/7:2+events` (or whichever worker/core is
+implicated next time) is actually stuck in.
