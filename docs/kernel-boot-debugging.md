@@ -6165,3 +6165,47 @@ SMMU stall-on-fault race (fits the GL-object-churn theory), or the
 zap-shader/zap-region devicetree carveout (a documented historical cause
 of literal whole-system freezes on this exact SoC family, not just GPU
 hangs).
+
+### Real GPU fault/recover deadlock evidence, and a fix attempt that changed the signature without confirming the fix (2026-09-21)
+
+A userspace capture tool (`tools/loadtest/capture_watch.py`, fsync'd to
+real storage instead of pstore's small DRAM region - full detail in
+`docs/load-test-modules.md`) finally captured real lead-up on three
+independent real crashes: a rapid-fire sequence of genuine GPU faults
+(`[drm:a6xx_irq] gpu fault` -> `[drm:recover_worker] hangcheck
+recover!`), recovering successfully several times (fence counters
+climbing, `rptr`/`wptr` resyncing) before, each time, a final attempt
+that either showed an unresynced ring or produced an IRQ spike with no
+recovery message at all, immediately followed by total silence.
+
+Checked `references/ubuntu-galaxy-tab-s9-ultra`'s own real diagnosis for
+the same GPU driver family (`docs/gpu-recovery.md` there) and confirmed
+the exact same code, line-for-line, in this project's own tree: a real
+circular-lock deadlock between GPU fault recovery and fault-capture
+completion. `recover_worker()`/`msm_gpu_fault_crashstate_capture()`
+(`drivers/gpu/drm/msm/msm_gpu.c`) both need `gpu->lock`, while
+`a6xx_gmu_set_oob()`/`a6xx_hfi_wait_for_msg_interrupt()` can be reached
+from inside recovery while it already holds that lock, and both did an
+*unbounded* `wait_for_completion()` on the one completion only
+`crashstate_capture` ever signals. Confirmed via online research this is
+a known, acknowledged-but-unfixed upstream gap (freedreno list
+msg39107/msg39108, July 2025 - the GMU maintainer flagged this exact
+scenario during the original patch's own review; it merged anyway,
+unfixed).
+
+Applied the S9 Ultra project's own fix (bound both waits to a 1s timed
+retry - `kernel/patches/0006-bound-fault-coredump-wait-a6xx.patch`),
+built, flashed, retested. **The device still froze, but the failure's
+signature genuinely changed**: instead of instant silent death, this run
+captured a single CPU core (`cpu0`) pinning at exactly 100% and staying
+there, unchanging, for over 1.5 continuous seconds before the system
+died - direct, sustained evidence of a spin never seen this clearly
+before. **However, the patch's own new error path never fired** despite
+dozens of chances to catch it, so this is *not* confirmed to be the
+actual root cause - either a different, still-unbounded loop is the
+real culprit, or something downstream of the new timeout return doesn't
+handle the failure gracefully and spins elsewhere instead. Keeping the
+fix in place regardless (real improvement on its own terms - recovery no
+longer waits forever), but the freeze itself remains unresolved. Full
+detail, including the exact byte-for-byte evidence, in
+`docs/load-test-modules.md`.

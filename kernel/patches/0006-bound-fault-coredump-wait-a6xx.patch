@@ -49,9 +49,22 @@ changes what happens when a fault capture is genuinely stuck. Not a claim to
 fix the initial GPU fault itself - only to stop recovery from deadlocking on
 top of it.
 
-Status: built and flashed to real hardware for testing (2026-09-21). Not yet
-confirmed whether it resolves or changes the freeze's character - see
-docs/load-test-modules.md for the test log.
+Status: built, flashed, and tested on real hardware (2026-09-21) - see
+docs/load-test-modules.md ("Fix attempt: bounded fault_coredump_done wait")
+for the full test log. Device still froze, but the failure's observable
+signature changed: instead of instant silent death, this run captured a
+single CPU core pinning at 100% and staying there, unchanging, for over
+1.5 continuous seconds before the system died - direct, sustained evidence
+of a spin never seen this clearly before. However, this patch's own new
+error path (`DRM_DEV_ERROR("Timeout waiting for GMU OOB...")`) never fired
+during that window, despite dozens of opportunities to catch it - so this
+is NOT confirmed to be the actual root cause. Either a different, still-
+unbounded loop is the real culprit, or something downstream of this fix's
+new timeout return doesn't handle the failure gracefully and spins
+elsewhere instead. Keep this fix in place (it's still a real improvement -
+recovery no longer waits forever on a stuck completion), but the freeze
+itself remains unresolved and needs further investigation targeting
+whatever is actually spinning.
 
 diff --git a/drivers/gpu/drm/msm/adreno/a6xx_gmu.c b/drivers/gpu/drm/msm/adreno/a6xx_gmu.c
 index 2e5d7b53a..5e587bf65 100644

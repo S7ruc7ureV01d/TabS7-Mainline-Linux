@@ -354,3 +354,72 @@ way: a burst of GPU interrupt activity coinciding with the app launch,
 immediately followed by total death, with no clean fault-and-recover
 message this time - a real escalation pattern, not proof of the specific
 deadlock mechanism yet.
+
+## 50ms sampling retest: final recovery shows an unresynced ring (2026-09-21)
+
+Sped `capture_watch.py` up to 50ms sampling (benchmarked headroom: ~1.6ms
+of actual work per light cycle against the old 300ms interval) with
+millisecond timestamps. Crashed again. Same repeated fault/recover
+pattern (multiple clean cycles, `rptr`==`wptr` resync each time), but
+**the final recovery attempt this run showed `rptr=1068`, `rb wptr:
+1417`** - a real, unresolved gap, unlike every prior successful recovery
+in any capture so far, where they matched exactly right after the
+recovery message printed. Immediately before this, `gpu-irq` delta hit
+**738** in one window - the largest spike yet. CPU saturation then
+spread across *multiple* cores simultaneously (not one), `MemFree`
+dropped ~200MB in the final 400ms, and the log stopped cold, matching
+the host monitor's last-alive reading almost exactly. Converging
+evidence across three real crashes now: elevated GPU IRQ activity right
+before death, escalating multi-core saturation, fast memory drop, then
+silence - and this time, direct evidence the final recovery attempt
+didn't finish resyncing before everything died.
+
+## Fix attempt: bounded `fault_coredump_done` wait (`kernel/patches/0006-...`) - changed the signature, not proven to have fixed it (2026-09-21)
+
+Applied the S9 Ultra project's bounded-wait fix (see the patch file for
+full reasoning) to `a6xx_gmu.c`/`a6xx_hfi.c`, built, flashed (kernel
+`#70`). Retested.
+
+**Froze again - before Minecraft was even launched this time** (the
+owner saw "a bunch of kwin desktop effects restart" messages, i.e.
+several GPU-reset recoveries during idle desktop use, then a full
+freeze). `capture_watch.log` survived and shows something genuinely new:
+
+- Same repeated fault/recover pattern (8 cycles this run, matching the
+  owner's "a bunch of these" observation), each showing `hangcheck
+  recover!` + an offending task. The **final** one again shows an
+  unresynced ring (`rptr: 5181`, `rb wptr: 5647`), same as the previous
+  run's final attempt.
+- Then, for the first time, **`cpu0` pins at exactly 100.0% and stays
+  there, unchanging, for over 1.5 continuous seconds** (30+ consecutive
+  50ms samples) while every other core drops to near-idle - direct,
+  sustained evidence of a single-core spin, never captured this clearly
+  before.
+- **The patch's own new error path
+  (`DRM_DEV_ERROR("Timeout waiting for GMU OOB...")`) never fired**,
+  despite `cpu0` being stuck long enough for 30+ kmsg-drain opportunities
+  (kmsg draining runs on whatever core the scheduler puts our script on,
+  which kept working fine on other cores throughout the pin - confirmed
+  by the log itself continuing to write for the full 1.5s). This means
+  we do **not** have direct proof the code we patched is what's
+  actually spinning - either a different, unbounded loop is the real
+  culprit, or something downstream of our new timeout return doesn't
+  handle the failure gracefully and spins somewhere else instead.
+- Notable: the host monitor's SSH check went unreachable ~2-3 seconds
+  *before* our own on-device script finally stopped writing - networking
+  died first, general scheduling failed later. Consistent with `cpu0`'s
+  spin gradually starving the rest of the system rather than an instant,
+  uniform freeze.
+
+**Conclusion: the fix changed the failure's observable signature (a
+sustained, capturable single-core spin instead of instant silent death)
+but is not confirmed to have addressed the actual root cause** - we
+don't know yet whether the spin is inside the code we bounded or
+somewhere else entirely. A real gap surfaced: the heavy-cycle process
+snapshot only runs every ~2s and the next one never fired before the
+system died, so we have no thread-level attribution for what's actually
+running on `cpu0` during the pin. Next step, not yet implemented: an
+adaptive trigger that takes an immediate heavy sample the moment any
+core exceeds ~95% for a couple of consecutive light samples, instead of
+waiting for the fixed cadence - specifically to catch which thread is on
+the pinned core.
