@@ -1,0 +1,7 @@
+# Grant the video group (the active seat's desktop user, gts7l, is
+# already a member) write access to backlight brightness controls.
+# systemd's own uaccess-tag mechanism (73-seat-late.rules) exists for
+# this but its ACL grant didn't apply here even after retriggering
+# with the tag set (2026-09-21) - using a plain group-ownership rule
+# instead, simpler and more directly verifiable.
+SUBSYSTEM=="backlight", RUN+="/bin/chgrp video /sys/class/backlight/%k/brightness", RUN+="/bin/chmod 664 /sys/class/backlight/%k/brightness"

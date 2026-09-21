@@ -80,7 +80,18 @@ CONFIG_FB_SIMPLE=y
 # belt-and-suspenders only, per this file's own Round 22 note). Meant to
 # be dropped again once the pseudo-NMI trial is done (~5% runtime cost
 # while active, per the research doc) - not a permanent addition.
-CONFIG_CMDLINE="console=tty0 loglevel=15 clk_ignore_unused irqchip.gicv3_pseudo_nmi=1"
+# rootflags=nodelalloc (2026-09-21, docs/load-test-modules.md/
+# kernel-boot-debugging.md "Root cause found"): testing whether
+# disabling ext4 delayed allocation avoids the real spinlock stuck in
+# ext4_da_reserve_space() under heavy write load (storage_load.sh
+# reproduces in seconds). Confirmed the hard way that this can NOT be
+# applied via `mount -o remount` or /etc/fstab - ext4 explicitly refuses
+# ("can't disable delalloc during remount") since root is already
+# mounted with delalloc by the time fstab is processed, both manually
+# and via systemd-remount-fs at boot. rootflags on the kernel cmdline
+# is applied at the kernel's own initial mount of root, before that
+# restriction can apply.
+CONFIG_CMDLINE="console=tty0 loglevel=15 clk_ignore_unused irqchip.gicv3_pseudo_nmi=1 rootflags=nodelalloc"
 CONFIG_CMDLINE_FORCE=y
 
 # Round 24 (2026-09-19, docs/kernel-boot-debugging.md): the memory-node fix

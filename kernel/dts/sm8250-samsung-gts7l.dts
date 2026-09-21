@@ -408,7 +408,7 @@
 	 * kept in sync manually. See that file for the pseudo-NMI trial's
 	 * irqchip.gicv3_pseudo_nmi=1 note.
 	 */
-	bootargs = "console=tty0 loglevel=15 clk_ignore_unused irqchip.gicv3_pseudo_nmi=1";
+	bootargs = "console=tty0 loglevel=15 clk_ignore_unused irqchip.gicv3_pseudo_nmi=1 rootflags=nodelalloc";
 };
 
 /*
