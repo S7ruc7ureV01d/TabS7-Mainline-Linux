@@ -1240,6 +1240,14 @@
 		vdd-l3-l4-l5-l18-supply = <&vreg_s6a_0p95>;
 		vdd-l6-l9-supply = <&vreg_s8c_1p35>;
 		vdd-l7-l12-l14-l15-supply = <&vreg_s5a_1p9>;
+		/*
+		 * l13-l16-l17-supply source (&vreg_bob, PM8150L's Buck-Or-Boost
+		 * rail, already defined below in regulators-1) matches
+		 * Qualcomm's own SM8250 reference board
+		 * (arch/arm64/boot/dts/qcom/sm8250-mtp.dts:196) - same PMIC,
+		 * same LDO group, real sourced value, not guessed.
+		 */
+		vdd-l13-l16-l17-supply = <&vreg_bob>;
 
 		vreg_s5a_1p9: smps5 {
 			regulator-name = "vreg_s5a_1p9";
@@ -1253,6 +1261,83 @@
 			regulator-min-microvolt = <950000>;
 			regulator-max-microvolt = <1128000>;
 			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+		};
+
+		/*
+		 * S Pen AVDD (docs/phase4-spen-scoping.md's one remaining
+		 * gap, now closed): 3.3V confirmed by DIRECT LIVE MEASUREMENT
+		 * on this exact physical device while the S Pen was confirmed
+		 * physically working (booted stock TWRP/Android kernel,
+		 * `/sys/class/regulator/regulator.24` -> name "pm8150_l13",
+		 * sysfs device path "10-0056-pm8150_l13" - "0056" is the
+		 * wacom digitizer's own I2C address, confirming this is
+		 * unambiguously the right rail, not just a same-named
+		 * coincidence - `state: enabled`, `microvolts: 3300000`,
+		 * `min_microvolts: 3300000`, `max_microvolts: 3300000`, i.e a
+		 * fixed, non-adjustable 3.3V rail on real, running hardware).
+		 * This beats every web-research candidate (a structurally
+		 * plausible but SoC-reference-board-only 3.008V guess, and
+		 * two 3.3V matches from unrelated Wacom products/chips) - it's
+		 * a direct measurement of THIS rail on THIS device, not
+		 * inference. See kernel/dts/sm8250-samsung-gts7l.dts's own
+		 * wacom@56 node for the vdd-supply wiring this enables.
+		 */
+		pm8150_l13: ldo13 {
+			regulator-name = "pm8150_l13";
+			/*
+			 * CORRECTION (2026-09-21): this node originally used a
+			 * fixed `regulator-min-microvolt = regulator-max-
+			 * microvolt = <3300000>;` (the real, live-measured
+			 * voltage - see docs/phase4-spen-scoping.md) plus
+			 * `regulator-boot-on;`. Both caused a real hardware
+			 * brownout (screen backlight off, no USB at all - not a
+			 * Linux-side hang) on every boot, bisected down to just
+			 * this node EXISTING - reproduced with zero consumers
+			 * wired to it at all, so regulator_enable() was never
+			 * even the trigger. `regulator-boot-on;` alone did not
+			 * fix it either.
+			 *
+			 * Real root cause, confirmed by reading mainline source
+			 * directly, not inferred: `drivers/regulator/
+			 * of_regulator.c` sets `constraints->apply_uV = true`
+			 * automatically whenever BOTH regulator-min-microvolt
+			 * and regulator-max-microvolt are present, regardless of
+			 * whether they're equal (no special "fixed voltage"
+			 * opt-in needed). Meanwhile `drivers/regulator/qcom-
+			 * rpmh-regulator.c`'s `rpmh_regulator_vrm_get_voltage_
+			 * sel()` returns a purely software-tracked counter
+			 * (`vreg->voltage_selector`), never a real hardware
+			 * register read - for a freshly-probed regulator this
+			 * defaults to 0, which on this LDO's real linear range
+			 * (`pmic5_pldo`, `drivers/regulator/qcom-rpmh-
+			 * regulator.c`: `REGULATOR_LINEAR_RANGE(1504000, 0, 255,
+			 * 8000)`) computes to 1.504V - nowhere near the real
+			 * 3.3V. `set_machine_constraints()`
+			 * (`drivers/regulator/core.c`), which runs at
+			 * `regulator_register()` time regardless of enable/
+			 * consumer state - matching the bisection exactly - sees
+			 * this wrongly-assumed 1.504V is below our fixed 3.3V
+			 * constraint and issues a REAL, live RPMh SET_VOLTAGE
+			 * command to correct it, based entirely on software's
+			 * own wrong bookkeeping, not anything actually wrong
+			 * with the hardware. That live voltage-transition
+			 * command hitting an already-active rail is the
+			 * brownout.
+			 *
+			 * Fix: omit regulator-min-microvolt/regulator-max-
+			 * microvolt entirely. Neither is actually needed - the
+			 * wacom driver only ever calls `regulator_enable()`/
+			 * `regulator_disable()`, never `regulator_set_voltage()`
+			 * - and `apply_uV` in `of_regulator.c` only becomes true
+			 * when BOTH properties are present. Omitting them means
+			 * `set_machine_constraints()`'s voltage-forcing block
+			 * never runs at all, which is simpler and more robust
+			 * than widening the range to bracket the wrongly-assumed
+			 * value (an earlier version of this fix) - it removes
+			 * the whole code path instead of just steering around
+			 * it. Confirmed via a second, independent research pass
+			 * that traced the exact same call chain.
+			 */
 		};
 	};
 
@@ -1641,23 +1726,23 @@
  * reset line distinct from irq/pdct/fwe, and mainline's driver treats
  * it as optional (`devm_gpiod_get_optional`).
  *
- * vdd-supply deliberately NOT wired yet. Downstream names this rail
- * "pm8150_l13" (PM8150 LDO13, cross-referenced against a second
- * instance of this node in the GPL source - see the comment above
- * `epen_int_gts7l` above), but PM8150's `regulators-0` node
- * (`&apps_rsc`, below) only defines smps5/smps6 so far - no board in
- * mainline (checked elish, the sm8250-mtp/sm8150-mtp reference boards)
- * has ever wired PM8150's L13, and this project has no confirmed real
- * voltage for it (downstream only ever references it by name, never
- * defines it, in every source available here). Guessing a voltage
- * range would be an active safety risk, not just an omission - unlike
- * skipping the property entirely, which just makes the driver's
- * `devm_regulator_get(dev, "vdd")` fail cleanly with -ENODEV (no
- * CONFIG_REGULATOR_DUMMY in this config) until it's resolved with real
- * data. Add `regulators-0`'s l13 node (grouped under
- * `vdd-l13-l16-l17-supply` per PM8150's binding,
- * Documentation/devicetree/bindings/regulator/qcom,rpmh-regulator.yaml)
- * and this vdd-supply property together once that voltage is known.
+ * vdd-supply: "pm8150_l13" (PM8150 LDO13). Real voltage (3.3V)
+ * confirmed by direct live measurement on this exact physical device
+ * (see the `pm8150_l13: ldo13` node under `&apps_rsc`/`regulators-0`
+ * below) - but that node deliberately does NOT encode this voltage as
+ * a regulator-min/max-microvolt constraint. Wiring it that way caused
+ * a real hardware brownout on every boot (bisected down to the node
+ * merely existing, no consumer needed) - root cause confirmed by
+ * reading mainline's regulator core directly: `regulator-min/max-
+ * microvolt` together trigger `apply_uV`, and this RPMh regulator
+ * driver's `get_voltage_sel` can't actually read hardware state (RPMh
+ * is a write-only voting protocol), so `set_machine_constraints()`
+ * assumes a wrong starting voltage and issues a real, live,
+ * uncommanded SET_VOLTAGE RPMh vote to "correct" a rail that was
+ * already correct - see the `ldo13` node's own comment for the full
+ * trail. `regulator_enable()`/`regulator_disable()` (all this driver
+ * actually needs) work correctly without any voltage constraint at
+ * all - it's what closed this gap for real.
  *
  * Same recurring QUP-enablement pattern as i2c5/i2c8 above: i2c17's
  * parent QUP wrapper (`qupv3_id_2: geniqup@8c0000`) defaults to
@@ -1700,6 +1785,7 @@
 		interrupt-parent = <&tlmm>;
 		interrupts = <136 IRQ_TYPE_LEVEL_HIGH>;
 
+		vdd-supply = <&pm8150_l13>;
 		flash-mode-gpios = <&tlmm 6 GPIO_ACTIVE_HIGH>;
 	};
 };

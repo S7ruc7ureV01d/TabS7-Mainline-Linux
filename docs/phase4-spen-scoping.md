@@ -166,15 +166,88 @@ references this rail) and add `regulators-0`'s `l13` node (grouped
 under `vdd-l13-l16-l17-supply` per PM8150's binding) plus the
 `vdd-supply` property on the wacom node together.
 
+## Real hardware brownout, found and fixed (2026-09-21)
+
+Wiring the AVDD rail was not as simple as finding its real voltage
+(3.3V, confirmed by direct live measurement on this exact device via
+`/sys/class/regulator/regulator.24` in stock TWRP/Android - `state:
+enabled`, `microvolts: 3300000`, `min_microvolts` = `max_microvolts` =
+`3300000`, sysfs device path `10-0056-pm8150_l13` independently
+confirming it's the right rail since `0056` is the wacom digitizer's
+own I2C address). Wiring that measured voltage directly as
+`regulator-min-microvolt`/`regulator-max-microvolt` on the new
+`pm8150_l13` node caused a **real hardware brownout on every single
+boot** - backlight off, USB completely unresponsive, no kernel panic,
+nothing in pstore. Confirmed via careful bisection (with the owner's
+suggestion to test toggling the live regulator directly, which turned
+out to be blocked by the sysfs `state` file being read-only with no
+debugfs override available - a real dead end, documented so a future
+session doesn't retry it) that the crash happened even with **zero
+consumers wired to the regulator at all** - `regulator_enable()` was
+never even called. `regulator-boot-on` did not help either, with or
+without it.
+
+**Root cause, confirmed by reading mainline source directly** (cross-
+checked by two independent research passes that both traced the same
+code path):
+- `drivers/regulator/of_regulator.c`'s devicetree parsing sets
+  `constraints->apply_uV = true` automatically whenever BOTH
+  `regulator-min-microvolt` and `regulator-max-microvolt` are present
+  - no special "fixed voltage" opt-in needed, and it doesn't matter
+  whether they're equal.
+- `drivers/regulator/qcom-rpmh-regulator.c`'s
+  `rpmh_regulator_vrm_get_voltage_sel()` returns a purely software-
+  tracked counter (`vreg->voltage_selector`), never a real hardware
+  register read - RPMh is a write-only voting protocol; there's no way
+  for the AP to query a rail's real aggregated hardware voltage at
+  all. This field defaults to 0 at probe.
+- `drivers/regulator/core.c`'s `set_machine_constraints()`, which runs
+  at `regulator_register()` time - i.e. at **probe, unconditionally,
+  regardless of enable/consumer state**, matching the bisection result
+  exactly - sees `apply_uV` is true, computes a "current" voltage from
+  that always-zero selector (1.504V on this LDO's real linear range,
+  `pmic5_pldo`: `REGULATOR_LINEAR_RANGE(1504000, 0, 255, 8000)`), finds
+  it's below our fixed-3.3V constraint, and issues a real, live,
+  **uncommanded RPMh SET_VOLTAGE vote** to "correct" a rail that was
+  already correct - based entirely on software's own wrong bookkeeping
+  about a protocol it fundamentally cannot read back.
+
+**Fix**: omit `regulator-min-microvolt`/`regulator-max-microvolt`
+entirely on the `pm8150_l13` node. Neither is actually needed - the
+wacom driver only ever calls `regulator_enable()`/
+`regulator_disable()`, never `regulator_set_voltage()` - and without
+both properties present, `apply_uV` never becomes true, so
+`set_machine_constraints()`'s voltage-forcing block never runs at all.
+Confirmed on real hardware: boots cleanly, no brownout, the regulator
+enables/disables correctly around the driver's probe-time query
+attempt. This is a genuinely useful, exportable finding for any future
+work adding an LDO (not SMPS) to an already-probed PM8150-family RPMh
+regulator block on this or a sibling SoC - the two SMPS rails already
+in this file's `regulators-0` block hit the identical code path but
+apparently tolerate the spurious nudge; this specific LDO's shared
+group (`l13-l16-l17`) evidently does not.
+
+**Current status after the fix**: no brownout, the S Pen still doesn't
+respond over I2C yet (`wacom_w9000 17-0056: error -ENXIO: Failed to
+query`, same failure as before this fix, minus the crash). This is now
+an ordinary, non-destructive driver/timing problem (most likely GPIO
+sequencing or polarity on the `flash-mode-gpios` line, or the driver's
+`msleep(200)` power-up delay not matching this exact chip's real
+requirement) rather than a hardware safety issue - safe to iterate on
+without needing a hard reset each time.
+
 ## Bottom line
 
-This was a bounded, moderate-scope task, confirmed by actually doing
-it: real driver extension (~60 lines, see the patch) plus real DT/GPIO/
-QUP-bus archaeology (same resolved-phandle and QUP-wrapper-enablement
-patterns already established for MAX77705/touchscreen in this
-project), and it's now structurally complete and verified on real
-hardware down to one single, clearly-isolated remaining gap (a real
-voltage number for one PM8150 LDO) rather than an open-ended unknown.
+This was a bounded, moderate-scope task for the driver/DT wiring
+itself, confirmed by actually doing it. It surfaced a real, subtle,
+and initially dangerous mainline regulator-core interaction (above)
+that took several hard-reset cycles to properly isolate and fix -
+worth remembering as a general lesson for this project: a regulator's
+*live-measured* voltage is not automatically safe to encode as a DT
+voltage *constraint* when the underlying RPMh (or similar write-only)
+regulator driver can't read hardware state back. The S Pen itself
+still doesn't respond over I2C, but that's now a normal, safe-to-debug
+driver problem, not a hardware risk.
 
 ## Sources
 
