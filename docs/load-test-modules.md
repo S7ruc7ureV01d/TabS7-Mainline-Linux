@@ -325,3 +325,32 @@ indefinitely rather than fault-and-recover), or the zap-shader/zap-region
 devicetree carveout (a documented historical cause of literal whole-system
 freezes, not just GPU hangs, on this exact SoC family during early SM8250
 mainline bring-up).
+
+## Retest with 0.3s kmsg draining: sharper picture, still not conclusive (2026-09-21)
+
+Re-ran with kmsg now drained every light cycle instead of only the ~2s
+heavy tier. Crashed again (last-alive `2026-09-21T02:13:44-03:00`). Same
+recoverable-fault pattern repeated three times (05:13:31/05:13:36/
+05:13:40 - fault, hangcheck recover!, offending task: plasmashell, clean
+resync each time, roughly every 4-5s this run). Then:
+
+- `05:13:45`: `prismlauncher` (the Minecraft launcher) appears in
+  top-procs for the first time.
+- Same instant: the `gpu-irq` delta **spikes to 295**, versus a 20-85
+  baseline in every prior window this run (and the run before it) - a
+  3-15x jump.
+- **No `hangcheck recover!` (or any fault message at all) accompanies
+  this spike** - the kmsg drain at that exact moment shows only a
+  harmless cgroups line.
+- Log stops immediately after, matching the host monitor's last-alive
+  reading almost exactly.
+
+Two readings, can't fully distinguish from this data alone: (1) recovery
+itself got stuck this time (matches the deadlock theory - `recover_worker`
+started, took `gpu->lock`, never got far enough to print anything), or
+(2) whatever happened this time was fast enough that even a 0.3s-cadence
+non-blocking kmsg read never got another turn before the freeze. Either
+way: a burst of GPU interrupt activity coinciding with the app launch,
+immediately followed by total death, with no clean fault-and-recover
+message this time - a real escalation pattern, not proof of the specific
+deadlock mechanism yet.
