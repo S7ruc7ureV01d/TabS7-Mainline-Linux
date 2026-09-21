@@ -237,6 +237,21 @@ def read_kernel_stack(pid, tid):
         return f"(stack unavailable: {e})"
 
 
+def trigger_sysrq_backtrace():
+    """echo l > /proc/sysrq-trigger: NMI backtrace of every CPU, dumped to
+    the kernel log. Requires CONFIG_MAGIC_SYSRQ and sysrq bit 0x4 ("enable
+    debugging dumps") - confirmed this device's default sysrq=16 (0x10,
+    remount-only) does NOT have that bit, so the caller/deployment must
+    also `echo 1 > /proc/sys/kernel/sysrq` once per boot before this can
+    work (not done automatically here - a one-time root action, not
+    something this script should silently change on every run)."""
+    try:
+        with open("/proc/sysrq-trigger", "w") as f:
+            f.write("l")
+    except Exception:
+        pass
+
+
 def read_interrupts():
     out = {}
     try:
@@ -300,6 +315,17 @@ def main():
     prev_irq = read_interrupts()
     kmsg_fd = open_kmsg()
 
+    # Ensure sysrq's cross-CPU NMI backtrace ('l') is actually enabled -
+    # this device's default sysrq=16 (0x10, remount-only) is missing bit
+    # 0x4 ("enable debugging dumps"), which silently no-ops the trigger
+    # the stuck-core detector below depends on. Set once per script start
+    # rather than relying on a manual step being remembered every boot.
+    try:
+        with open("/proc/sys/kernel/sysrq", "w") as f:
+            f.write("1")
+    except Exception:
+        pass
+
     out.write(f"=== capture_watch start {time.strftime('%Y-%m-%dT%H:%M:%S')} ===\n")
     out.flush()
     os.fsync(fd_out)
@@ -354,6 +380,18 @@ def main():
                     stack = read_kernel_stack(pid, tid)
                     for line in stack.splitlines():
                         out.write(f"    {line}\n")
+                # /proc/<pid>/task/<tid>/stack is only reliable for a
+                # SLEEPING task - a task that's genuinely RUNNING right now
+                # has no saved stack to unwind, and reads back as
+                # meaningless garbage (confirmed on a real crash: a single
+                # non-symbol hex value, no real trace). sysrq's
+                # cross-CPU NMI backtrace (arch_trigger_all_cpu_backtrace)
+                # is the correct tool for this - it interrupts every CPU
+                # via NMI and has each one dump its own real, live call
+                # trace to the kernel log. Fire it here; our own kmsg
+                # draining (every light cycle) picks up the result
+                # automatically on the very next iteration.
+                trigger_sysrq_backtrace()
                 out.flush()
                 os.fsync(fd_out)
 
