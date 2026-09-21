@@ -581,3 +581,23 @@ CONFIG_IRQSOFF_TRACER=y
 # CONFIG_PSTORE_COMPRESS is independently selectable (fs/pstore/Kconfig)
 # by design.
 # CONFIG_PSTORE_COMPRESS is not set
+
+# Freeze investigation, continued (2026-09-21): after ruling out
+# cpuidle/PSCI (every level), cpufreq/RPMh bandwidth-vote churn
+# (performance governor still froze), and treating a GPU-scheduler
+# mutex block and an RPMh completion timeout as downstream symptoms
+# rather than root causes (different subsystems show up as "blocked"
+# in different capture runs - the signature of one shared stall being
+# observed through whichever detector happens to catch it first, not
+# several independent bugs) - one thing is common to every single
+# repro that's frozen this device: they all request more memory than
+# is physically available, with zero swap configured (`free -h` showed
+# `Swap: 0B` throughout). CONFIG_ZRAM was never enabled at all. Stock
+# Android ships zram-backed swap by default on virtually every modern
+# device - this is a real, load-bearing difference from stock, not
+# just a missing nice-to-have. Built-in (=y, not =m) for the same
+# reason as other early-boot-critical drivers in this fragment: this
+# project's minimal initramfs doesn't reliably load modules, and swap
+# needs to be available before it matters, not after. See
+# docs/load-test-modules.md for the reasoning and the test this backs.
+CONFIG_ZRAM=y

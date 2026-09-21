@@ -883,3 +883,99 @@ what bandwidth votes are in place during a freeze - this is a
 fundamentally different, more promising direction than anything tried
 so far, since it's the first hypothesis that isn't ruled out by the
 "disable every CPU idle state and it still freezes" result above.
+
+## BWMON, RPMh, cpufreq governor, and swap: all tested, all ruled out as *the* cause (2026-09-21)
+
+Widened the pstore capture window first (`kernel/config/gts7l.fragment`
+already had a real 1MB `ramoops@9fa00000` node -
+`sm8250-samsung-common.dtsi` - just split wastefully: 256KB each for
+console/ftrace/pmsg, neither ftrace-pstore nor `/dev/pmsg0` in use.
+Reallocated to `console-size=0xf0000` (960KB), `ftrace-size=0`,
+`pmsg-size=0`, since console-ramoops is the only backend that's
+actually produced readable forensics all session), which let a
+150ms-interval `/dev/kmsg` logger of `interconnect_summary` +
+`/proc/interrupts` survive several seconds into each crash instead of
+under one second.
+
+- **`QCOM_ICC_BWMON` is real and bound** (correcting an earlier wrong
+  assumption in this file): `9091000.pmu`/`90b6400.pmu`, both attached
+  to the `qcom-bwmon` driver, IRQs 81/581 for LLCC↔DDR and CPU↔LLCC
+  respectively. Both IRQs fire continuously and their counts increment
+  steadily right up to each freeze - the hardware threshold-interrupt
+  mechanism is healthy.
+- The DDR/LLCC bandwidth vote itself never changed across any capture
+  despite the IRQs firing constantly. Initially read as suspicious, but
+  reading `drivers/soc/qcom/icc-bwmon.c`'s `bwmon_intr_thread()`
+  directly shows this is **expected behaviour**, not a bug:
+  `dev_pm_opp_set_opp()` is only called when the newly computed
+  `target_kbps` differs from the currently active one (line ~689-692).
+  A flat vote just means demand never crossed into a different OPP
+  tier. This hypothesis is not confirmed by the evidence after all.
+- **Found something real anyway**, right before an RCU-stall panic in
+  one capture: `sugov_work` (schedutil) → `qcom_cpufreq_hw_target_index`
+  → `dev_pm_opp_set_opp` → `icc_set_bw` → `qcom_icc_bcm_voter_commit` →
+  `rpmh_write_batch`, followed immediately by `Error sending RPMH
+  requests (-110)` - `-ETIMEDOUT`. `RPMH_TIMEOUT_MS` is 10 seconds
+  (`drivers/soc/qcom/rpmh.c:25`); the timing lines up with the RCU
+  stall detector's own window almost exactly, meaning whatever blocks
+  RPMh's completion had already been stuck well before the RPMh call
+  even timed out - **this is a downstream symptom of the freeze
+  already starting, not the trigger.**
+- **Tested directly:** switched all 8 CPUs to the `performance`
+  governor (`echo performance > .../scaling_governor`, no reboot
+  needed) to eliminate `schedutil`-driven RPMh bandwidth-vote churn
+  entirely, then reran the 3G repro. **Still froze.** This rules out
+  cpufreq/RPMh vote frequency as a necessary trigger.
+- That same performance-governor run's panic showed a **third,
+  different** symptom: `msm_job_run` (GPU DRM job scheduler) blocked
+  >4s on `gpu->lock` (`msm_ringbuffer.c:38`) - the same lock from the
+  GPU-fault-recovery deadlock theory from early in this investigation
+  (already mitigated by `kernel/patches/0006-...patch`, confirmed still
+  applied). The reported lock owner (pid reused from an earlier,
+  unrelated process in the same capture) couldn't be reliably
+  identified, so this is best read as another downstream victim, not a
+  confirmed second GPU-specific bug.
+- **Noticed swap was completely absent**: `CONFIG_ZRAM` was never
+  enabled, `free -h` showed `Swap: 0B` in every single test all
+  session. Stock Android ships zram swap by default on virtually every
+  device, so every repro this whole investigation has been hitting a
+  hard OOM condition with zero pressure-relief valve - a real,
+  load-bearing difference from stock, and a very plausible root cause
+  candidate on its own merits (independent of anything else tried).
+  **Tested directly:** added `CONFIG_ZRAM=y` (built-in, not `=m` - this
+  project's minimal initramfs doesn't reliably load modules), set up a
+  4GB `/dev/zram0` swap device at runtime (`mkswap` + `swapon`,
+  confirmed via `free -h` showing `Swap: 4.0Gi`), reran the exact 3G
+  repro. **Still froze.** This rules out total swap absence as the (or
+  a sole) necessary trigger too.
+- That zram-swap run's panic showed a **fourth** different symptom:
+  `jbd2_log_wait_commit`/`ext4_fsync` (an `fsync()` call blocked on the
+  ext4 journal) and, separately, a Bluetooth HCI RX worker blocked on
+  `synchronize_rcu`. Again `SMP: failed to stop secondary CPUs`.
+
+**This is the real pattern, and it's now airtight across five
+independent captures**: cpuidle/PSCI (`cpu_suspend`), RPMh
+(`rpmh_write_batch`), the GPU scheduler (`gpu->lock`), the RCU grace-
+period kthread itself, and now ext4/Bluetooth - a *different*
+subsystem shows up as "the blocked task" in nearly every single crash.
+That is the signature of **one shared, system-wide stall being
+observed through whichever detector or watchdog happens to catch it
+first**, not five independent bugs. Every one of cpuidle (every
+level), cpufreq/RPMh vote frequency, BPF JIT, and total swap absence
+has now been individually tested and individually ruled out as *the*
+necessary trigger. The `cluster_sleep_0` disable (`patch 0008`) remains
+the one genuine, confirmed fix - for the *moderate*-pressure case only.
+
+**Where this leaves the investigation:** the remaining live hypothesis
+is a genuine interconnect/NoC/DDR bus-fabric saturation event under
+sustained heavy memory-bandwidth load - below every layer of Linux
+software configuration tested so far (idle states, cpufreq governor,
+JIT compilation, swap availability). This doesn't mean it's
+unfixable - the earlier finding that mainline's BWMON never requests a
+*higher* bandwidth tier because demand never crosses an OPP threshold
+is worth a second look from a different angle: check what OPP/bandwidth
+tier is actually *active* by default under this workload (not just
+whether BWMON asks to change it) and whether it's plausibly sized for
+worst-case DDR bandwidth demand at all, or forcibly pin the
+interconnect to its maximum tier for a test, independent of BWMON's
+own threshold logic.

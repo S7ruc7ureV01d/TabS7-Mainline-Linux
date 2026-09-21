@@ -1,0 +1,59 @@
+Widens the crash-forensics capture window for the ongoing freeze
+investigation (docs/load-test-modules.md). The existing
+ramoops@9fa00000 node (sm8250-samsung-common.dtsi, included by the
+board .dts) already had a real 1MB pstore/ramoops carveout, just split
+wastefully for this project's actual needs: 256KB each for
+record/console/ftrace/pmsg. Neither CONFIG_PSTORE_FTRACE nor
+/dev/pmsg0 userspace logging is in use, and the plain-text
+console-ramoops backend is the only one that's actually produced
+readable crash forensics all session (this device has a real
+read-time bit-corruption problem, documented at length elsewhere in
+this project - plain text survives it well enough to read around
+individual garbled characters; a single bit flip anywhere in a
+compressed dmesg-ramoops stream corrupts everything after it).
+
+Every real hard-freeze capture before this change only had about one
+second of runway before the crash (256KB filled fast at
+printk/kmsg-injection sampling rates), not enough to see the lead-up
+to a freeze rather than just its immediate aftermath.
+
+Reallocates the same 1MB total: console-size 256KB -> 960KB
+(0xf0000), ftrace-size and pmsg-size both dropped to 0. No new
+reserved-memory region needed - stays within the existing carveout.
+
+Status: built and tested. Confirmed a meaningfully longer capture
+window (several seconds instead of under one) in subsequent crashes.
+
+diff --git a/arch/arm64/boot/dts/qcom/sm8250-samsung-common.dtsi b/arch/arm64/boot/dts/qcom/sm8250-samsung-common.dtsi
+index ef7ea4f72..3be325069 100644
+--- a/arch/arm64/boot/dts/qcom/sm8250-samsung-common.dtsi
++++ b/arch/arm64/boot/dts/qcom/sm8250-samsung-common.dtsi
+@@ -47,10 +47,25 @@ cont_splash_mem: memory@9c000000 {
+ 		ramoops@9fa00000 {
+ 			compatible = "ramoops";
+ 			reg = <0x0 0x9fa00000 0x0 0x100000>;
++			/*
++			 * Reallocated (2026-09-21, freeze investigation): the
++			 * ftrace-size and pmsg-size zones are dead weight here -
++			 * neither CONFIG_PSTORE_FTRACE nor /dev/pmsg0 userspace
++			 * logging is in use - while console-size (plain text,
++			 * survives this device's read-time bit corruption far
++			 * better than a compressed dmesg-ramoops record) is the
++			 * only backend that has actually produced usable crash
++			 * forensics all session. Every real capture from a hard
++			 * freeze so far only had ~1s of runway before the crash
++			 * (256KB filled fast at printk/kmsg-injection rates), not
++			 * enough to see the lead-up. Total stays within the
++			 * existing 0x100000 (1MB) carveout, no new reserved-memory
++			 * region needed. See docs/load-test-modules.md.
++			 */
+ 			record-size = <0x4000>;
+-			console-size = <0x40000>;
+-			ftrace-size = <0x40000>;
+-			pmsg-size = <0x40000>;
++			console-size = <0xf0000>;
++			ftrace-size = <0x0>;
++			pmsg-size = <0x0>;
+ 			no-map;
+ 		};
+ 	};
