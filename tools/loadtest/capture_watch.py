@@ -109,16 +109,20 @@ def read_loadavg():
 
 
 def read_dpu_crtc_state():
-    """DPU (display controller) side state - separate from the GPU/a6xx
-    ring above. kmsg has shown recover_worker errors attributed to the
-    display controller (ae01000.display-controller) too, not just the
-    GPU (3d00000.gpu) - worth watching both independently."""
-    try:
-        with open(DPU_CRTC_STATE, "rb") as f:
-            chunk = f.read(300).decode("utf-8", "replace")
-        return " ".join(chunk.split())
-    except Exception as e:
-        return f"(unavailable: {e})"
+    """REMOVED FROM USE (kept only so the function exists if anyone
+    re-derives this) - reading DPU_CRTC_STATE
+    (/sys/kernel/debug/dri/0/crtc-0/state) triggers a real kernel
+    WARN_ON on this device, every single time, in
+    dpu_crtc_debugfs_state_show (drivers/gpu/drm/msm/disp/dpu1/
+    dpu_crtc.c:627) - confirmed directly: 84 occurrences in an 820-line
+    capture_watch.log, starting at line 22 (i.e. within the first
+    second of reading it), tainting the kernel (Tainted: G W) and
+    producing a real printk storm (a 30-40 line stack trace every 0.3s
+    read). This almost certainly caused (or heavily contributed to) a
+    real crash during testing that had nothing to do with Minecraft -
+    do not re-enable this specific debugfs read without first fixing
+    whatever locking precondition dpu_crtc.c:627 assumes."""
+    return "(disabled - see docstring, WARN_ON on this kernel)"
 
 
 def read_meminfo_brief():

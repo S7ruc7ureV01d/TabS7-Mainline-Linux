@@ -156,6 +156,41 @@ Full captured log for this crash: available in this project's scratch
 area; not committed to the repo (large, single-crash-specific raw data,
 not a durable artifact - the summary above is what's durable).
 
+## Self-inflicted crash from `capture_watch.py` itself (2026-09-21) - false lead, now fixed
+
+After adding a DPU-side debugfs read (`/sys/kernel/debug/dri/0/crtc-0/
+state`) to `capture_watch.py` per the owner's "think about what other
+low-level debug we can add" request, the very next test run crashed
+within seconds - **before Minecraft was even launched**, on an otherwise
+idle desktop. Traced directly, not guessed: `capture_watch.log` showed
+84 occurrences of a real kernel `WARN_ON` (`dpu_crtc_debugfs_state_show`,
+`drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.c:627`, `CPU#N: python3/<our
+own pid>`) in an 820-line log, starting at line 22 - i.e. within the
+first second of the script reading that file. Reading this specific
+debugfs file apparently violates a locking precondition the driver
+assumes is only ever true when the real DRM/KMS subsystem calls it
+internally, not when read raw from an unrelated process - it produces a
+genuine ~30-40 line stack-trace printk burst *every single read*, at our
+0.3s cadence. That's a real printk storm (2500+ log lines in well under
+a minute), which tainted the kernel (`Tainted: G W`) and very likely
+caused (or heavily contributed to) this specific crash on its own -
+**this crash is a false lead for the actual freeze investigation, not a
+Minecraft repro, and should be discarded from that data set.**
+
+Also notable: pstore's own recovery this time reported an even more
+garbled header than usual (`found existing invalid buffer, size
+4452340` - larger than the entire 1MB region itself), plausibly because
+the printk storm itself corrupted the ring buffer's header worse than a
+typical crash does.
+
+**Fixed**: `read_dpu_crtc_state()` disabled (returns a placeholder
+string instead of reading the file) - do not re-enable without first
+understanding/fixing whatever locking precondition `dpu_crtc.c:627`
+assumes. Rest of `capture_watch.py` (GPU ring bounded read, IRQ deltas,
+per-thread breakdown, meminfo, per-core CPU%) was already confirmed
+clean across two earlier idle-desktop smoke tests before this addition
+- no reason to distrust those parts.
+
 ## Real Minecraft repro, same session (2026-09-21)
 
 Since all three synthetic modules survived, ran the actual Minecraft repro
