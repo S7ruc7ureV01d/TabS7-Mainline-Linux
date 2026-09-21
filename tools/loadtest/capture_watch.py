@@ -44,6 +44,7 @@ HEAVY_EVERY = 7  # ~every ~2s at 0.3s sampling
 GPU_DEBUGFS = "/sys/kernel/debug/dri/0/gpu"
 GPU_DEBUGFS_READ_BYTES = 400  # covers the header, stops before the ascii85 ring dump
 GPU_DEVFREQ = "/sys/class/devfreq/3d00000.gpu"
+DPU_CRTC_STATE = "/sys/kernel/debug/dri/0/crtc-0/state"
 
 CLK_TCK = os.sysconf("SC_CLK_TCK")
 
@@ -103,6 +104,34 @@ def read_loadavg():
     try:
         with open("/proc/loadavg") as f:
             return f.read().strip()
+    except Exception as e:
+        return f"(unavailable: {e})"
+
+
+def read_dpu_crtc_state():
+    """DPU (display controller) side state - separate from the GPU/a6xx
+    ring above. kmsg has shown recover_worker errors attributed to the
+    display controller (ae01000.display-controller) too, not just the
+    GPU (3d00000.gpu) - worth watching both independently."""
+    try:
+        with open(DPU_CRTC_STATE, "rb") as f:
+            chunk = f.read(300).decode("utf-8", "replace")
+        return " ".join(chunk.split())
+    except Exception as e:
+        return f"(unavailable: {e})"
+
+
+def read_meminfo_brief():
+    try:
+        with open("/proc/meminfo") as f:
+            out = {}
+            for line in f:
+                if line.startswith(("MemFree:", "MemAvailable:")):
+                    k, v = line.split(":", 1)
+                    out[k] = v.strip()
+                if len(out) == 2:
+                    break
+        return " ".join(f"{k}={v}" for k, v in out.items())
     except Exception as e:
         return f"(unavailable: {e})"
 
@@ -232,7 +261,8 @@ def main():
 
         out.write(
             f"[{ts}] {busy_str} | gpufreq: {read_gpu_devfreq()} "
-            f"| load: {read_loadavg()}\n"
+            f"| load: {read_loadavg()} | mem: {read_meminfo_brief()} "
+            f"| dpu: {read_dpu_crtc_state()}\n"
         )
 
         i += 1
