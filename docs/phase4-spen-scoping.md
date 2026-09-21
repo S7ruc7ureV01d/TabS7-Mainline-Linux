@@ -121,18 +121,60 @@ GPIO/regulator identities are resolved.
   project's established pattern for early-boot/no-module-loading
   reliability.
 
+## Status update (2026-09-21): implemented, structurally confirmed on real hardware, not yet end-to-end working
+
+Everything scoped above was implemented and tested the same day:
+
+- `kernel/patches/0011-wacom-w9000-add-gts7l-variant-and-tilt.patch` -
+  the `wacom,w9021-gts7l` variant, the two buffer-size bumps, and tilt
+  reporting, all in mainline's `wacom_w9000.c`.
+- `kernel/dts/sm8250-samsung-gts7l.dts` - the real device node, on
+  `&i2c17` (resolved via the exact same downstream-fixup-table method
+  already used for MAX77705's bus: `qupv3_se17_i2c` -> mainline's
+  `&i2c17`), with real IRQ (tlmm 136) and flash-mode (tlmm 6) GPIOs
+  reusing pinctrl states a previous session had already resolved and
+  live-confirmed via `/proc/interrupts`.
+- Two real, previously-undocumented-for-this-board gaps found and
+  fixed along the way, both following an exact precedent already in
+  this file for i2c5/i2c8: `i2c17`'s parent QUP wrapper
+  (`qupv3_id_2`/`geniqup@8c0000`) defaults to `status = "disabled"` in
+  `sm8250.dtsi` and needed enabling, and `i2c17`'s GENI SE instance has
+  no FIFO mode and needs a real GPI DMA channel (`gpi_dma2`) with the
+  same kind of `qcom,gpi-ee-offset` TrustZone-execution-environment
+  override i2c5 needed - real value (`0x6000`, confirmed different
+  from i2c5's `0x1000`) pulled directly from downstream's own
+  `kona.dtsi`.
+
+**Confirmed on real hardware:** the digitizer enumerates correctly on
+the I2C bus (`ls /sys/bus/i2c/devices/` shows `17-0056`), the driver
+binds, and it attempts its query command the documented 8 times before
+failing cleanly with `-ENXIO` - because the chip has no real power
+without its actual `vdd` rail (currently falls back to a dummy
+always-on regulator stub, which satisfies the software dependency but
+doesn't turn on real hardware). No crashes, no hangs, no effect on any
+other subsystem.
+
+**What's left, and it's now a single, well-isolated gap:** the real
+S Pen AVDD rail is `pm8150_l13` (PM8150 LDO13), confirmed by name via a
+second instance of this node in the GPL source, but no board in
+mainline has ever wired PM8150's L13 before, and this project has no
+confirmed real voltage for it. Guessing one would be an actual safety
+risk (unlike omitting the property, which just fails probe cleanly).
+Real next step: find PM8150 LDO13's actual voltage (PM8150 datasheet,
+or a differently-sourced downstream tree that defines rather than just
+references this rail) and add `regulators-0`'s `l13` node (grouped
+under `vdd-l13-l16-l17-supply` per PM8150's binding) plus the
+`vdd-supply` property on the wacom node together.
+
 ## Bottom line
 
-This is a bounded, moderate-scope task - meaningfully easier than
-fingerprint (no kernel driver framework exists at all for that sensor
-class) or cameras (ISP complexity), and comparable to the touchscreen/
-panel bring-up already completed: real driver extension (~variant
-table entry + two `#define` bumps + tilt parsing following an existing
-pattern in the same function, likely well under 100 lines total) plus
-real DT/GPIO archaeology (same resolved-phandle pattern already used
-for MAX77705). Not "just flip a config switch," but not a from-scratch
-port either - "moderate, well-precedented, mostly mechanical" is the
-honest characterization.
+This was a bounded, moderate-scope task, confirmed by actually doing
+it: real driver extension (~60 lines, see the patch) plus real DT/GPIO/
+QUP-bus archaeology (same resolved-phandle and QUP-wrapper-enablement
+patterns already established for MAX77705/touchscreen in this
+project), and it's now structurally complete and verified on real
+hardware down to one single, clearly-isolated remaining gap (a real
+voltage number for one PM8150 LDO) rather than an open-ended unknown.
 
 ## Sources
 

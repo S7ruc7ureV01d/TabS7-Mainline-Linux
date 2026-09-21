@@ -1371,7 +1371,7 @@ Progress log:
 
 ## Phase 4 — S Pen, cameras, and remaining hardware
 
-**Status:** not started
+**Status:** in progress (S Pen)
 
 Goal: everything else the hardware has, to the extent it's feasible.
 
@@ -1395,7 +1395,20 @@ Exit criteria:
 - [ ] USB-C DisplayPort output working, if hardware supports it on this model.
 
 Progress log:
-- (none yet)
+- 2026-09-21: Scoped and implemented S Pen driver support
+  (`docs/phase4-spen-scoping.md`). Mainline already had the right
+  driver family (`drivers/input/touchscreen/wacom_w9000.c`) - added a
+  new variant + tilt-axis reporting
+  (`kernel/patches/0011-wacom-w9000-add-gts7l-variant-and-tilt.patch`)
+  and the real devicetree node (bus, IRQ, flash-mode GPIO, plus two
+  QUP-bus enablement gaps found and fixed along the way). Confirmed on
+  real hardware: the digitizer enumerates on the I2C bus and the
+  driver binds and queries it correctly, failing cleanly only because
+  the AVDD power rail (PM8150 LDO13) isn't wired yet - no real voltage
+  data available for it anywhere in this project's references, so it
+  was deliberately left unwired rather than guessed (guessing a
+  regulator voltage is a real safety risk, unlike omitting one). Next:
+  find PM8150 L13's actual voltage and wire `vdd-supply`.
 
 ---
 

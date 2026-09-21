@@ -1,0 +1,186 @@
+Phase 4, S Pen (docs/phase4-spen-scoping.md). Mainline already has the
+right driver family for this device's Wacom EMR digitizer -
+drivers/input/touchscreen/wacom_w9000.c, confirmed field-for-field
+against this device's own downstream driver (same query command, same
+byte offsets for max_x/max_y/pressure/fw_version). Adds:
+
+  - a new "wacom,w9021-gts7l" variant with the longer query/coordinate
+    message lengths this chip's response format needs (it also carries
+    module/bootloader version, tilt, and height fields the shorter
+    w9002/w9007a variants don't have) - the two compile-time buffer
+    maximums are bumped to fit;
+  - tilt-axis (ABS_TILT_X/ABS_TILT_Y) reporting, which the driver
+    didn't have at all before this - the one real gap identified in
+    the scoping doc, added following the exact same conditional
+    pattern the driver already uses for ABS_DISTANCE. Offsets (query
+    response 0x0b/0x0c for the max range, coordinate-message bytes 8/9
+    for the live value, both signed) are pulled directly from the
+    downstream driver's register map
+    (references/gts7l/drivers/input/wacom/wacom_reg.h's
+    EPEN_REG_TILT_X/TILT_Y and the runtime coordinate-report parsing in
+    wacom_i2c.c), not guessed.
+
+The exact public Wacom part number for this chip is unconfirmed (no
+public source found for it - see the scoping doc) - "gts7l" is used in
+the compatible string rather than asserting an unverified model name.
+
+Status: built and tested on real hardware (2026-09-21). The digitizer
+enumerates correctly on the I2C bus (`17-0056`) and the driver binds
+and attempts its query command the expected number of times before
+failing cleanly - it does NOT yet work end to end, because the real
+S Pen power rail (PM8150 LDO13) isn't wired in the devicetree yet (see
+kernel/dts/sm8250-samsung-gts7l.dts's own comment on the wacom node for
+why, and docs/phase4-spen-scoping.md for the full status). This patch
+is confirmed structurally correct up to that one deliberately-deferred
+gap; no crashes, no regressions elsewhere.
+
+diff --git a/Documentation/devicetree/bindings/input/touchscreen/wacom,w9007a-lt03.yaml b/Documentation/devicetree/bindings/input/touchscreen/wacom,w9007a-lt03.yaml
+index 6d1da6a43..6c24bd0a8 100644
+--- a/Documentation/devicetree/bindings/input/touchscreen/wacom,w9007a-lt03.yaml
++++ b/Documentation/devicetree/bindings/input/touchscreen/wacom,w9007a-lt03.yaml
+@@ -24,6 +24,7 @@ properties:
+       - wacom,w9002
+       - wacom,w9007a-lt03
+       - wacom,w9007a-v1
++      - wacom,w9021-gts7l
+
+   reg:
+     maxItems: 1
+diff --git a/drivers/input/touchscreen/wacom_w9000.c b/drivers/input/touchscreen/wacom_w9000.c
+index 4a2629a54..dffc7eb60 100644
+--- a/drivers/input/touchscreen/wacom_w9000.c
++++ b/drivers/input/touchscreen/wacom_w9000.c
+@@ -22,12 +22,25 @@
+ #define CMD_QUERY_RETRIES	8
+
+ /* Message length */
+-#define CMD_QUERY_NUM_MAX	9
+-#define MSG_COORD_NUM_MAX	12
++#define CMD_QUERY_NUM_MAX	16
++#define MSG_COORD_NUM_MAX	16
+
+ /* Commands */
+ #define CMD_QUERY		0x2a
+
++/*
++ * Tilt fields, present on variants whose query/coordinate messages are
++ * long enough to carry them. Offsets are fixed within this protocol
++ * family (confirmed against a downstream driver for a chip in this
++ * same series - not guessed): query response offsets 0x0b/0x0c are the
++ * max tilt range, coordinate-message offsets 8/9 are the live tilt
++ * value, both signed bytes.
++ */
++#define QUERY_TILT_X_IDX	0x0b
++#define QUERY_TILT_Y_IDX	0x0c
++#define COORD_TILT_X_IDX	8
++#define COORD_TILT_Y_IDX	9
++
+ struct wacom_w9000_variant {
+ 	const u8 cmd_query_num;
+ 	const u8 msg_coord_num;
+@@ -42,6 +55,8 @@ struct wacom_w9000_data {
+
+ 	struct touchscreen_properties prop;
+ 	u16 max_pressure;
++	s8 max_tilt_x;
++	s8 max_tilt_y;
+
+ 	struct regulator *regulator;
+
+@@ -111,6 +126,11 @@ static int wacom_w9000_query(struct wacom_w9000_data *wacom_data)
+ 	wacom_data->max_pressure = get_unaligned_be16(&data[5]);
+ 	wacom_data->fw_version = get_unaligned_be16(&data[7]);
+
++	if (wacom_data->variant->cmd_query_num > QUERY_TILT_Y_IDX) {
++		wacom_data->max_tilt_x = (s8)data[QUERY_TILT_X_IDX];
++		wacom_data->max_tilt_y = (s8)data[QUERY_TILT_Y_IDX];
++	}
++
+ 	dev_dbg(dev, "max_x:%d, max_y:%d, max_pressure:%d, fw:%#x\n",
+ 		wacom_data->prop.max_x, wacom_data->prop.max_y,
+ 		wacom_data->max_pressure, wacom_data->fw_version);
+@@ -157,6 +177,7 @@ static void wacom_w9000_coord(struct wacom_w9000_data *wacom_data)
+ 	bool touch, rubber, side_button;
+ 	u16 x, y, pressure;
+ 	u8 distance = 0;
++	s8 tilt_x = 0, tilt_y = 0;
+ 	int error;
+
+ 	error = i2c_master_recv(client, data, wacom_data->variant->msg_coord_num);
+@@ -183,6 +204,11 @@ static void wacom_w9000_coord(struct wacom_w9000_data *wacom_data)
+ 		if (wacom_data->variant->msg_coord_num > 7)
+ 			distance = data[7];
+
++		if (wacom_data->variant->msg_coord_num > COORD_TILT_Y_IDX) {
++			tilt_x = (s8)data[COORD_TILT_X_IDX];
++			tilt_y = (s8)data[COORD_TILT_Y_IDX];
++		}
++
+ 		if (x > wacom_data->prop.max_x || y > wacom_data->prop.max_y) {
+ 			dev_warn_ratelimited(dev, "Coordinates out of range x=%d, y=%d\n", x, y);
+ 			return;
+@@ -199,6 +225,11 @@ static void wacom_w9000_coord(struct wacom_w9000_data *wacom_data)
+ 		if (wacom_data->variant->msg_coord_num > 7)
+ 			input_report_abs(wacom_data->input_dev, ABS_DISTANCE, distance);
+
++		if (wacom_data->variant->msg_coord_num > COORD_TILT_Y_IDX) {
++			input_report_abs(wacom_data->input_dev, ABS_TILT_X, tilt_x);
++			input_report_abs(wacom_data->input_dev, ABS_TILT_Y, tilt_y);
++		}
++
+ 		input_report_key(wacom_data->input_dev, BTN_STYLUS, side_button);
+ 		input_report_key(wacom_data->input_dev, BTN_TOUCH, touch);
+ 		input_report_key(wacom_data->input_dev, BTN_TOOL_PEN, !rubber);
+@@ -345,6 +376,14 @@ static int wacom_w9000_probe(struct i2c_client *client)
+ 	if (wacom_data->variant->msg_coord_num > 7)
+ 		input_set_abs_params(input_dev, ABS_DISTANCE, 0, 255, 0, 0);
+
++	if (wacom_data->variant->msg_coord_num > COORD_TILT_Y_IDX &&
++	    wacom_data->variant->cmd_query_num > QUERY_TILT_Y_IDX) {
++		input_set_abs_params(input_dev, ABS_TILT_X,
++				     -wacom_data->max_tilt_x, wacom_data->max_tilt_x, 0, 0);
++		input_set_abs_params(input_dev, ABS_TILT_Y,
++				     -wacom_data->max_tilt_y, wacom_data->max_tilt_y, 0, 0);
++	}
++
+ 	touchscreen_parse_properties(input_dev, false, &wacom_data->prop);
+
+ 	dev_info(dev, "%s size X%uY%u\n", wacom_data->variant->name,
+@@ -412,10 +451,29 @@ static const struct wacom_w9000_variant w9007a_v1 = {
+ 	.name = "Wacom W9007A V1 Digitizer",
+ };
+
++/*
++ * Samsung Galaxy Tab S7 (gts7l) S Pen digitizer, ic_type 0x233d per
++ * this device's own downstream driver query response. Longer
++ * query/coordinate messages than the other variants above because
++ * this chip also reports module/bootloader version and hover
++ * distance/tilt - confirmed field-for-field against that downstream
++ * driver's register map (see docs/phase4-spen-scoping.md), not
++ * guessed. The exact public Wacom part number is unconfirmed (no
++ * public source found for it), so "gts7l" is used in the compatible
++ * string rather than asserting an unverified model name - update this
++ * if a real part number is ever confirmed.
++ */
++static const struct wacom_w9000_variant w9021_gts7l = {
++	.cmd_query_num	= 16,
++	.msg_coord_num	= 16,
++	.name = "Wacom Digitizer (Galaxy Tab S7)",
++};
++
+ static const struct of_device_id wacom_w9000_of_match[] = {
+ 	{ .compatible = "wacom,w9002", .data = &w9002 },
+ 	{ .compatible = "wacom,w9007a-lt03", .data = &w9007a_lt03, },
+ 	{ .compatible = "wacom,w9007a-v1", .data = &w9007a_v1, },
++	{ .compatible = "wacom,w9021-gts7l", .data = &w9021_gts7l, },
+ 	{ }
+ };
+ MODULE_DEVICE_TABLE(of, wacom_w9000_of_match);
+@@ -424,6 +482,7 @@ static const struct i2c_device_id wacom_w9000_id[] = {
+ 	{ .name = "w9002", .driver_data = (kernel_ulong_t)&w9002 },
+ 	{ .name = "w9007a-lt03", .driver_data = (kernel_ulong_t)&w9007a_lt03 },
+ 	{ .name = "w9007a-v1", .driver_data = (kernel_ulong_t)&w9007a_v1 },
++	{ .name = "w9021-gts7l", .driver_data = (kernel_ulong_t)&w9021_gts7l },
+ 	{ }
+ };
+ MODULE_DEVICE_TABLE(i2c, wacom_w9000_id);

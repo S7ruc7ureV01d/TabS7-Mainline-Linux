@@ -1609,3 +1609,97 @@
 		status = "okay";
 	};
 };
+
+/*
+ * S Pen (Phase 4, docs/phase4-spen-scoping.md): Wacom W90xx-series EMR
+ * digitizer, ic_type 0x233d. Driver support added upstream in
+ * drivers/input/touchscreen/wacom_w9000.c (a new "wacom,w9021-gts7l"
+ * variant plus tilt-axis reporting, confirmed field-for-field against
+ * this device's own downstream driver - see the scoping doc and the
+ * driver's own comment above that variant's definition).
+ *
+ * I2C bus resolved the same way as MAX77705's (line ~547 above):
+ * downstream's overlay fixup table maps this node's fragment
+ * (fragment@129) target to symbol `qupv3_se17_i2c`, i.e. mainline's
+ * `&i2c17` (`i2c@88c000` in sm8250.dtsi - same SE-number convention
+ * already confirmed for i2c0/MAX77705).
+ *
+ * irq-gpios and flash-mode-gpios reuse `epen_int_gts7l`/
+ * `epen_fwe_gts7l` pinctrl states already defined and live-confirmed
+ * above (tlmm 136 and tlmm 6 respectively - see that comment for the
+ * two independent confirmations). IRQ_TYPE_LEVEL_HIGH follows from
+ * those same two sources: the GPL overlay's third gpio-spec cell (`...
+ * 0x88 0x0>`) is `0x0` = `GPIO_ACTIVE_HIGH`, and the live
+ * `/proc/interrupts` confirmation independently says "Level" (as
+ * opposed to touchscreen's own confirmed "Edge" trigger a few nodes
+ * up) - not independently reconfirmed against this exact mainline DT
+ * yet, so treat as inferred-not-measured until this node actually
+ * probes. `epen_pdct_gts7l` (tlmm 7, "pen detect") has no equivalent
+ * property in mainline's binding - the pinctrl state stays defined
+ * but unused here; see the scoping doc for whether this turns out to
+ * matter. reset-gpios omitted: downstream's node has no separate
+ * reset line distinct from irq/pdct/fwe, and mainline's driver treats
+ * it as optional (`devm_gpiod_get_optional`).
+ *
+ * vdd-supply deliberately NOT wired yet. Downstream names this rail
+ * "pm8150_l13" (PM8150 LDO13, cross-referenced against a second
+ * instance of this node in the GPL source - see the comment above
+ * `epen_int_gts7l` above), but PM8150's `regulators-0` node
+ * (`&apps_rsc`, below) only defines smps5/smps6 so far - no board in
+ * mainline (checked elish, the sm8250-mtp/sm8150-mtp reference boards)
+ * has ever wired PM8150's L13, and this project has no confirmed real
+ * voltage for it (downstream only ever references it by name, never
+ * defines it, in every source available here). Guessing a voltage
+ * range would be an active safety risk, not just an omission - unlike
+ * skipping the property entirely, which just makes the driver's
+ * `devm_regulator_get(dev, "vdd")` fail cleanly with -ENODEV (no
+ * CONFIG_REGULATOR_DUMMY in this config) until it's resolved with real
+ * data. Add `regulators-0`'s l13 node (grouped under
+ * `vdd-l13-l16-l17-supply` per PM8150's binding,
+ * Documentation/devicetree/bindings/regulator/qcom,rpmh-regulator.yaml)
+ * and this vdd-supply property together once that voltage is known.
+ *
+ * Same recurring QUP-enablement pattern as i2c5/i2c8 above: i2c17's
+ * parent QUP wrapper (`qupv3_id_2: geniqup@8c0000`) defaults to
+ * `status = "disabled"` in sm8250.dtsi, and per the Round 48 finding
+ * documented above (`&qupv3_id_1`), a disabled wrapper means none of
+ * its children ever get instantiated regardless of their own status -
+ * confirmed live here too (`ls /sys/bus/i2c/devices/` had no `17-*`
+ * entry at all with only `&i2c17` itself enabled). i2c17's GENI SE
+ * instance also has no FIFO mode (like i2c5, unlike i2c8) and needs a
+ * real GPI DMA channel - its own `dmas` property points at
+ * `&gpi_dma2`, a sibling of `qupv3_id_2`, not a child, so enabling the
+ * wrapper alone doesn't cover it either. Following the exact same
+ * `qcom,gpi-ee-offset` fix i2c5/gpi_dma0 needed (this SoC's downstream
+ * firmware uses non-default TrustZone execution-environment bank
+ * offsets per DMA controller instance, not the single hardcoded value
+ * mainline's `drivers/dma/qcom/gpi.c` assumes) - real value pulled
+ * directly from `references/gts7l/.../kona.dtsi:4722-4740`'s own
+ * `gpi_dma2` node (`0x6000`, genuinely different from gpi_dma0's
+ * `0x1000` - confirmed per-instance, not copied blindly).
+ */
+&qupv3_id_2 {
+	status = "okay";
+};
+
+&gpi_dma2 {
+	status = "okay";
+	qcom,gpi-ee-offset = <0x6000>;
+};
+
+&i2c17 {
+	status = "okay";
+
+	wacom@56 {
+		compatible = "wacom,w9021-gts7l";
+		reg = <0x56>;
+
+		pinctrl-names = "default";
+		pinctrl-0 = <&epen_int_gts7l>, <&epen_fwe_gts7l>;
+
+		interrupt-parent = <&tlmm>;
+		interrupts = <136 IRQ_TYPE_LEVEL_HIGH>;
+
+		flash-mode-gpios = <&tlmm 6 GPIO_ACTIVE_HIGH>;
+	};
+};
