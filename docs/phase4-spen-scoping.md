@@ -228,13 +228,45 @@ apparently tolerate the spurious nudge; this specific LDO's shared
 group (`l13-l16-l17`) evidently does not.
 
 **Current status after the fix**: no brownout, the S Pen still doesn't
-respond over I2C yet (`wacom_w9000 17-0056: error -ENXIO: Failed to
+respond over I2C (`wacom_w9000 17-0056: error -ENXIO: Failed to
 query`, same failure as before this fix, minus the crash). This is now
-an ordinary, non-destructive driver/timing problem (most likely GPIO
-sequencing or polarity on the `flash-mode-gpios` line, or the driver's
-`msleep(200)` power-up delay not matching this exact chip's real
-requirement) rather than a hardware safety issue - safe to iterate on
+an ordinary, non-destructive driver problem - safe to iterate on
 without needing a hard reset each time.
+
+**Timing tested and ruled out (2026-09-21).** Added a per-variant
+`power_on_delay_ms`/`query_retry_delay_ms` to the driver
+(`kernel/patches/0011-...patch`) and tried 500ms power-on settle time
+(vs the driver's default 200ms) plus real 20ms spacing between the 8
+query retries (vs firing all of them back-to-back). Identical `-ENXIO`
+result either way, on real hardware. This rules out "the chip just
+needs more time to boot" as the explanation.
+
+**Confirmed real GPIO/regulator states via `/sys/kernel/debug/gpio`
+and `/sys/class/regulator/`** on the running mainline kernel: `gpio6`
+(flash-mode) reads `out low` as expected from the driver's
+`GPIOD_OUT_LOW` request; `gpio136` (IRQ) reads `in high` at idle (not
+yet meaningful on its own - the IRQ is never enabled during probe,
+only later via `open()`, so this doesn't confirm or rule out trigger
+polarity). `pm8150_l13`'s sysfs `state`/`microvolts` files are
+read-only with no debugfs override available in the recovery kernel -
+directly toggling the live regulator to test enable/disable behavior
+in isolation (an idea from the owner, worth recording as tried and
+blocked, not just skipped) was not possible with the tools available.
+
+**What's next, and why it's currently blocked**: the most likely
+remaining explanation is GPIO polarity/sequencing on `flash-mode-gpios`
+(downstream's "FWE" line) - possibly this chip needs the opposite
+initial state from the driver's default, or a real pulse rather than a
+static level. Verifying this needs either the chip's own real
+datasheet (not available - Wacom doesn't publish EMR digitizer specs
+publicly) or a live UART capture of whatever the chip itself reports at
+power-up, which this project's own prior research
+(`docs/uart-debug-research.md`) documents a real method for (CC-line
+resistance detection via the MUIC, not the PD-VDM "AnyWay JIG"
+mechanism) but never actually built or tested - it needs physical
+hardware (a bare USB-C breakout board, a ~619kOhm resistor, a USB-to-
+TTL serial adapter) that wasn't available this session. This is the
+concrete blocker for making further progress here without guessing.
 
 ## Bottom line
 
