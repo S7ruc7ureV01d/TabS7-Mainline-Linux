@@ -253,13 +253,29 @@ directly toggling the live regulator to test enable/disable behavior
 in isolation (an idea from the owner, worth recording as tried and
 blocked, not just skipped) was not possible with the tools available.
 
-**What's next, and why it's currently blocked**: the most likely
-remaining explanation is GPIO polarity/sequencing on `flash-mode-gpios`
-(downstream's "FWE" line) - possibly this chip needs the opposite
-initial state from the driver's default, or a real pulse rather than a
-static level. Verifying this needs either the chip's own real
-datasheet (not available - Wacom doesn't publish EMR digitizer specs
-publicly) or a live UART capture of whatever the chip itself reports at
+**GPIO polarity also tested and ruled out (2026-09-21).** Flipped
+`flash-mode-gpios` from `GPIO_ACTIVE_HIGH` to `GPIO_ACTIVE_LOW` - this
+physically inverts the driver's requested logical-LOW initial state
+(previously physically LOW, now physically HIGH). Identical `-ENXIO`
+result on real hardware. Combined with timing already ruled out, the
+two most plausible software-side explanations for "chip doesn't ack
+its own I2C address at all" are both eliminated. Left the property at
+`GPIO_ACTIVE_LOW` rather than reverting - equally unconfirmed either
+way absent real evidence, no reason to prefer one over the other.
+
+**What's next, and why it's currently blocked**: with timing and FWE
+polarity both ruled out, remaining candidates are more speculative and
+harder to test blind - e.g. whether the chip needs an explicit command
+sequence to switch out of a "boot_addr" bootloader-mode listening
+address (downstream's overlay records `wacom,boot_addr = <0x9>` as a
+distinct alternate address; mainline's driver has no concept of this
+at all), or a real reset pulse rather than a static GPIO level, or
+something about the shared `vdd-l13-l16-l17-supply`/RPMh vote
+aggregation not actually energizing the rail the way a plain
+`regulator_enable()` call assumes. None of these are safely testable
+by guessing further - each needs either the chip's own real datasheet
+(not available - Wacom doesn't publish EMR digitizer specs publicly)
+or a live UART capture of whatever the chip itself reports at
 power-up, which this project's own prior research
 (`docs/uart-debug-research.md`) documents a real method for (CC-line
 resistance detection via the MUIC, not the PD-VDM "AnyWay JIG"

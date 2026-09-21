@@ -1786,6 +1786,20 @@
 		interrupts = <136 IRQ_TYPE_LEVEL_HIGH>;
 
 		vdd-supply = <&pm8150_l13>;
-		flash-mode-gpios = <&tlmm 6 GPIO_ACTIVE_HIGH>;
+		/*
+		 * Polarity test, RULED OUT (2026-09-21): flipping this from
+		 * GPIO_ACTIVE_HIGH to GPIO_ACTIVE_LOW (physically inverting
+		 * the driver's requested logical-LOW state) made no
+		 * difference - identical -ENXIO on real hardware. Combined
+		 * with timing already ruled out
+		 * (kernel/patches/0011-...patch), the two most plausible
+		 * software-side explanations are both eliminated. Left at
+		 * GPIO_ACTIVE_LOW rather than reverting - equally unconfirmed
+		 * either way, no reason to prefer one over the other absent
+		 * real evidence. See docs/phase4-spen-scoping.md for what's
+		 * left to try (needs real chip documentation or a live UART
+		 * capture, neither available this session).
+		 */
+		flash-mode-gpios = <&tlmm 6 GPIO_ACTIVE_LOW>;
 	};
 };
