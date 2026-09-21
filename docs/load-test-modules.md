@@ -612,3 +612,64 @@ allocation pattern (vs. `dd`'s single massive `bs=1G` write or
 narrow down whether it's really about total memory pressure, or
 specifically about the *rate/burstiness* of a large allocation/access
 event.
+
+## The real root cause: a specific CPU stops responding even to an NMI (2026-09-21)
+
+Ran a graduated `stress-ng --vm` series (512M, 1G, 1.5G, each 20s) to
+find a size threshold. 512M and 1G both survived cleanly ("successful
+run completed"). **1.46GB (`--vm-bytes 1500M`) froze it** - narrows the
+threshold to somewhere between 1G and 1.46GB on this device (~5.3GB
+total RAM, no swap). Both smaller steps also triggered the stuck-core
+detector, but those were confirmed false positives (stress-ng
+legitimately using a core for its own valid userspace work, same as
+the earlier 3G test) - the real evidence is what happened during the
+1.5G step, right before the freeze:
+
+**`khugepaged` (the kernel's Transparent Huge Page background daemon,
+PID 65) was caught by the hung-task detector, genuinely blocked for
+over 5 seconds**, with a complete, real stack trace:
+
+```
+khugepaged -> lru_add_drain_all -> __lru_add_drain_all -> flush_work
+  -> wait_for_completion -> schedule_timeout -> schedule -> __schedule
+```
+
+`khugepaged` periodically calls `lru_add_drain_all()`, which requires
+*every* CPU to run a small per-CPU work item (draining that CPU's page
+LRU cache) before it can return - it's blocked waiting for that to
+complete everywhere.
+
+**Then, in the same window, the sysrq NMI backtrace (triggered by the
+stuck-core detector moments earlier) reported:**
+
+```
+After 10 seconds, these CPUs still haven't responded to the NMI: 6
+```
+
+**CPU 6 never responded - not even to an NMI.** A CPU spinning in a
+software loop, even stuck on a spinlock, still answers an NMI (NMIs
+preempt almost everything by design). Non-response to an NMI means
+that core is genuinely unresponsive at the hardware/firmware level -
+not busy, not looping, just gone.
+
+**This is the same signature as "Crash #4"/"Crash #5" from
+`docs/kernel-boot-debugging.md`, documented at the very start of this
+whole freeze investigation, well before tonight's GPU/ext4 detours** -
+back then it was CPU 5 that never answered an NMI; this time it's CPU
+6. Different core, same underlying phenomenon. This directly explains
+every trigger found across this entire investigation (Minecraft's
+asset loading, `dd`'s page-cache pressure, `stress-ng --vm`'s
+allocation, the ext4 spinlock, the earlier "sudden uniform stop"
+signature): they're all different paths into cross-CPU synchronization
+primitives (`lru_add_drain_all()` and similar, invoked by memory
+reclaim/compaction under real pressure) - and any of them is enough to
+expose that some specific core has *already* gone hardware-level
+unresponsive, for a reason no kernel-side software fix can address.
+
+**Conclusion: this is very likely below what this project's software
+tools can diagnose further or fix.** The GPU deadlock and ext4 spinlock
+found earlier were both real, but both downstream symptoms of the same
+underlying hardware/firmware-level single-CPU lockup - not root causes
+in their own right. Matches, and now substantially reinforces with a
+second independent NMI-non-response capture, the original conclusion
+in `docs/crash-investigation-nmi-research.md`.

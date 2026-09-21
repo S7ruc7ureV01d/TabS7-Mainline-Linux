@@ -6260,3 +6260,26 @@ hardware, and the ext4 spinlock caught earlier was very likely a
 downstream victim (waiting on a lock whose owner froze for the same
 underlying reason) rather than the actual root cause. Full detail in
 `docs/load-test-modules.md`.
+
+### The real root cause, confirmed: a specific CPU stops answering even an NMI (2026-09-21)
+
+A graduated `stress-ng --vm` series found the freeze threshold sits
+between 1G and 1.46GB of pressure on this device. Right before that
+freeze, the hung-task detector caught `khugepaged` (the kernel's
+Transparent Huge Page daemon) genuinely blocked for 5+ seconds inside
+`lru_add_drain_all()` - a function that requires every CPU to run a
+small per-CPU work item before returning. Moments later, sysrq's NMI
+backtrace reported `After 10 seconds, these CPUS still haven't
+responded to the NMI: 6` - **CPU 6 never answered an NMI**, which even
+a CPU stuck spinning on a software lock normally would.
+
+This is the same signature as "Crash #4"/"Crash #5" above (CPU 5 never
+answering an NMI there), now independently reproduced on a different
+core via a completely different, much faster, purely-memory-pressure
+trigger. Directly explains every reproduction across this whole
+investigation - GPU faults, the ext4 spinlock, Minecraft, `dd`,
+`stress-ng` - as different paths into cross-CPU synchronization
+primitives that all happen to expose the same underlying, genuinely
+hardware/firmware-level single-CPU lockup. Full detail in
+`docs/load-test-modules.md`. This is very likely below what this
+project's software tools can diagnose further or fix.

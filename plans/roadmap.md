@@ -1622,3 +1622,24 @@ decisions, scope changes) goes here instead of being forced into a phase log.
   to recur on a second independent real repro**, not a one-off. See
   `../docs/kernel-boot-debugging.md` ("Crash #5") and
   `../docs/load-test-modules.md`. Still unresolved.
+- 2026-09-21 (much later, same day): **Root cause found and confirmed**
+  for the hard-freeze bug that had been chased through GPU-driver and
+  ext4 theories all session: a specific CPU core stops answering even a
+  real per-CPU NMI backtrace request (`sysrq`'s cross-CPU NMI mechanism)
+  under memory pressure - caught directly via a purely-memory-pressure
+  repro (`stress-ng --vm`, threshold ~1-1.46GB on this device) with
+  `khugepaged` genuinely blocked 5+ seconds inside `lru_add_drain_all()`
+  (a cross-CPU synchronization primitive) followed by `After 10
+  seconds, these CPUS still haven't responded to the NMI: 6`. Same
+  signature as "Crash #4"/"Crash #5" from earlier this session (CPU 5
+  then, CPU 6 now) - a genuine hardware/firmware-level single-CPU
+  lockup, not a software bug. Explains every trigger found this session
+  (GPU faults, the ext4 spinlock, Minecraft, `dd`, `stress-ng`) as
+  different paths into cross-CPU sync primitives that happen to expose
+  this same underlying issue. **This is very likely below what this
+  project's software tools can diagnose further or fix** - full
+  evidence trail in `../docs/load-test-modules.md` and
+  `../docs/kernel-boot-debugging.md`. Also still pending from earlier:
+  revert the pseudo-NMI trial bootarg once this investigation is
+  considered closed (~5% steady-state cost, and while it did let us
+  capture this evidence, it can't fix the underlying issue either).
