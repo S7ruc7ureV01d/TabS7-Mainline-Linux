@@ -1,0 +1,150 @@
+Freeze investigation, real root cause found (docs/load-test-modules.md,
+docs/kernel-boot-debugging.md "The real root cause, confirmed"): a specific
+CPU core stops responding to EVERYTHING, including a real per-CPU NMI
+backtrace request (sysrq's arch_trigger_cpumask_backtrace), under memory
+pressure - confirmed twice independently (CPU 5 in an earlier crash, CPU 6
+in a later one, both times triggered via cross-CPU synchronization
+primitives used by memory reclaim, specifically lru_add_drain_all() called
+by khugepaged).
+
+The owner correctly pushed back on an earlier "this may be unfixable"
+conclusion: stock Samsung Android and custom Android ROMs (same downstream
+kernel lineage, different userspace) do NOT exhibit this freeze under heavy
+load on this exact physical hardware - proving the silicon itself is fine.
+This had to be something mainline does differently from downstream, not a
+hardware defect.
+
+Confirmed directly via dmesg on this device:
+
+    psci: OSI mode supported.
+    [Firmware Bug]: failed to set PC mode: -3
+    CPUidle PSCI: Initialized CPU PM domain topology using OSI mode
+
+This kernel is running PSCI OS-initiated (OSI) mode because this device's
+firmware refuses platform-coordinated (PC) mode - not a guess, a literal
+"[Firmware Bug]" log line from the kernel's own PSCI probe. Research (a
+sibling porting project search plus direct mailing-list archive fetches,
+verified against the actual raw patch text, not an AI summary) found a
+real, unmerged (as of the source kernel version this project is based on,
+Linux v7.2) upstream fix series specifically for genpd/cpuidle-psci
+behaviour under OSI mode:
+
+  "[PATCH v3 0/5] pmdomain/cpuidle-psci: Fix behaviours for CPU PM domains"
+  Ulf Hansson, 2026-09-07, reported by Qualcomm's own Maulik Shah
+  (lore.kernel.org/all/20260811-domain_off_ss3-v1-0-6a0a0fc023f5@oss.qualcomm.com/)
+
+The bug: when the PM domain/topology is registered through genpd, it's not
+yet known whether the corresponding CPUs are online, so genpd may assume a
+domain is powered ON when it may not be - or vice versa. Under OSI mode
+this is worse: a non-CPU device sharing the same PM domain can't trust the
+domain's reported status at all. The fix initializes CPU PM domains as
+powered OFF and in the deepest idle state under OSI, using a new
+GENPD_FLAG_POWER_UNKNOWN flag to preserve correct ->sync_state() behaviour,
+and moves cpuidle-psci's own init earlier (subsys_initcall instead of
+device_initcall) so this happens before other device_initcall-level
+drivers try to attach to a CPU domain that isn't ready.
+
+This backports the minimal core of that fix (patches 3, 4, and 5 of 5 -
+the genpd flag/logic and the two cpuidle-psci changes; patches 1-2 address
+a separate, unrelated problem: letting a *non-CPU* device sharing a CPU
+domain force it awake via IPI, which this device's own confirmed bug
+doesn't need). Verified against this project's own v7.2 tree: all context
+lines matched exactly, no fuzz. The one known caveat in the v3 series
+(Dhruva Gole, 2026-09-11: GENPD_FLAG_POWER_UNKNOWN implying
+GENPD_FLAG_RPM_ALWAYS_ON breaks pm_genpd_init() under CONFIG_PREEMPT_RT)
+does not apply here - confirmed via `grep CONFIG_PREEMPT_RT .config`
+returning nothing; this project's kernel doesn't use PREEMPT_RT.
+
+Sources (raw patch text fetched and verified directly, not AI-summarized):
+  https://ratatoskr.run/linux-pm/2026/09/17524643 (patch 3/5)
+  https://ratatoskr.run/linux-pm/2026/09/17524644 (patch 4/5, the main fix)
+  https://ratatoskr.run/linux-pm/2026/09/17524642 (patch 5/5)
+
+Status: built and flashed to real hardware for testing (2026-09-21). Not
+yet confirmed whether it resolves the freeze - update this file's status
+once tested (docs/load-test-modules.md has the test log).
+
+diff --git a/drivers/cpuidle/cpuidle-psci-domain.c b/drivers/cpuidle/cpuidle-psci-domain.c
+index b9e4ad7d4..4d8c63d32 100644
+--- a/drivers/cpuidle/cpuidle-psci-domain.c
++++ b/drivers/cpuidle/cpuidle-psci-domain.c
+@@ -68,7 +68,8 @@ static int psci_pd_init(struct device_node *np, bool use_osi)
+ 	 */
+ 	if (use_osi) {
+ 		pd->power_off = psci_pd_power_off;
+-		pd->flags |= GENPD_FLAG_ACTIVE_WAKEUP;
++		pd->flags |= GENPD_FLAG_ACTIVE_WAKEUP | GENPD_FLAG_POWER_UNKNOWN;
++		pd->state_idx = pd->state_count ? pd->state_count - 1 : 0;
+ 		if (IS_ENABLED(CONFIG_PREEMPT_RT))
+ 			pd->flags |= GENPD_FLAG_RPM_ALWAYS_ON;
+ 	} else {
+@@ -78,7 +79,7 @@ static int psci_pd_init(struct device_node *np, bool use_osi)
+ 	/* Use governor for CPU PM domains if it has some states to manage. */
+ 	pd_gov = pd->states ? &pm_domain_cpu_gov : NULL;
+
+-	ret = pm_genpd_init(pd, pd_gov, false);
++	ret = pm_genpd_init(pd, pd_gov, use_osi);
+ 	if (ret)
+ 		goto free_pd_prov;
+
+diff --git a/drivers/cpuidle/cpuidle-psci.c b/drivers/cpuidle/cpuidle-psci.c
+index dcf20ea5e..4af7dacab 100644
+--- a/drivers/cpuidle/cpuidle-psci.c
++++ b/drivers/cpuidle/cpuidle-psci.c
+@@ -489,4 +489,4 @@ static int __init psci_idle_init(void)
+
+ 	return 0;
+ }
+-device_initcall(psci_idle_init);
++subsys_initcall(psci_idle_init);
+diff --git a/drivers/pmdomain/core.c b/drivers/pmdomain/core.c
+index 842c4169e..d953742f7 100644
+--- a/drivers/pmdomain/core.c
++++ b/drivers/pmdomain/core.c
+@@ -183,6 +183,7 @@ static const struct genpd_lock_ops genpd_raw_spin_ops = {
+ #define genpd_is_dev_name_fw(genpd)	(genpd->flags & GENPD_FLAG_DEV_NAME_FW)
+ #define genpd_is_no_sync_state(genpd)	(genpd->flags & GENPD_FLAG_NO_SYNC_STATE)
+ #define genpd_is_no_stay_on(genpd)	(genpd->flags & GENPD_FLAG_NO_STAY_ON)
++#define genpd_is_power_unknown(genpd)	(genpd->flags & GENPD_FLAG_POWER_UNKNOWN)
+
+ static inline bool irq_safe_dev_in_sleep_domain(struct device *dev,
+ 		const struct generic_pm_domain *genpd)
+@@ -2375,7 +2376,10 @@ static void genpd_lock_init(struct generic_pm_domain *genpd)
+ #ifdef CONFIG_PM_GENERIC_DOMAINS_OF
+ static void genpd_set_stay_on(struct generic_pm_domain *genpd, bool is_off)
+ {
+-	genpd->stay_on = !genpd_is_no_stay_on(genpd) && !is_off;
++	if (genpd_is_power_unknown(genpd))
++		genpd->stay_on = is_off;
++	else
++		genpd->stay_on = !genpd_is_no_stay_on(genpd) && !is_off;
+ }
+ #else
+ static void genpd_set_stay_on(struct generic_pm_domain *genpd, bool is_off)
+diff --git a/include/linux/pm_domain.h b/include/linux/pm_domain.h
+index f925614ae..14e0e346c 100644
+--- a/include/linux/pm_domain.h
++++ b/include/linux/pm_domain.h
+@@ -121,6 +121,14 @@ struct dev_pm_domain_list {
+  *				powered-off until the ->sync_state() callback is
+  *				invoked. This flag informs genpd to allow a
+  *				power-off without waiting for ->sync_state().
++ *
++ * GENPD_FLAG_POWER_UNKNOWN:	Use this flag to inform	genpd that its initial
++ *				status for the PM domain is set to powered off,
++ *				which may not correctly reflect the state of the
++ *				HW, as it's unknown. If the PM domain becomes
++ *				powered on during boot, genpd will prevent it
++ *				from being powered off until the ->sync_state
++ *				callback is invoked for it.
+  */
+ #define GENPD_FLAG_PM_CLK	 (1U << 0)
+ #define GENPD_FLAG_IRQ_SAFE	 (1U << 1)
+@@ -133,6 +141,7 @@ struct dev_pm_domain_list {
+ #define GENPD_FLAG_DEV_NAME_FW	 (1U << 8)
+ #define GENPD_FLAG_NO_SYNC_STATE (1U << 9)
+ #define GENPD_FLAG_NO_STAY_ON	 (1U << 10)
++#define GENPD_FLAG_POWER_UNKNOWN (1U << 11)
+
+ enum gpd_status {
+ 	GENPD_STATE_ON = 0,	/* PM domain is on */
