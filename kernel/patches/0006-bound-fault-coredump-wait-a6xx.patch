@@ -1,0 +1,135 @@
+Freeze investigation (docs/kernel-boot-debugging.md, docs/load-test-modules.md):
+a real, repeated, unresolved hard-freeze under heavy CPU+GPU load (Minecraft,
+specifically at the world-loading -> gameplay transition). Three independent
+real repros left zero forensic trace anywhere (pstore/ramoops, the pseudo-NMI
+hardlockup detector, CONFIG_DETECT_HUNG_TASK at a 5s timeout) - consistent
+with a genuine software deadlock rather than a hardware/bus-level hang, since
+none of the tools built to catch either of those ever fired.
+
+A userspace capture script (tools/loadtest/capture_watch.py, fsync'd to real
+storage rather than pstore's small DRAM region) caught the actual lead-up on
+three separate real crashes: a rapid-fire sequence of genuine GPU faults
+([drm:a6xx_irq] gpu fault -> [drm:recover_worker] hangcheck recover!),
+recovering successfully several times in a row (fence counters climbing,
+rptr/wptr resyncing each time) before the final attempt in each run showed a
+GPU-IRQ-count spike far beyond any prior window, immediately followed by
+total silence - once with the final recovery's own rptr/wptr never fully
+resyncing before the log stopped.
+
+Checked a sibling porting project's own real diagnosis for the same GPU
+family (ubuntu-galaxy-tab-s9-ultra, docs/gpu-recovery.md) and confirmed the
+exact same code, line-for-line, against this project's own tree: a real
+circular-lock deadlock exists between GPU fault recovery and fault-capture
+completion. `recover_worker()`/`msm_gpu_fault_crashstate_capture()`
+(drivers/gpu/drm/msm/msm_gpu.c) both need `gpu->lock`. `a6xx_gmu_set_oob()`
+and `a6xx_hfi_wait_for_msg_interrupt()` can each be reached from inside
+`recover_worker()` while it already holds `gpu->lock`, and both do an
+*unbounded* `wait_for_completion(&a6xx_gpu->base.fault_coredump_done)` - but
+the only code path that ever completes that completion
+(`msm_gpu_fault_crashstate_capture()`, called from the SMMU fault IRQ thread)
+itself starts with `mutex_lock(&gpu->lock)`. Recovery holds the lock and
+waits forever for a completion that can only be signaled by code needing the
+same lock.
+
+Confirmed via online research this is a known, acknowledged-but-unfixed gap:
+the `fault_coredump_done` mechanism was introduced by a 2025-07-18 freedreno
+patch ("[PATCH] drm/msm: Wait for MMU devcoredump when waiting for GMU").
+During its own review, the GMU maintainer (Akhil P Oommen) flagged this exact
+scenario verbatim: "we might be holding both gpu and gmu locks here and the
+crashstate capture in the pf handler tries to lock gpu, which can result in a
+dead lock." The author acknowledged the risk but no fix followed - the patch
+merged anyway, and no later revision or follow-up thread addresses it. Still
+present, unfixed, in this v7.2-based tree.
+
+No upstream fix exists to backport, so this bounds both wait loops to one
+timed retry (1s) instead of waiting forever - the same fix the S9 Ultra
+project independently arrived at for the same underlying bug on a different
+device. Preserves the existing behavior on the success path entirely; only
+changes what happens when a fault capture is genuinely stuck. Not a claim to
+fix the initial GPU fault itself - only to stop recovery from deadlocking on
+top of it.
+
+Status: built and flashed to real hardware for testing (2026-09-21). Not yet
+confirmed whether it resolves or changes the freeze's character - see
+docs/load-test-modules.md for the test log.
+
+diff --git a/drivers/gpu/drm/msm/adreno/a6xx_gmu.c b/drivers/gpu/drm/msm/adreno/a6xx_gmu.c
+index 2e5d7b53a..5e587bf65 100644
+--- a/drivers/gpu/drm/msm/adreno/a6xx_gmu.c
++++ b/drivers/gpu/drm/msm/adreno/a6xx_gmu.c
+@@ -395,6 +395,7 @@ int a6xx_gmu_set_oob(struct a6xx_gmu *gmu, enum a6xx_gmu_oob_state state)
+ 	struct a6xx_gpu *a6xx_gpu = container_of(gmu, struct a6xx_gpu, gmu);
+ 	struct adreno_gpu *adreno_gpu = &a6xx_gpu->base;
+ 	int ret;
++	bool waited_for_fault = false;
+ 	u32 val;
+ 	int request, ack;
+
+@@ -432,14 +433,25 @@ int a6xx_gmu_set_oob(struct a6xx_gmu *gmu, enum a6xx_gmu_oob_state state)
+ 		if (!ret)
+ 			break;
+
+-		if (completion_done(&a6xx_gpu->base.fault_coredump_done))
++		if (waited_for_fault ||
++		    completion_done(&a6xx_gpu->base.fault_coredump_done))
+ 			break;
+
+-		/* We may timeout because the GMU is temporarily wedged from
+-		 * pending faults from the GPU and we are taking a devcoredump.
+-		 * Wait until the MMU is resumed and try again.
++		/*
++		 * gts7l freeze investigation (docs/kernel-boot-debugging.md):
++		 * recover_worker()/msm_gpu_fault_crashstate_capture() both
++		 * need gpu->lock, and this OOB wait can be reached while
++		 * recovery already holds it - an unbounded
++		 * wait_for_completion() here can deadlock both paths
++		 * (flagged by the GMU maintainer during this completion's
++		 * own upstream review, freedreno list msg39107/39108, never
++		 * fixed). Bound the wait to one retry so a stuck fault
++		 * capture times out instead of hanging forever.
+ 		 */
+-		wait_for_completion(&a6xx_gpu->base.fault_coredump_done);
++		waited_for_fault = true;
++		if (!wait_for_completion_timeout(&a6xx_gpu->base.fault_coredump_done,
++						  msecs_to_jiffies(1000)))
++			break;
+ 	} while (true);
+
+ 	if (ret)
+diff --git a/drivers/gpu/drm/msm/adreno/a6xx_hfi.c b/drivers/gpu/drm/msm/adreno/a6xx_hfi.c
+index 186a73c0b..428b4fc98 100644
+--- a/drivers/gpu/drm/msm/adreno/a6xx_hfi.c
++++ b/drivers/gpu/drm/msm/adreno/a6xx_hfi.c
+@@ -111,6 +111,7 @@ static int a6xx_hfi_queue_write(struct a6xx_gmu *gmu,
+ static int a6xx_hfi_wait_for_msg_interrupt(struct a6xx_gmu *gmu, u32 id, u32 seqnum)
+ {
+ 	int ret;
++	bool waited_for_fault = false;
+ 	u32 val;
+ 	struct a6xx_gpu *a6xx_gpu = container_of(gmu, struct a6xx_gpu, gmu);
+
+@@ -122,14 +123,19 @@ static int a6xx_hfi_wait_for_msg_interrupt(struct a6xx_gmu *gmu, u32 id, u32 seq
+ 		if (!ret)
+ 			break;
+
+-		if (completion_done(&a6xx_gpu->base.fault_coredump_done))
++		if (waited_for_fault ||
++		    completion_done(&a6xx_gpu->base.fault_coredump_done))
+ 			break;
+
+-		/* We may timeout because the GMU is temporarily wedged from
+-		 * pending faults from the GPU and we are taking a devcoredump.
+-		 * Wait until the MMU is resumed and try again.
++		/*
++		 * gts7l freeze investigation - see the matching comment in
++		 * a6xx_gmu_set_oob() (a6xx_gmu.c). Same unbounded-wait
++		 * deadlock risk on this HFI message-response path.
+ 		 */
+-		wait_for_completion(&a6xx_gpu->base.fault_coredump_done);
++		waited_for_fault = true;
++		if (!wait_for_completion_timeout(&a6xx_gpu->base.fault_coredump_done,
++						  msecs_to_jiffies(1000)))
++			break;
+ 	} while (true);
+
+ 	if (ret) {
