@@ -44,8 +44,9 @@ import time
 
 LOGDIR = "/root/loadtest"
 OUTFILE = os.path.join(LOGDIR, "capture_watch.log")
-SAMPLE_INTERVAL = 0.3
-HEAVY_EVERY = 7  # ~every ~2s at 0.3s sampling
+SAMPLE_INTERVAL = 0.05  # benchmarked: fsync ~1.3ms + reads ~0.3ms << 50ms,
+                        # well under 5% duty cycle, safe to go this fast
+HEAVY_EVERY = 40  # 40 * 0.05s = ~2s wall-clock, same heavy cadence as before
 GPU_DEBUGFS = "/sys/kernel/debug/dri/0/gpu"
 GPU_DEBUGFS_READ_BYTES = 400  # covers the header, stops before the ascii85 ring dump
 GPU_DEVFREQ = "/sys/class/devfreq/3d00000.gpu"
@@ -261,7 +262,8 @@ def main():
     i = 0
     while True:
         time.sleep(SAMPLE_INTERVAL)
-        ts = time.strftime("%H:%M:%S")
+        now = time.time()
+        ts = f"{time.strftime('%H:%M:%S', time.localtime(now))}.{int(now * 1000) % 1000:03d}"
 
         cur_cpu = read_proc_stat_cpus()
         busy = cpu_busy_pct(prev_cpu, cur_cpu)
