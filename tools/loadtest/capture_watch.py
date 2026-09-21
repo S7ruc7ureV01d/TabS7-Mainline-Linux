@@ -197,6 +197,46 @@ def top_by_delta(prev, cur, n):
     return rows[:n]
 
 
+def find_running_threads_on_cpu(cpu_index):
+    """Snapshot scan of every thread's /proc/*/task/*/stat, returning
+    (pid, tid, comm) for any thread currently RUNNING (state 'R') on the
+    given CPU index (the "processor" field, /proc/pid/stat field 39).
+    Only called when a stuck-core is actually detected, not every cycle -
+    a full /proc scan is too heavy for the light tier."""
+    hits = []
+    for entry in os.listdir("/proc"):
+        if not entry.isdigit():
+            continue
+        pid = entry
+        task_dir = f"/proc/{pid}/task"
+        try:
+            tids = os.listdir(task_dir)
+        except Exception:
+            continue
+        for tid in tids:
+            try:
+                with open(f"{task_dir}/{tid}/stat", "rb") as f:
+                    data = f.read().decode("utf-8", "replace")
+                rparen = data.rfind(")")
+                comm = data[data.find("(") + 1 : rparen]
+                rest = data[rparen + 2 :].split()
+                state = rest[0]
+                processor = int(rest[36])
+                if state == "R" and processor == cpu_index:
+                    hits.append((int(pid), int(tid), comm))
+            except Exception:
+                continue
+    return hits
+
+
+def read_kernel_stack(pid, tid):
+    try:
+        with open(f"/proc/{pid}/task/{tid}/stack", "rb") as f:
+            return f.read().decode("utf-8", "replace").strip()
+    except Exception as e:
+        return f"(stack unavailable: {e})"
+
+
 def read_interrupts():
     out = {}
     try:
@@ -243,6 +283,9 @@ def drain_kmsg(fd):
 
 
 prev_thread_cache = {}
+stuck_core_streak = {}
+stuck_core_dumped = set()
+STUCK_CORE_SAMPLES = 4  # ~200ms at 50ms sampling
 
 
 def main():
@@ -275,6 +318,42 @@ def main():
             f"| load: {read_loadavg()} | mem: {read_meminfo_brief()} "
             f"| dpu: {read_dpu_crtc_state()}\n"
         )
+
+        # Stuck-core detector: a real crash (docs/load-test-modules.md,
+        # "storage_load.sh" section) showed a single core pinned at 100%
+        # for 2.5+ seconds with a specific kworker thread dominating it -
+        # the hung-task detector can't catch this (it's RUNNING, not
+        # sleeping). The moment any core has been >=95% for
+        # STUCK_CORE_SAMPLES consecutive light cycles, immediately snapshot
+        # which thread is actually running there right now and dump its
+        # real kernel stack (/proc/<pid>/task/<tid>/stack) - direct proof
+        # of exactly what it's doing, not just that it's busy. One dump per
+        # continuous stuck episode (STUCK_CORE_DUMPED), not spammed every
+        # cycle, so a real multi-second stall doesn't flood the log.
+        for cpu_name, pct in busy.items():
+            if pct >= 95.0:
+                stuck_core_streak[cpu_name] = stuck_core_streak.get(cpu_name, 0) + 1
+            else:
+                stuck_core_streak[cpu_name] = 0
+                stuck_core_dumped.discard(cpu_name)
+
+            if (stuck_core_streak[cpu_name] >= STUCK_CORE_SAMPLES
+                    and cpu_name not in stuck_core_dumped):
+                stuck_core_dumped.add(cpu_name)
+                cpu_index = int(cpu_name.replace("cpu", ""))
+                hits = find_running_threads_on_cpu(cpu_index)
+                out.write(f"--- STUCK CORE {cpu_name} @ {ts} (pinned >=95% for "
+                          f"{stuck_core_streak[cpu_name]} samples) ---\n")
+                if not hits:
+                    out.write("  (no RUNNING thread found on this CPU at scan time - "
+                              "raced with a fast context switch)\n")
+                for pid, tid, comm in hits[:3]:
+                    out.write(f"  pid={pid} tid={tid} comm={comm}\n")
+                    stack = read_kernel_stack(pid, tid)
+                    for line in stack.splitlines():
+                        out.write(f"    {line}\n")
+                out.flush()
+                os.fsync(fd_out)
 
         i += 1
         if i % HEAVY_EVERY == 0:
