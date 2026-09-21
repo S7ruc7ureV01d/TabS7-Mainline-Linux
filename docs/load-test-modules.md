@@ -673,3 +673,213 @@ underlying hardware/firmware-level single-CPU lockup - not root causes
 in their own right. Matches, and now substantially reinforces with a
 second independent NMI-non-response capture, the original conclusion
 in `docs/crash-investigation-nmi-research.md`.
+
+**Correction (2026-09-21, per owner pushback): the above "unfixable"
+framing was wrong.** Stock Samsung Android and custom Android ROMs, on
+this exact physical hardware, do not exhibit this freeze under heavy
+load - proving the silicon is fine. This has to be a mainline-vs-
+downstream software difference, not a hardware defect. Owner's
+instruction: research other mainline porting projects for the same
+platform family, pull them locally, check for the same pattern.
+
+Two research threads followed up on that instruction:
+
+1. Found a real, unmerged-upstream fix series (Ulf Hansson,
+   "[PATCH v3 0/5] pmdomain/cpuidle-psci: Fix behaviours for CPU PM
+   domains") addressing incorrect genpd power-state bookkeeping under
+   PSCI OSI mode - which dmesg confirms this device's firmware forces
+   (`[Firmware Bug]: failed to set PC mode: -3`). Backported as
+   `kernel/patches/0007-backport-genpd-psci-osi-power-unknown.patch`.
+   **Tested on real hardware 2026-09-21: does NOT fix the freeze.**
+   Froze again on the exact same repro
+   (`stress-ng --vm 1 --vm-bytes 1500M --vm-keep --timeout 30s`), host
+   monitor showing UNREACHABLE from 2026-09-21T13:12:52-03:00. This
+   run's `capture_watch.log` shows no new STUCK CORE re-trigger and no
+   NMI backtrace - the freeze this time happened faster than the
+   detector's ~100ms window, right as `MemFree` cratered in a single
+   50ms sample. pstore was empty. No new forensic detail, just a clean
+   repro on the patched kernel. See the patch file's own status note
+   for the full writeup of why this fix (real, but addresses initial
+   *boot-time* state assumptions, not a live idle-state race) is
+   likely the wrong mechanism.
+
+2. Found that downstream's own LPM driver
+   (`references/gts7l/drivers/cpuidle/lpm-levels.c`,
+   `cluster_configure()`) explicitly checks `is_IPI_pending()` before
+   allowing a CPU cluster to collapse into its deepest shared idle
+   state (`cluster_sleep_0` in `sm8250.dtsi`), and mainline's generic
+   PSCI/genpd cpuidle governor has no equivalent guard. This is a
+   direct structural match for the observed failure:
+   `lru_add_drain_all()` (called by `khugepaged` and directly by memory
+   reclaim under pressure) dispatches IPIs to every CPU, and if a
+   cluster idle-state collapse is in flight at that exact moment with
+   no such guard, a CPU can end up in a state that never answers
+   anything again, including an NMI.
+
+**Tried (2026-09-21): disabling `cluster_sleep_0` outright** -
+`kernel/patches/0008-disable-cluster-sleep-0-domain-idle-state.patch`.
+Removes `domain-idle-states = <&cluster_sleep_0>;` from `cluster_pd` in
+`sm8250.dtsi`, so CPUs stay in their per-CPU idle states and the shared
+cluster domain never collapses. Confirmed on-device via
+`pm_genpd_summary`: `power-domain-cpu-cluster0` now stays `on`
+permanently.
+
+**RESULT: partial fix - real progress, not a full resolution.**
+
+- The exact repro that reliably froze *every* prior kernel this whole
+  investigation (`stress-ng --vm 1 --vm-bytes 1500M --vm-keep --timeout
+  30s`) now completes cleanly. Host reachability monitor showed
+  continuous OK, zero UNREACHABLE, device fully responsive afterward.
+  First time this exact repro has not frozen the device.
+- A harder repro (`stress-ng --vm 1 --vm-bytes 3G --vm-keep --timeout
+  30s`, requesting more memory than is available with no swap) still
+  froze it - hard freeze, host monitor UNREACHABLE from
+  2026-09-21T13:53:07-03:00, no recovery after 30+s, owner reset the
+  device.
+
+So the cluster-collapse race was real and disabling it closes off at
+least one genuine path into the freeze - but there's still a second
+path, likely tied specifically to real OOM-killer pressure (the 3G case
+exceeds available memory; the 1.46GB case doesn't) rather than the
+milder `lru_add_drain_all()`-driven reclaim path the smaller repro
+exercises.
+
+**Follow-up diagnostic (2026-09-21): disabled per-CPU idle states too,
+ruled out the cpuidle/PSCI angle entirely.** Temporarily also removed
+`domain-idle-states` from all 8 `cpu_pdN` nodes (`little_cpu_sleep_0`/
+`big_cpu_sleep_0`), on top of the already-disabled cluster state -
+device-wide, no CPU could power-collapse at any level, only WFI.
+Confirmed on-device via `pm_genpd_summary`. Reran the 3G repro: **still
+froze hard** (host monitor UNREACHABLE from 2026-09-21T14:10:26-03:00,
+no recovery). This rules out the cpuidle/PSCI idle-state race as the
+cause of the 3G-specific freeze at any level, cluster or per-CPU. The
+per-CPU idle-state disable was diagnostic-only (real, unnecessary
+battery cost) and has been reverted; only the cluster-level fix
+(`kernel/patches/0008-...patch`) is being kept.
+
+**Where this leaves things:** the moderate-pressure freeze
+(`lru_add_drain_all()` racing a cluster idle-state collapse) is fixed.
+The heavier, real-OOM-killer freeze (`--vm-bytes 3G` with no swap) is a
+separate, still-unexplained failure with no cpuidle/PSCI connection.
+Every crash of this second kind has left no forensics (no STUCK CORE
+re-trigger, no NMI backtrace, empty pstore) because it happens faster
+than the ~100ms detector window - option (b) below is what actually
+broke this open.
+
+## Getting real forensics: panic-on-hang + uncompressed pstore + ftrace (2026-09-21)
+
+Every crash of the second kind left nothing to look at, because the
+freeze itself silently swallowed the printk/pstore path along with
+everything else. Fixed that from two directions instead of trying to
+sample faster:
+
+1. **Turn every watchdog trip into a clean panic instead of a silent
+   hang**, via runtime sysctls (survive a reboot, must be re-set each
+   boot): `kernel.softlockup_panic=1`, `kernel.hung_task_panic=1`,
+   `kernel.panic_on_rcu_stall=1`, plus a short
+   `kernel.hung_task_timeout_secs=5`. This alone took the failure from
+   "device silently unreachable forever" to "device panics, dumps to
+   pstore, and (usually) auto-reboots" - a large improvement on its
+   own regardless of what caused the underlying stall.
+2. **Disabled `CONFIG_PSTORE_COMPRESS`** (independently selectable,
+   `fs/pstore/Kconfig`). Pstore's deflate encoding turned out to be
+   strictly worse for this project's specific read-time bit-corruption
+   problem (documented throughout this file and
+   `docs/kernel-boot-debugging.md`): the plain-text `console-ramoops`
+   backend survives corruption well enough to read around individual
+   garbled characters, but one bit flip anywhere in a compressed
+   `dmesg-ramoops` stream corrupts everything after it. The first
+   attempt with compression still on produced a completely unparseable
+   binary blob (tried every zlib `wbits` mode, all failed). Turning
+   compression off made subsequent captures fully readable.
+3. Also added `CONFIG_FTRACE`/`CONFIG_FUNCTION_TRACER`/
+   `CONFIG_IRQSOFF_TRACER` (none were compiled in before - no
+   `/sys/kernel/debug/tracing/` at all) plus `ftrace_dump_on_oops=1`, to
+   try to catch the exact code path holding IRQs disabled. This part
+   turned out to be a dead end for THIS specific question (see below)
+   but is generally useful and kept.
+
+Both changes are in `kernel/config/gts7l.fragment` with dated comments.
+
+### The irqsoff capture, and ruling out a self-inflicted artifact
+
+With the tracer on, a captured critical section showed hundreds of
+repeated `unwind_find_stack() <- arch_stack_walk` calls interleaved
+with real reclaim/allocator activity (`lru_add`, `folio_batch_move_lru`,
+`__rmqueue_pcplist`). Checked every usual suspect that could explain
+that many stack walks on a hot path (`PAGE_OWNER`, `KASAN`, `DEBUG_VM`,
+`KMEMLEAK`, `LATENCYTOP`, `SCHEDSTATS` - all off); the only thing
+enabled that could cause it was the `irqsoff` tracer itself, which
+saves a fresh stack trace every time it detects a *new* max latency -
+consistent with a critical section that kept getting steadily worse,
+triggering a fresh save each time.
+
+That raised a real question: was the tracer's own overhead (a
+non-trivial stack walk, done *while IRQs are already disabled*)
+extending the very critical section it was measuring, in a feedback
+loop? **Control test: reran the identical `--vm-bytes 3G` repro with
+the tracer set to `nop` (off) but panic-on-hang sysctls still active.
+It froze anyway**, just as fast. This rules out tracer
+self-amplification - the underlying stall is real and independent of
+the instrumentation.
+
+### The real finding: multiple CPUs unreachable even by the kernel's own panic-shutdown NMI
+
+With the cluster-level fix in place but per-CPU idle states still
+active (`kernel/patches/0008-...patch`'s state), a clean (uncompressed)
+panic dump caught the idle task on multiple CPUs with a **real NMI
+backtrace sitting inside `cpu_suspend()` / `psci_cpu_suspend_enter()`**
+- the actual PSCI `CPU_SUSPEND` firmware/TrustZone call, not a
+Linux-side data structure race. That reopened the idea that PSCI
+`CPU_SUSPEND` itself might be hanging under memory pressure.
+
+To test that directly: disabled the remaining per-CPU idle states too
+(`kernel/patches/0009-disable-percpu-idle-states-diagnostic.patch`,
+diagnostic only), so **no CPU calls into PSCI `CPU_SUSPEND` at all**
+- confirmed on-device via the NMI-skip messages showing every idle CPU
+at plain `cpu_do_idle` (WFI), never `psci_cpu_suspend_enter`. Reran the
+3G repro. **It froze again anyway.** This time, with clean pstore
+output, the sequence was unambiguous:
+
+```
+rcu: INFO: rcu_preempt detected stalls on CPUs/tasks
+rcu: rcu_preempt kthread starved for 9811 jiffies! ...
+Sending NMI from CPU 2 to CPUs 1
+After 10 seconds, these CPUS still haven't responded to the NMI: 1
+Kernel panic - not syncing: RCU Stall
+...
+SMP: stopping secondary CPUs
+SMP: retry stop with NMI for CPUs 1,3-5
+SMP: failed to stop secondary CPUs 1,3-5
+```
+
+**Multiple CPUs could not be stopped even by the kernel's own
+last-resort, forced NMI shutdown during an active panic - with every
+CPU idle state Linux controls (cluster and per-CPU) disabled.** This is
+airtight: it rules out cpuidle/PSCI at every level, definitively this
+time (earlier "ruled out" claims in this file were based on a freeze
+with no forensics at all; this one has a full, clean panic trace).
+
+**Current best hypothesis:** this points below cpuidle/PSCT entirely -
+most likely a genuine interconnect/NoC bus-fabric stall under heavy DDR
+bandwidth pressure, where CPUs stay architecturally alive (not looping,
+so no software lockup detector fires, and not power-collapsed, so PSCI
+isn't involved) but block forever on an ordinary load/store to
+anything sharing that fabric - including, plausibly, whatever the NMI
+delivery path itself needs to touch (GIC registers, cache-coherency
+traffic). This isn't a new idea invented this session - it's the exact
+rationale already written into `kernel/config/gts7l.fragment`'s
+`CONFIG_QCOM_ICC_BWMON` comment from before this investigation started.
+It would explain why nothing tried at the Linux software layer so far
+(genpd fix, cluster-idle disable, per-CPU-idle disable, BPF JIT
+disable) has fully resolved it - none of them touch interconnect/DDR
+bandwidth voting, a separate subsystem where mainline's generic
+interconnect framework may simply vote for less bandwidth/higher
+latency than Qualcomm's downstream driver does under the same
+sustained pressure.
+
+**Next step:** check whether `QCOM_ICC_BWMON` is actually active and
+what bandwidth votes are in place during a freeze - this is a
+fundamentally different, more promising direction than anything tried
+so far, since it's the first hypothesis that isn't ruled out by the
+"disable every CPU idle state and it still freezes" result above.

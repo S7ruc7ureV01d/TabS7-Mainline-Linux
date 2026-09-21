@@ -6283,3 +6283,23 @@ primitives that all happen to expose the same underlying, genuinely
 hardware/firmware-level single-CPU lockup. Full detail in
 `docs/load-test-modules.md`. This is very likely below what this
 project's software tools can diagnose further or fix.
+
+**Correction (2026-09-21):** "unfixable" was wrong - stock Samsung
+Android and custom Android ROMs on this exact hardware do not exhibit
+this under heavy load, proving the silicon is fine. Two real, tested
+mitigations followed: a backported unmerged upstream genpd/cpuidle-psci
+OSI-mode fix (didn't help), then disabling the `cluster_sleep_0`
+domain-idle-state (genuinely fixed the original moderate-pressure
+repro, but a harder one still froze). Getting real forensics required
+converting hangs into clean panics (`softlockup_panic`/
+`hung_task_panic`/`panic_on_rcu_stall=1`) and disabling
+`CONFIG_PSTORE_COMPRESS` (deflate corrupts completely under this
+device's read-time bit corruption; plain text degrades gracefully).
+That produced a clean panic trace with **every CPU idle state
+disabled** (cluster and per-CPU) showing `SMP: failed to stop secondary
+CPUs 1,3-5` during the kernel's own last-resort NMI shutdown -
+conclusively ruling out cpuidle/PSCI at every level. Current best
+hypothesis: a genuine interconnect/NoC bus-fabric stall under heavy DDR
+bandwidth pressure (matches `kernel/config/gts7l.fragment`'s own
+pre-existing `CONFIG_QCOM_ICC_BWMON` rationale). Full trail in
+`docs/load-test-modules.md`.

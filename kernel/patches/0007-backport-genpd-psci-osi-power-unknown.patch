@@ -60,9 +60,32 @@ Sources (raw patch text fetched and verified directly, not AI-summarized):
   https://ratatoskr.run/linux-pm/2026/09/17524644 (patch 4/5, the main fix)
   https://ratatoskr.run/linux-pm/2026/09/17524642 (patch 5/5)
 
-Status: built and flashed to real hardware for testing (2026-09-21). Not
-yet confirmed whether it resolves the freeze - update this file's status
-once tested (docs/load-test-modules.md has the test log).
+Status: built, flashed, and tested on real hardware (2026-09-21). RESULT:
+does NOT fix the freeze. Ran the exact repro (`stress-ng --vm 1
+--vm-bytes 1500M --vm-keep --timeout 30s`) on the patched kernel; device
+went unreachable at 2026-09-21T13:12:52-03:00, confirmed via the host-side
+reachability monitor. capture_watch.log for this run shows no new
+STUCK CORE re-trigger and no NMI backtrace this time (unlike the prior
+CPU 5/CPU 6 captures) - the log just stops dead mid-sample, right as
+MemFree craters in one 50ms tick, meaning the freeze this time happened
+faster than the ~100ms window the stuck-core detector needs to re-fire.
+pstore was empty afterward too. So this run adds no new forensic detail,
+just a clean repro on the patched kernel.
+
+This fix is still correct and worth keeping (it fixes real genpd
+bookkeeping under OSI), but it addresses a different bug class than
+whatever is actually causing the freeze: it corrects genpd's assumption
+about a CPU PM domain's *initial* power state at boot, not any ongoing
+race during a live idle-state transition. The other candidate identified
+by the same research pass - downstream's lpm-levels.c explicitly checks
+is_IPI_pending() before allowing a CPU cluster to collapse into its
+deepest shared idle state, and mainline's generic cpuidle governor has no
+equivalent check - remains untested and is a more direct match for the
+observed failure (lru_add_drain_all() dispatching IPIs under memory
+pressure at the moment a cluster idle-state transition is in flight).
+Next candidate to try: disable the `cluster_sleep_0` domain-idle-state in
+sm8250.dtsi outright, removing the opportunity for that race rather than
+patching genpd's bookkeeping around it.
 
 diff --git a/drivers/cpuidle/cpuidle-psci-domain.c b/drivers/cpuidle/cpuidle-psci-domain.c
 index b9e4ad7d4..4d8c63d32 100644

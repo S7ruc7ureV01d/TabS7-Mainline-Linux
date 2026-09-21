@@ -546,3 +546,38 @@ CONFIG_QCOM_ICC_BWMON=y
 # of the bus/NoC/pstore machinery that's failed to capture anything
 # across every real repro attempt so far.
 CONFIG_DETECT_HUNG_TASK=y
+
+# Freeze investigation, continued (2026-09-21): ruled out cpuidle/PSCI at
+# every level (cluster AND per-CPU idle-state collapse both disabled via
+# DTS, froze anyway) and a specific unmerged genpd/OSI fix (didn't help).
+# A pstore capture caught a real, corroborated (matches a known upstream
+# code path) soft-lockup signature: sshd-auth's seccomp BPF filter JIT
+# doing self-modifying code via __text_poke -> kick_all_cpus_sync, an
+# ordinary IPI broadcast - but a plain IPI cannot reach a CPU with
+# PSTATE.DAIF interrupts masked, only NMI-class delivery can. So the
+# real question is why some CPU gets stuck in an IRQ-disabled region
+# under memory pressure in the first place; any cross-call (BPF JIT
+# sync, TLB flush, anything) would hang identically once that happens.
+# CONFIG_IRQSOFF_TRACER exists exactly to answer this without needing
+# to catch a live freeze in a narrow sampling window - it continuously
+# records the single longest IRQs-disabled stretch and its exact code
+# path. CONFIG_FUNCTION_TRACER is its prerequisite.
+CONFIG_FTRACE=y
+CONFIG_FUNCTION_TRACER=y
+CONFIG_IRQSOFF_TRACER=y
+
+# Panic-on-hang sysctls (softlockup_panic/hung_task_panic/panic_on_rcu_
+# stall, set at runtime) got the freeze to actually panic and write a
+# pstore dmesg-ramoops record instead of hanging silently - real
+# progress. But CONFIG_PSTORE_COMPRESS's deflate encoding turned out to
+# be strictly worse for this project's specific failure mode: the
+# console-ramoops backend (plain text) survives the read-time bit
+# corruption we keep seeing from this device's persistent-RAM region
+# well enough to still read around (individual garbled characters, rest
+# legible) - but a single bit flip anywhere in a deflate stream corrupts
+# everything after it, and the one dmesg-ramoops dump captured so far
+# was completely unparseable by zlib in every wbits mode tried. Trading
+# a small amount of on-disk size for guaranteed-plain-text panic dumps.
+# CONFIG_PSTORE_COMPRESS is independently selectable (fs/pstore/Kconfig)
+# by design.
+# CONFIG_PSTORE_COMPRESS is not set
