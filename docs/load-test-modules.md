@@ -155,3 +155,45 @@ they navigated there on purpose; worth re-checking if it ever happens
 *without* the user doing so on purpose, since `param` being pinned to
 force-recovery was a real, separate historical issue in this project
 (Phase 1 Round 7/13) - not reopened here, just flagged as a thing to watch.
+
+## Candidate fix #1 tested and ruled out: `CONFIG_QCOM_ICC_BWMON` (2026-09-21)
+
+Research (two parallel forks: a local downstream-vs-mainline source diff,
+and an upstream mailing-list/bug-report search) converged on
+`CONFIG_QCOM_ICC_BWMON` being left at defconfig's `=m` and never loaded -
+the same bug class as the already-fixed `CONFIG_INTERCONNECT_QCOM_OSM_L3`
+(Bug 1), but on the DDR-bandwidth-monitoring side. Forced `=y` in
+`kernel/config/gts7l.fragment`, rebuilt, flashed (`boot` only, RP/
+bootloader confirmed unchanged before/after, readback-verified) - full
+build/flash log in the `904b8ee` commit.
+
+**Confirmed live on real hardware before retesting**: `9091000.pmu` bound
+to the `qcom-bwmon` driver (`/sys/bus/platform/devices/9091000.pmu/driver`
+symlink present), and `/sys/kernel/debug/interconnect/interconnect_summary`
+showed it actively casting a real ~3GB/s peak bandwidth vote on both the
+`llcc_mc@163d000`/`ebi@163d000` DDR paths - previously completely absent.
+The fix itself works exactly as intended.
+
+**Retested with real Minecraft anyway: froze again**, even faster than
+before (~30-47s from launch to freeze, at the same world-loading ->
+gameplay transition). Same total-silence signature: host monitor lost
+reachability abruptly (last-alive `2026-09-21T00:08:57-03:00`), pstore's
+own driver rejected a torn buffer again (`found existing invalid buffer,
+size 148840, start 148841`), and a full raw `mmap()` recovery + `strings`
+search for `panic|NMI|lockup|watchdog|RCU stall|bwmon|BUG` across the
+entire 1MB region again found nothing from this kernel's own crash - only
+stale leftover fragments.
+
+**Conclusion: Candidate #1 is ruled out as the (sole) cause.** The fix is
+real and worth keeping (adaptive DDR bandwidth scaling that previously
+never ran at all is a genuine improvement), but it does not explain this
+freeze. Whatever's happening is not "DDR bandwidth scaling never engages
+under combined load" on its own. Next candidates from the same research,
+not yet tried: the GPU's own missing bus-bandwidth OPP table/`interconnects`
+property (a mainline-wide gap, not gts7l-specific, so lower prior but
+stacks with #1), the SMMU stall-on-fault race (matches the GL-object-churn
+theory better - a mishandled page fault under heavy alloc/free could hang
+indefinitely rather than fault-and-recover), or the zap-shader/zap-region
+devicetree carveout (a documented historical cause of literal whole-system
+freezes, not just GPU hangs, on this exact SoC family during early SM8250
+mainline bring-up).

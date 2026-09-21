@@ -6140,3 +6140,28 @@ hangs is below where even a real per-CPU NMI-capable detector ever gets a
 chance to fire, on both occasions this specific failure mode has been
 caught. Status unchanged: unresolved, not further actionable with the
 tools this project has without real UART/JTAG-level hardware debug access.
+
+### Candidate fix tested and ruled out: `CONFIG_QCOM_ICC_BWMON` (2026-09-21)
+
+Research (two parallel forks) found `CONFIG_QCOM_ICC_BWMON` left at
+defconfig's `=m`, never loaded - same bug class as the already-fixed
+`CONFIG_INTERCONNECT_QCOM_OSM_L3` (Bug 1), but for DDR-bandwidth
+monitoring instead of CPU L3 scaling. Forced `=y`, rebuilt, flashed to
+`boot` (RP/bootloader confirmed unchanged, readback-verified). Confirmed
+on real hardware that the fix genuinely works: `9091000.pmu` bound to the
+`qcom-bwmon` driver, actively casting a real ~3GB/s DDR bandwidth vote via
+`/sys/kernel/debug/interconnect/interconnect_summary` - previously
+completely inert.
+
+**Retested with real Minecraft: froze again**, even faster (~30-47s),
+same transition point, same total-silence signature (host monitor lost
+reachability abruptly, pstore's own driver rejected a torn buffer again,
+a full raw `mmap()` recovery found nothing from this kernel's own crash).
+**Ruled out as the sole cause.** Fix kept anyway (real, harmless DDR
+scaling improvement). Full detail: `docs/load-test-modules.md`. Remaining
+candidates from the same research round, not yet tried: the GPU's own
+missing bus-bandwidth OPP table (mainline-wide gap, lower prior), the
+SMMU stall-on-fault race (fits the GL-object-churn theory), or the
+zap-shader/zap-region devicetree carveout (a documented historical cause
+of literal whole-system freezes on this exact SoC family, not just GPU
+hangs).
