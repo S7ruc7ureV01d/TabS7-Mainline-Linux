@@ -515,3 +515,23 @@ CONFIG_USB_QCOM_EUD=y
 # above: foundational, needed from early boot to track real traffic
 # patterns, not a late-attaching optional peripheral.
 CONFIG_QCOM_ICC_BWMON=y
+
+# Freeze investigation, continued - found a real candidate root cause by
+# checking the local reference projects (per the owner's direction):
+# references/ubuntu-galaxy-tab-s9-ultra/docs/gpu-recovery.md documents a
+# genuine deadlock in mainline's own Freedreno GPU-fault-recovery path
+# (a6xx_gmu.c/a6xx_hfi.c's unbounded `wait_for_completion(&fault_coredump_
+# done)`, held while `recover_worker()`/`msm_gpu_fault_crashstate_capture()`
+# both need the same `gpu->lock`) - confirmed present in this project's
+# own tree line-for-line, not just theirs. This is a genuine software
+# deadlock (blocked on a mutex/completion), not a hardware hang - a
+# structurally different failure class from anything the pseudo-NMI
+# hardlockup detector above watches for (that only catches a CPU stuck
+# NOT taking interrupts, not a schedulable-but-blocked task). Enabling
+# purely as a diagnostic first, before committing to the S9 Ultra
+# project's own bounded-wait patch as an actual fix - if this deadlock is
+# really happening, this should finally produce a real blocked-task
+# stack trace via a scheduler-side timer check that doesn't depend on any
+# of the bus/NoC/pstore machinery that's failed to capture anything
+# across every real repro attempt so far.
+CONFIG_DETECT_HUNG_TASK=y
