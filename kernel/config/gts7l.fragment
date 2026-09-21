@@ -68,7 +68,19 @@ CONFIG_FB_SIMPLE=y
 # `clk_ignore_unused` is the standard, well-known mainline cmdline
 # parameter for this exact class of problem - tells the clock framework
 # to leave whatever the bootloader left running alone.
-CONFIG_CMDLINE="console=tty0 loglevel=15 clk_ignore_unused"
+#
+# Crash forensics trial (docs/crash-investigation-nmi-research.md,
+# 2026-09-20/21): irqchip.gicv3_pseudo_nmi=1 is the actual runtime switch
+# for CONFIG_ARM64_PSEUDO_NMI below - the Kconfig symbol alone changes
+# nothing at boot without it (drivers/irqchip/irq-gic-v3.c only calls
+# static_branch_enable(&supports_pseudo_nmis) when this param is set).
+# Added here, not just in the DTS's own &{/chosen}/bootargs, because this
+# is the string that actually reaches the kernel (CONFIG_CMDLINE_FORCE=y
+# below wins over whatever devicetree bootargs say - the DTS copy is
+# belt-and-suspenders only, per this file's own Round 22 note). Meant to
+# be dropped again once the pseudo-NMI trial is done (~5% runtime cost
+# while active, per the research doc) - not a permanent addition.
+CONFIG_CMDLINE="console=tty0 loglevel=15 clk_ignore_unused irqchip.gicv3_pseudo_nmi=1"
 CONFIG_CMDLINE_FORCE=y
 
 # Round 24 (2026-09-19, docs/kernel-boot-debugging.md): the memory-node fix
@@ -321,8 +333,22 @@ CONFIG_BT_HCIUART=y
 # commonly needed by userspace HID tooling, harmless to include) while
 # already in this area.
 CONFIG_UHID=y
-CONFIG_BT_HIDP=y
 CONFIG_HIDRAW=y
+
+# docs/phase5-module-loading-scoping.md: real module-loading trial run
+# - CONFIG_BT_HIDP picked deliberately as the very first thing built as
+# a real loadable module (=m, not =y like everything else this
+# project has ever added; CONFIG_HIDRAW was tried first but turned out
+# to be a plain `bool` in this kernel version, not tristate - can't be
+# a module at all, reverted above). BT_HIDP is genuinely harmless to
+# test with: it's classic BR/EDR HID support, and nothing working
+# today actually exercises it - the real BLE mouse already confirmed
+# working goes through CONFIG_UHID/BlueZ's HOGP bridge instead,
+# deliberately left alone above. Proves the whole build ->
+# modules_install -> deploy -> depmod -> udev-autoload pipeline
+# end-to-end against a known-good, low-stakes baseline before audio
+# (the real motivation for this whole effort) touches it.
+CONFIG_BT_HIDP=m
 
 # Phase 5 follow-up: real hardware use found `pacman` fails every
 # single install with "switching to sandbox user 'alpm' failed!" -
@@ -350,3 +376,103 @@ CONFIG_CHARGER_MAX77705=y
 # tristate, depends on I2C (already =y), selects REGMAP_I2C - no
 # tristate-ceiling chain expected.
 CONFIG_BATTERY_MAX17042=y
+
+# Real, severe stability bug found under sustained real-world load
+# (Firefox, Minecraft) - a hard CPU lockup (watchdog-detected,
+# "CPU3: Watchdog detected hard LOCKUP on cpu 4"), preceded by a DPU
+# display frame-event queue overflow storm
+# ([drm:dpu_crtc_frame_event_cb] *ERROR* crtc91 event 1 overflow).
+# Root-caused, not guessed: `qcom-cpufreq-hw: Failed to find icc
+# paths` has been a permanently-deferred probe in *every single boot
+# this entire session* (confirmed via journalctl on every prior
+# round's boot log, never investigated until now) - meaning real CPU
+# frequency scaling has never worked at all, the whole session; CPUs
+# have been stuck at whatever fixed frequency ABL/XBL left them at
+# since first boot. Traced directly: cpufreq-hw's own icc-path lookup
+# (dev_pm_opp_of_find_icc_paths(), drivers/cpufreq/qcom-cpufreq-hw.c)
+# needs the `epss_l3` interconnect provider node
+# (arch/arm64/boot/dts/qcom/sm8250.dtsi's `interconnect@18590000`,
+# referenced by every CPU node's own `interconnects` property) to
+# actually probe - and its driver, CONFIG_INTERCONNECT_QCOM_OSM_L3,
+# was the *only* interconnect driver in this entire kernel's whole
+# `CONFIG_INTERCONNECT_QCOM_*` family still left at defconfig's `=m`
+# (every sibling SoC's own driver defaults to `=y` in plain
+# defconfig - a real, apparently-unintentional defconfig outlier, not
+# a deliberate choice) - and this project had no module-loading
+# infrastructure until this exact session, so it could never load.
+# Real-world heavy load (Firefox, Minecraft) on CPUs stuck at a fixed,
+# likely-conservative boot-time frequency is a well-understood, real
+# way to starve a real-time display kthread worker badly enough to
+# both overflow its bounded event queue and eventually trip a genuine
+# hard-lockup watchdog - matches the observed symptom chain directly.
+# Forced built-in (not left as a module even now that module-loading
+# infra exists) since this is foundational, performance-critical
+# infrastructure needed from early boot, not a late-attaching optional
+# peripheral - matches this project's own stated policy (docs/
+# phase5-module-loading-scoping.md) of keeping bootstrap-critical
+# pieces built-in and reserving modules for genuinely optional/late
+# hardware.
+CONFIG_INTERCONNECT_QCOM_OSM_L3=y
+
+# Crash forensics (docs/kernel-boot-debugging.md) - the OSM_L3 fix
+# above did NOT stop the real crash (confirmed on real hardware: same
+# "crtc91 event 1 overflow" -> watchdog hard-lockup signature recurred
+# under Minecraft's real 3D rendering load even with CPU frequency
+# scaling genuinely working). The hard reset kills the device before
+# the kernel can flush a real backtrace to the journal, leaving the
+# actual stuck function unknown - pstore/ramoops (a persistent RAM
+# region that survives a hard reset) exists specifically to preserve
+# whatever the kernel wrote right up to the lockup. The devicetree side
+# was quietly already correct the whole time (sm8250-samsung-common.dtsi's
+# own real `ramoops@9fa00000` node) - only the kernel config was ever
+# missing. PSTORE_RAM is the backend matching that DT node;
+# PSTORE_CONSOLE is the important one - continuous console capture,
+# not just panic-time dumps, so even a hard lockup that never reaches
+# a clean panic() path should still have everything written up to
+# that point preserved.
+CONFIG_PSTORE=y
+CONFIG_PSTORE_RAM=y
+CONFIG_PSTORE_CONSOLE=y
+
+# Real hardware test found pstore/ramoops alone isn't enough for a
+# real hard-lockup crash specifically: the abrupt reset can leave the
+# persistent-RAM header torn (confirmed live: "ramoops: found existing
+# invalid buffer, size 155976, start 155977" - `start` one byte past
+# `size`, a classic non-atomic-header-update-vs-abrupt-reset race, not
+# a checksum/ECC-fixable bit-flip), causing the pstore driver to
+# reject a real ~152KB of otherwise-probably-intact captured console
+# data on the very next boot. Disabling STRICT_DEVMEM (was =y, plain
+# defconfig default) allows a raw /dev/mem read of the ramoops
+# physical region as a manual fallback when that happens - bypassing
+# the driver's own conservative all-or-nothing validation to recover
+# whatever's actually still there. A real, deliberate, single-owner
+# debug-device tradeoff (this project's whole kernel is already
+# custom/unsigned/debug-oriented by design), not a default worth
+# recommending generally.
+# CONFIG_STRICT_DEVMEM is not set
+
+# Crash forensics, continued (docs/crash-investigation-nmi-research.md) -
+# the recovered pstore backtrace from a real hard-lockup showed CPU 5
+# never responded even to an NMI sent from CPU 4, then never responded to
+# the SMP stop-CPU shutdown request either - genuinely frozen, three
+# independent ways, but we still don't know what CPU 5 was actually
+# executing, because the current detector (CONFIG_HARDLOCKUP_DETECTOR_BUDDY,
+# the only one available without this) is a *different*, unaffected CPU
+# noticing CPU 5 stopped reporting in - it can never capture CPU 5's own
+# registers/stack. ARM64_PSEUDO_NMI is the one real, already-upstream,
+# no-patch-carrying path to a true per-CPU NMI-capable detector
+# (HARDLOCKUP_DETECTOR_PERF) on GICv3 hardware (which SM8250 has) - but
+# whether it actually works depends on TrustZone/`xbl`/`tz` firmware
+# having set SCR_EL3.FIQ=1, which this project has no visibility into and
+# will never touch - answerable only empirically, by enabling it and
+# checking dmesg for "Pseudo-NMIs enabled" vs. a silent no-op.
+# Deliberately build+bootarg-gated, not left on by default: the actual
+# runtime behavior only changes once `irqchip.gicv3_pseudo_nmi=1` is also
+# passed on the kernel cmdline (see &{/chosen}'s bootargs in
+# kernel/dts/sm8250-samsung-gts7l.dts) - enabling just this Kconfig
+# symbol alone costs nothing at runtime. Real, measured cost *if* the
+# bootarg is also set and firmware actually supports it: ~5% on general
+# workloads, so only meant to be flipped on for a deliberate crash
+# reproduction session, not left on permanently.
+CONFIG_ARM64_PSEUDO_NMI=y
+CONFIG_HARDLOCKUP_DETECTOR_PERF=y

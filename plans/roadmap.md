@@ -1338,6 +1338,34 @@ Progress log:
   disappears) - this chip's Type-C/MUIC block has never been touched,
   scoped separately in `docs/phase3-typec-muic-scoping.md`. Next:
   implement Type-C/MUIC once that scoping pass reports back.
+- 2026-09-20/21: Crash investigation - a real, reproducible hard CPU
+  lockup under sustained heavy 3D load (Minecraft/LWJGL). Full story in
+  `docs/kernel-boot-debugging.md`'s "Crash investigation" section
+  (setup/mechanics reference: `docs/dev-environment-quickref.md`;
+  standalone research: `docs/crash-investigation-nmi-research.md`).
+  Two real, confirmed bugs found and fixed along the way:
+  `CONFIG_INTERCONNECT_QCOM_OSM_L3` was off, meaning CPU frequency
+  scaling had silently never worked the entire project session (now
+  fixed, confirmed live); and the DPU driver's fixed 4-slot frame-event
+  queue (`dpu_crtc.h`) was overflowing under heavy GPU commit traffic
+  (mitigated by doubling it to 8 - not yet captured as a tracked patch
+  file). Neither fix eliminated the underlying freeze. Set up pstore/
+  ramoops crash forensics (config-only, the DT node already existed
+  upstream) plus a manual `mmap()`-based `/dev/mem` recovery technique
+  for when a hard reset leaves its header torn - recovered a real,
+  if bit-corrupted, panic backtrace once. Tried a pseudo-NMI hardlockup
+  -detector trial (`CONFIG_ARM64_PSEUDO_NMI`); confirmed this device's
+  TrustZone firmware genuinely supports it (`SCR_EL3.FIQ=1`,
+  "Pseudo-NMIs enabled"), but the next crash reproduction was a
+  qualitatively new, more severe failure (device didn't even
+  self-reset, SSH also died, pstore captured nothing about it) -
+  pointing below what any kernel-side software forensics can reach
+  without hardware debug access. **Status: unresolved**, documented as
+  a known limitation of sustained heavy-3D-load workloads; the two
+  found bugs are real, worthwhile, standalone fixes and stay regardless.
+  Next: revert the pseudo-NMI bootarg (real ~5% runtime cost, answered
+  its own question already) and go back to feature work; leave this
+  investigation closed unless new evidence surfaces.
 
 ---
 

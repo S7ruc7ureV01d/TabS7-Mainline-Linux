@@ -5872,3 +5872,208 @@ charging-status or fuel-gauge work above, but almost certainly the
 MAX77705's separate USB-C/PD port-management and MUIC block, never
 touched by this project at all. Scoped separately:
 `docs/phase3-typec-muic-scoping.md`.
+
+---
+
+## Crash investigation: hard CPU lockup under sustained load (2026-09-20/21)
+
+A real, severe, reproducible stability bug surfaced under sustained
+real-world load (Firefox, then reliably in Minecraft 1.12.2/
+PrismLauncher with LWJGL OpenGL rendering) - a hard CPU lockup, watchdog
+-detected on the crashes that did self-recover, always ending in an
+uncontrolled reset with no clean panic() flush to the journal. Multiple
+real bugs were found and fixed along the way; the root freeze itself is
+still not fully explained. See also
+`docs/dev-environment-quickref.md` for the SSH/pstore/build mechanics
+referenced throughout this section, and
+`docs/crash-investigation-nmi-research.md` for the standalone research
+that fed the pseudo-NMI trial below.
+
+### Bug 1 (fixed, confirmed): CPU frequency scaling silently never worked, the whole session
+
+Independently found while investigating the crash, not initially the
+target: `qcom-cpufreq-hw: Failed to find icc paths` had been a
+permanently-deferred probe on **every boot this entire project session**
+- CPUs had been stuck at whatever fixed frequency ABL/XBL left them at
+since first boot, the entire time. Root-caused: `qcom-cpufreq-hw`'s own
+icc-path lookup (`dev_pm_opp_of_find_icc_paths()`,
+`drivers/cpufreq/qcom-cpufreq-hw.c`) needs the `epss_l3` interconnect
+provider node (`sm8250.dtsi`'s `interconnect@18590000`, referenced by
+every CPU node's own `interconnects` property) to actually probe - and
+its driver, `CONFIG_INTERCONNECT_QCOM_OSM_L3`, was the *only*
+interconnect driver in this kernel's entire `CONFIG_INTERCONNECT_QCOM_*`
+family still left at defconfig's `=m` (every sibling SoC's own driver
+defaults `=y` - a real, apparently unintentional defconfig outlier).
+This project had no module-loading infrastructure until this exact
+session, so it could never load. Forced `CONFIG_INTERCONNECT_QCOM_OSM_L3=y`
+(built-in, not left as a module even now that module-loading exists -
+foundational, performance-critical, needed from early boot). **Confirmed
+live after the fix**: `scaling_cur_freq`/`scaling_available_frequencies`
+populated correctly (300MHz-1.8GHz on cpu0, up to 3.0912GHz turbo on
+cpu7), `schedutil` governor active, driver bound with zero errors. Did
+**not** stop the crash on its own - the same failure signature recurred
+under Minecraft even with CPU scaling genuinely working, ruling out
+plain frequency starvation as the sole cause.
+
+### Bug 2 (mitigated, not eliminated): DPU frame-event queue overflow
+
+The first two crashes both showed a `[drm:dpu_crtc_frame_event_cb]
+*ERROR* crtcN event 1 overflow` storm (hundreds of suppressed
+ratelimited callbacks) immediately preceding
+`watchdog: CPUx: Watchdog detected hard LOCKUP on cpu Y`, then an
+uncontrolled reset. Root-caused: `DPU_CRTC_FRAME_EVENT_SIZE = 4` in
+`work/linux/drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.h` is a fixed 4-slot
+free-list pool for `struct dpu_crtc_frame_event`, drained by a
+per-CRTC `kthread_worker` correctly configured `SCHED_FIFO`
+(`sched_set_fifo()` in `msm_kms.c`). Under Minecraft's heavy GPU commit
+traffic all 4 slots get checked out simultaneously before
+`dpu_crtc_frame_event_work()` returns any to the free list, producing
+the overflow. **Mitigation applied**: doubled the pool to 8 slots (a
+real, low-risk headroom increase, not a guess - see the comment at the
+top of `dpu_crtc.h` for the full justification). **Not yet captured as
+a tracked `kernel/patches/000N-*.patch` file** - still a live,
+uncommitted change against `work/linux` as of this writing; do that
+before considering this fix "landed" the way this project's other
+upstream-driver changes are.
+
+Measured effect on the next crash (round90, after both this fix and
+Bug 1's fix): took ~12 minutes of sustained load to reproduce, versus
+~1-2 minutes before - a real improvement - but the crash still happened,
+and with **no overflow signature at all this time** - a different
+failure mode than the first two crashes.
+
+### pstore/ramoops crash forensics: set up, and a real gotcha found
+
+Discovered mainline's own `sm8250-samsung-common.dtsi` already ships a
+complete `ramoops@9fa00000` node (1MB, `no-map`) - only
+`CONFIG_PSTORE=y`/`CONFIG_PSTORE_RAM=y`/`CONFIG_PSTORE_CONSOLE=y` needed
+adding. Confirmed working for a clean reboot. But **a real hard
+lockup's abrupt reset frequently leaves the persistent-RAM header torn**
+(`ramoops: found existing invalid buffer, size X, start Y` with `Y > X`
+- a non-atomic-header-update-vs-abrupt-reset race, not an ECC-fixable
+bit-flip), which makes the driver reject data it would otherwise expose
+cleanly. Worked around by disabling `CONFIG_STRICT_DEVMEM` and reading
+the raw physical region via `mmap()` on `/dev/mem` (plain `read()`-based
+access fails with `Bad address` on `no-map` memory - no linear-map entry
+- `mmap()` doesn't need one). Full recipe in
+`docs/dev-environment-quickref.md`. This recovered a real, if
+significantly bit-corrupted, backtrace from crash #3:
+
+```
+rcu: INFO: rcu_preempt detected stalls on CPUs/tasks: CPU 5 (...)
+[Sending NMI from CPU 4 to CPU 5]
+After 1 second(s), these CPUs still haven't responded to the NMI: 5
+Kernel panic - not syncing: Hard LOCKUP
+CPU: 6 ... Comm: swapper/6 Tainted: G  W  7.2.0-dirty #65 PREEMPT
+watchdog_hardlockup_check / watchdog_buddy_check_hardlockup / ...
+SMP: failed to stop secondary CPU 5
+pstore: backend (ramoops) writing error (-28)
+Rebooting in 5 seconds..
+```
+
+**Critical interpretation**: this is CPU 6's *own* backtrace (an idle,
+unaffected CPU running its periodic watchdog hrtimer), captured via
+Linux's software-only "buddy" hardlockup detector
+(`watchdog_buddy_check_hardlockup`) - not a real per-CPU NMI/perf-based
+detector. CPU 5 (the actually-frozen CPU) never got to dump its own
+registers/stack - it didn't respond to an NMI sent specifically to
+interrupt it, and later failed to respond to the SMP stop-CPU shutdown
+request either. Confirmed genuinely frozen three independent ways (RCU
+stall, NMI non-response, SMP stop-CPU failure), but the buddy detector
+structurally cannot capture what CPU 5 itself was executing.
+
+### The pseudo-NMI trial (2026-09-20/21)
+
+Research (`docs/crash-investigation-nmi-research.md`, via a research
+fork) concluded `CONFIG_ARM64_PSEUDO_NMI` + `CONFIG_HARDLOCKUP_DETECTOR_PERF`
+is the only real, already-upstream, no-patch-carrying path to a true
+per-CPU NMI-capable hardlockup detector on this GICv3 hardware - gated
+entirely on whether TrustZone/`xbl`/`tz` firmware left `SCR_EL3.FIQ=1`
+for Linux's world, which is unknowable without empirically trying it.
+Checked Samsung's own downstream defconfig first (no reboot needed) -
+found `CONFIG_HAVE_NMI=y` (a generic capability flag only) but neither
+`CONFIG_ARM64_PSEUDO_NMI` nor `CONFIG_HARDLOCKUP_DETECTOR_PERF` enabled,
+a mild negative signal but not conclusive.
+
+**Kconfig chain, confirmed by checking the resolved `.config` directly**
+(this project's established discipline for avoiding tristate-ceiling
+surprises): `CONFIG_ARM64_PSEUDO_NMI=y` → selects
+`HAVE_PERF_EVENTS_NMI` → makes `HAVE_HARDLOCKUP_DETECTOR_PERF` available
+(already had `PERF_EVENTS`/`HW_PERF_EVENTS`) → `HARDLOCKUP_DETECTOR`'s
+own `imply HARDLOCKUP_DETECTOR_PERF` picks it, and
+`HARDLOCKUP_DETECTOR_BUDDY`'s own `depends on !HAVE_HARDLOCKUP_DETECTOR_PERF
+|| HARDLOCKUP_DETECTOR_PREFER_BUDDY` correctly turns itself off. Verified
+post-`olddefconfig`: `HARDLOCKUP_DETECTOR_PERF=y`,
+`HARDLOCKUP_DETECTOR_BUDDY` unset, both forced explicitly in the
+fragment anyway rather than trusting `imply` alone.
+
+**Deliberately build+bootarg-gated**, matching the research's own
+recommendation to avoid the ~5% steady-state cost outside an actual
+test session: the Kconfig symbols alone change nothing at runtime -
+activation is the `irqchip.gicv3_pseudo_nmi=1` kernel cmdline parameter,
+added to `CONFIG_CMDLINE` (the string that actually reaches the kernel,
+`CONFIG_CMDLINE_FORCE=y`) and mirrored in the DTS `&{/chosen}/bootargs`
+for consistency.
+
+**Confirmed working end-to-end on real hardware, round91**:
+```
+GICv3: GICD_CTLR.DS=0, SCR_EL3.FIQ=1
+GICv3: Pseudo-NMIs enabled using forced ICC_PMR_EL1 synchronisation
+hw perfevents: enabled with armv8_pmuv3 PMU driver, ... using NMIs
+NMI watchdog: Enabled. Permanently consumes one hw-PMU counter.
+```
+TrustZone firmware on this specific device **does** support pseudo-NMI -
+this was a real, non-obvious firmware capability question that could
+only be answered empirically, and it came back positive.
+
+### Crash #4 (round91, pseudo-NMI active): a genuinely new, more severe failure mode
+
+Reproduced under Minecraft again. This time the device **did not
+auto-reboot at all** - froze on the pre-gameplay loading screen and
+stayed there, requiring a manual 10-15s power-button hold to recover
+(every prior crash had self-recovered via the hard-lockup-panic path
+within ~5 seconds). SSH also timed out completely
+(`ssh: connect ... Connection timed out`) - not just a display hang.
+
+**Recovered pstore afterward and found essentially nothing about this
+specific freeze.** The only NMI-related event in the recovered buffer
+was one genuine, successfully-resolved transient RCU stall at boot+350s
+(`Sending NMI from CPU 3 to CPUs 7:` / `NMI backtrace for cpu 7 skipped:
+idling at cpu_to_idle+0x64/0x68` - CPU 7 correctly answered and was
+found idle, not locked), which happened well before the actual freeze
+and self-resolved without incident - proof the pseudo-NMI mechanism
+itself works correctly, just not evidence about this crash. No
+hardlockup-detector message, no panic, nothing else useful - the actual
+freeze left no trace in pstore at all.
+
+**Also confirmed** (worth remembering going forward): the ramoops
+physical region is **not cleared by a warm/`PS_HOLD` reset** - the raw
+recovered dump contained clearly unrelated leftover fragments from old
+*stock Android* boots (literal `HidlServiceManagement` HIDL log lines),
+mixed in with this session's own content. Don't assume everything found
+in a raw pstore recovery is from the crash under investigation.
+
+**Interpretation**: this is a step beyond what Bug 1/Bug 2 or the
+pseudo-NMI detector could reach. A real per-CPU NMI detector *and* the
+hardware/software hard-lockup-panic reset path both failed to fire -
+that points toward something even lower-level than a schedulable-CPU
+hard lockup (a bus/memory-controller livelock, a stuck SMC/EL3 trap, or
+similar), which is outside what kernel-side software forensics can
+diagnose further without UART/JTAG-level hardware debug access, which
+isn't available for this device. **Status: unresolved, not further
+actionable with the tools this project has.** Bugs 1 and 2 are real,
+confirmed, worthwhile fixes that measurably improved crash frequency/
+signature and should stay; the pseudo-NMI trial answered its own
+question (firmware supports it) but didn't resolve the deeper freeze,
+and should be reverted (drop `irqchip.gicv3_pseudo_nmi=1` from
+`CONFIG_CMDLINE`, optionally leave `CONFIG_ARM64_PSEUDO_NMI` built but
+inactive) once this investigation is considered closed, so normal use
+isn't permanently paying its ~5% cost for a detector that didn't end up
+answering the real question.
+
+**Practical guidance for actually using the device given all this**:
+sustained heavy 3D-rendering load (confirmed: Minecraft/LWJGL,
+suspected: other demanding OpenGL workloads) is a real, reproducible
+trigger for an eventual freeze requiring a manual hard reset. No fix
+currently known. Lighter graphics workloads and the desktop session
+itself have not shown this issue.

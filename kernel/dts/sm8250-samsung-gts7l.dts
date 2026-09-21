@@ -403,7 +403,12 @@
 };
 
 &{/chosen} {
-	bootargs = "console=tty0 loglevel=15";
+	/* Round 22's belt-and-suspenders copy - CONFIG_CMDLINE_FORCE=y in
+	 * kernel/config/gts7l.fragment is the string that actually wins,
+	 * kept in sync manually. See that file for the pseudo-NMI trial's
+	 * irqchip.gicv3_pseudo_nmi=1 note.
+	 */
+	bootargs = "console=tty0 loglevel=15 clk_ignore_unused irqchip.gicv3_pseudo_nmi=1";
 };
 
 /*
@@ -749,6 +754,33 @@
 		reg = <0x0 0x9e300000 0x0 0x100000>;
 	};
 };
+
+/*
+ * Real hardware crash investigation (2026-09-20/21,
+ * docs/kernel-boot-debugging.md): a genuine watchdog-detected hard CPU
+ * lockup under sustained heavy 3D rendering load (Minecraft), preceded
+ * by a DPU `[drm:dpu_crtc_frame_event_cb] *ERROR* crtc91 event 1
+ * overflow` storm - but the hard reset kills the device before the
+ * kernel can flush anything past the single "watchdog: ... hard
+ * LOCKUP" line to the journal, leaving the actual stuck function
+ * unknown. This project looked at pstore/ramoops once before, very
+ * early on (Phase 1's Round 13 notes: "`/sys/fs/pstore/
+ * console-ramoops-0` held only stale data... our DTS doesn't configure
+ * a matching `ramoops` region"), but never came back to actually wire
+ * it up until now that a real crash needs real forensics rather than
+ * guessing from driver source alone.
+ *
+ * No new devicetree node needed at all: `sm8250-samsung-common.dtsi`
+ * (this file's own base) already has a complete, real
+ * `ramoops@9fa00000` node (1MB, `compatible = "ramoops"`, real
+ * `record-size`/`console-size`/`ftrace-size`/`pmsg-size`, `no-map`) -
+ * confirmed by decompiling this project's own built DTB, not assumed.
+ * The only reason it never did anything is that `CONFIG_PSTORE`/
+ * `PSTORE_RAM` were never enabled - the devicetree side of this was
+ * quietly already correct. Enabling those below is the entire fix;
+ * reusing this existing, upstream-vetted placement is safer than
+ * picking a new manual address ourselves.
+ */
 
 /*
  * Round 35 (2026-09-19, docs/kernel-boot-debugging.md): the real,
