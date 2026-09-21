@@ -6209,3 +6209,27 @@ fix in place regardless (real improvement on its own terms - recovery no
 longer waits forever), but the freeze itself remains unresolved. Full
 detail, including the exact byte-for-byte evidence, in
 `docs/load-test-modules.md`.
+
+### Root cause found: real ext4 spinlock stuck in the delayed-allocation write path (2026-09-21)
+
+The entire GPU investigation above turned out to be a red herring. The
+owner ran a plain `dd if=/dev/zero ... conv=fdatasync` against a real
+directory by hand, completely unrelated to GPU/Minecraft, and the device
+froze immediately - reproducible in seconds (`tools/loadtest/
+storage_load.sh`), a huge improvement over booting Minecraft every time.
+
+A stuck-core detector added to `capture_watch.py` (triggers sysrq's
+cross-CPU NMI backtrace - `/proc/<pid>/stack` is unreliable for a
+genuinely-running task, only sysrq's NMI mechanism gets a real trace)
+caught the actual stuck core directly: **`dd` spinning forever on a
+spinlock inside `ext4_da_reserve_space()`** (call chain: `vfs_write` ->
+`ext4_file_write_iter` -> `ext4_buffered_write_iter` ->
+`generic_perform_write` -> `ext4_da_write_begin` ->
+`ext4_block_write_begin` -> `ext4_da_get_block_prep` ->
+`ext4_da_reserve_space` -> `_raw_spin_lock`). A real ext4
+delayed-allocation locking bug/contention issue, not anything
+GPU-driver-related - Minecraft triggers it because loading a world
+generates enough real disk I/O to hit the same path, not because of its
+GPU workload. Full detail, evidence, and next steps (untried: mounting
+with `nodelalloc` as both diagnostic and mitigation) in
+`docs/load-test-modules.md`.

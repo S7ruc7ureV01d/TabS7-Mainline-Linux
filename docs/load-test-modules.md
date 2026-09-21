@@ -478,3 +478,69 @@ exercised on a real crash, since this improvement landed after this
 particular repro already completed. Next test should show the exact
 kernel function `kworker/7:2+events` (or whichever worker/core is
 implicated next time) is actually stuck in.
+
+## Root cause found: a real spinlock stuck in ext4's delayed-allocation write path (2026-09-21)
+
+The stuck-core detector fired on a retest (threshold lowered to 2
+samples after a near-miss), but `/proc/<pid>/task/<tid>/stack` came back
+useless - a single non-symbol garbage value. Root cause of *that*: this
+file is only reliable for a *sleeping* task; a task that's genuinely
+`RUNNING` right now has no saved stack to unwind. Switched the detector
+to trigger sysrq's cross-CPU NMI backtrace instead (`echo l >
+/proc/sysrq-trigger`, `arch_trigger_cpumask_backtrace`) - this
+interrupts every CPU via NMI and has each one dump its own real, live
+call trace, which does work for a running task. Also had to enable
+`sysrq=1` (this device's default, `16`/`0x10`, is missing the bit this
+trigger needs) - now done automatically at script start.
+
+Retested. **Got a complete, symbolized kernel stack trace of the actual
+stuck core (CPU 6, PID 12299 `dd`):**
+
+```
+_raw_spin_lock+0x2c/0x68        <- actively spinning here
+ext4_da_reserve_space+0x4c/0xbc
+ext4_da_get_block_prep+0x228/0x5b0
+ext4_block_write_begin+0x260/0x5bc
+ext4_da_write_begin+0x23c/0x314
+generic_perform_write+0xac/0x250
+ext4_buffered_write_iter+0x130/0x1c0
+ext4_file_write_iter+0x70/0x6a0
+vfs_write+0x288/0x444
+ksys_write+0x78/0xec
+__arm64_sys_write
+```
+
+**This is the real root cause, and it has nothing to do with the GPU.**
+`dd`'s plain `write()` syscall enters ext4's delayed-allocation path and
+gets stuck forever spinning on a spinlock inside
+`ext4_da_reserve_space()` - the function that reserves blocks and
+updates free-space/reservation accounting for a delayed-allocation
+write. A real ext4 filesystem-level lock, not a GPU driver deadlock, not
+a scheduler issue, not memory pressure by itself (though heavy
+writeback pressure is almost certainly what exposes the race).
+
+The other CPUs captured in the same NMI sweep (0, 1, 3) show completely
+ordinary in-flight syscalls (an `open()` path lookup, a page fault,
+plain userspace execution) - normal activity that happened to be
+running at that instant, not evidence of being stuck themselves. Only
+`dd` on CPU 6 is actually spinning on a lock; the freeze presumably
+cascades from there as every other thread needing filesystem I/O on the
+same superblock eventually piles up behind the same contended
+accounting path.
+
+**Reframes the whole investigation**: the GPU fault/recover cascade
+chased through most of this session was unrelated background noise.
+Minecraft triggers this bug because loading a world generates real,
+heavy disk I/O (save files, asset caches) - enough to hit the same ext4
+locking pathology - not because of anything GPU-specific. The
+`CONFIG_QCOM_ICC_BWMON` and `fault_coredump_done` fixes are both still
+worth keeping on their own merits, but neither was ever going to fix
+this.
+
+**Next step, not yet tried**: mounting with `nodelalloc` (disables ext4
+delayed allocation entirely) as both a diagnostic and a possible
+mitigation - if that avoids the freeze, it strongly confirms this
+exact code path as the cause. Also worth checking this kernel's exact
+`ext4_da_reserve_space()` source and superblock-level reservation lock
+for a known upstream bug/fix, now that the exact function is known
+rather than guessed at.
