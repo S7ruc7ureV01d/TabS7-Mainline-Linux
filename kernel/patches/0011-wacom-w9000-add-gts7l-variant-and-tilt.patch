@@ -19,10 +19,12 @@ byte offsets for max_x/max_y/pressure/fw_version). Adds:
     EPEN_REG_TILT_X/TILT_Y and the runtime coordinate-report parsing in
     wacom_i2c.c), not guessed;
   - a per-variant power_on_delay_ms/query_retry_delay_ms (0 = driver's
-    original defaults, existing variants unaffected) - tested at 500ms/
-    20ms on real hardware, ruled out as the cause of the chip's current
-    non-response (see status below), but kept as a real, harmless
-    robustness margin.
+    original defaults, existing variants unaffected) and
+    force_power_cycle (false by default, existing variants unaffected)
+    - all tested on real hardware and individually ruled out as fixing
+    this chip's remaining non-response (see status below), but kept as
+    real, harmless robustness improvements matching downstream's own
+    documented behavior.
 
 The exact public Wacom part number for this chip is unconfirmed (no
 public source found for it - see the scoping doc) - "gts7l" is used in
@@ -31,19 +33,37 @@ the compatible string rather than asserting an unverified model name.
 Status (2026-09-21): built and tested on real hardware multiple times.
 The digitizer enumerates correctly on the I2C bus (`17-0056`) and the
 driver binds, but consistently fails its query command with -ENXIO (no
-I2C ack at all, not just bad data) regardless of power-on timing.
-Wiring this chip's real AVDD rail (PM8150 LDO13, see
-kernel/dts/sm8250-samsung-gts7l.dts and docs/phase4-spen-scoping.md)
-caused a real hardware brownout the first few attempts - root-caused
-and fixed (a mainline regulator-core interaction, not a problem with
-this driver - see the DTS commit for the full trail). With that fixed,
-no more brownout, but the chip still doesn't respond. Timing (longer
-power-on delay, spaced-out retries) was tested and ruled out. Next
-thing to check: GPIO polarity on flash-mode-gpios - no way to verify
-further without either real chip documentation or a live UART capture
-of what the chip itself reports at power-up (this project's own UART
-research, docs/uart-debug-research.md, documents a real but physical-
-hardware-dependent method never actually built/tested).
+I2C ack at all, not just bad data). Wiring this chip's real AVDD rail
+(PM8150 LDO13, see kernel/dts/sm8250-samsung-gts7l.dts and
+docs/phase4-spen-scoping.md) caused a real hardware brownout the first
+few attempts - root-caused and fixed (a mainline regulator-core
+interaction, not a problem with this driver - see the DTS commit for
+the full trail). With that fixed, no more brownout, but the chip still
+doesn't respond.
+
+Three independently well-reasoned hypotheses have since been tested
+on real hardware and cleanly ruled out, each with an identical -ENXIO
+result:
+  1. Power-on timing (500ms settle + spaced retries vs the driver's
+     stock 200ms/back-to-back).
+  2. flash-mode-gpios polarity (tested both GPIO_ACTIVE_HIGH and
+     GPIO_ACTIVE_LOW).
+  3. Power-cycle sequencing (force_power_cycle above) - matched
+     exactly against Samsung's own downstream driver for this chip
+     (references/gts7l/drivers/input/wacom/wacom_i2c.c,
+     wacom_power()/wacom_reset_hw(): explicitly forces a real
+     disable->100ms->enable->200ms cycle, never trusting a bare
+     enable() to have toggled real hardware when the rail can already
+     read back as enabled via RPMh aggregate voting) - confirmed via
+     direct source reading, not guessed, and it still didn't work.
+
+What's next needs either the chip's real datasheet (not publicly
+available for Wacom EMR digitizers) or a live UART capture of what the
+chip itself reports at power-up - this project's own prior research
+(docs/uart-debug-research.md) documents a real method for the latter
+but it was never built/tested; it needs physical hardware (a bare
+USB-C breakout board, a ~619kOhm resistor, a USB-to-TTL serial adapter)
+not available this session.
 
 diff --git a/Documentation/devicetree/bindings/input/touchscreen/wacom,w9007a-lt03.yaml b/Documentation/devicetree/bindings/input/touchscreen/wacom,w9007a-lt03.yaml
 index 6d1da6a43..6c24bd0a8 100644
@@ -58,10 +78,10 @@ index 6d1da6a43..6c24bd0a8 100644
    reg:
      maxItems: 1
 diff --git a/drivers/input/touchscreen/wacom_w9000.c b/drivers/input/touchscreen/wacom_w9000.c
-index 4a2629a54..69d44e46f 100644
+index 4a2629a54..162839623 100644
 --- a/drivers/input/touchscreen/wacom_w9000.c
 +++ b/drivers/input/touchscreen/wacom_w9000.c
-@@ -22,16 +22,38 @@
+@@ -22,16 +22,50 @@
  #define CMD_QUERY_RETRIES	8
 
  /* Message length */
@@ -99,10 +119,22 @@ index 4a2629a54..69d44e46f 100644
 +	 */
 +	const u16 power_on_delay_ms;
 +	const u16 query_retry_delay_ms;
++	/*
++	 * Some boards' firmware leaves this chip's AVDD rail already
++	 * enabled before Linux ever touches it (RPMh aggregate voting -
++	 * regulator_is_enabled() can read back as already-on with no real
++	 * edge ever having happened from this driver's own enable() call).
++	 * Downstream's own driver for this chip family explicitly forces a
++	 * real disable->100ms->enable->200ms cycle for exactly this reason
++	 * (a bare enable() on an already-on rail may never toggle real
++	 * hardware). Set true only for variants confirmed to need it -
++	 * false preserves every existing variant's original behavior.
++	 */
++	const bool force_power_cycle;
  };
 
  struct wacom_w9000_data {
-@@ -42,6 +64,8 @@ struct wacom_w9000_data {
+@@ -42,6 +76,8 @@ struct wacom_w9000_data {
 
  	struct touchscreen_properties prop;
  	u16 max_pressure;
@@ -111,7 +143,7 @@ index 4a2629a54..69d44e46f 100644
 
  	struct regulator *regulator;
 
-@@ -90,6 +114,9 @@ static int wacom_w9000_query(struct wacom_w9000_data *wacom_data)
+@@ -90,6 +126,9 @@ static int wacom_w9000_query(struct wacom_w9000_data *wacom_data)
  	int error;
 
  	for (retry = 0; retry < CMD_QUERY_RETRIES; retry++) {
@@ -121,7 +153,7 @@ index 4a2629a54..69d44e46f 100644
  		error = wacom_w9000_read(client, CMD_QUERY,
  					 wacom_data->variant->cmd_query_num,
  					 data);
-@@ -111,6 +138,11 @@ static int wacom_w9000_query(struct wacom_w9000_data *wacom_data)
+@@ -111,6 +150,11 @@ static int wacom_w9000_query(struct wacom_w9000_data *wacom_data)
  	wacom_data->max_pressure = get_unaligned_be16(&data[5]);
  	wacom_data->fw_version = get_unaligned_be16(&data[7]);
 
@@ -133,7 +165,7 @@ index 4a2629a54..69d44e46f 100644
  	dev_dbg(dev, "max_x:%d, max_y:%d, max_pressure:%d, fw:%#x\n",
  		wacom_data->prop.max_x, wacom_data->prop.max_y,
  		wacom_data->max_pressure, wacom_data->fw_version);
-@@ -130,7 +162,7 @@ static int wacom_w9000_power_on(struct wacom_w9000_data *wacom_data)
+@@ -130,7 +174,7 @@ static int wacom_w9000_power_on(struct wacom_w9000_data *wacom_data)
  		return error;
  	}
 
@@ -142,7 +174,7 @@ index 4a2629a54..69d44e46f 100644
 
  	gpiod_set_value_cansleep(wacom_data->reset_gpio, 0);
  	enable_irq(wacom_data->irq);
-@@ -157,6 +189,7 @@ static void wacom_w9000_coord(struct wacom_w9000_data *wacom_data)
+@@ -157,6 +201,7 @@ static void wacom_w9000_coord(struct wacom_w9000_data *wacom_data)
  	bool touch, rubber, side_button;
  	u16 x, y, pressure;
  	u8 distance = 0;
@@ -150,7 +182,7 @@ index 4a2629a54..69d44e46f 100644
  	int error;
 
  	error = i2c_master_recv(client, data, wacom_data->variant->msg_coord_num);
-@@ -183,6 +216,11 @@ static void wacom_w9000_coord(struct wacom_w9000_data *wacom_data)
+@@ -183,6 +228,11 @@ static void wacom_w9000_coord(struct wacom_w9000_data *wacom_data)
  		if (wacom_data->variant->msg_coord_num > 7)
  			distance = data[7];
 
@@ -162,7 +194,7 @@ index 4a2629a54..69d44e46f 100644
  		if (x > wacom_data->prop.max_x || y > wacom_data->prop.max_y) {
  			dev_warn_ratelimited(dev, "Coordinates out of range x=%d, y=%d\n", x, y);
  			return;
-@@ -199,6 +237,11 @@ static void wacom_w9000_coord(struct wacom_w9000_data *wacom_data)
+@@ -199,6 +249,11 @@ static void wacom_w9000_coord(struct wacom_w9000_data *wacom_data)
  		if (wacom_data->variant->msg_coord_num > 7)
  			input_report_abs(wacom_data->input_dev, ABS_DISTANCE, distance);
 
@@ -174,16 +206,24 @@ index 4a2629a54..69d44e46f 100644
  		input_report_key(wacom_data->input_dev, BTN_STYLUS, side_button);
  		input_report_key(wacom_data->input_dev, BTN_TOUCH, touch);
  		input_report_key(wacom_data->input_dev, BTN_TOOL_PEN, !rubber);
-@@ -302,7 +345,7 @@ static int wacom_w9000_probe(struct i2c_client *client)
+@@ -302,7 +357,15 @@ static int wacom_w9000_probe(struct i2c_client *client)
  	if (error)
  		return dev_err_probe(dev, error, "Failed to enable regulators\n");
 
 -	msleep(200);
++	if (wacom_data->variant->force_power_cycle) {
++		regulator_disable(wacom_data->regulator);
++		msleep(100);
++		error = regulator_enable(wacom_data->regulator);
++		if (error)
++			return dev_err_probe(dev, error, "Failed to re-enable regulators\n");
++	}
++
 +	msleep(wacom_data->variant->power_on_delay_ms ?: 200);
 
  	gpiod_set_value_cansleep(wacom_data->reset_gpio, 0);
 
-@@ -345,6 +388,14 @@ static int wacom_w9000_probe(struct i2c_client *client)
+@@ -345,6 +408,14 @@ static int wacom_w9000_probe(struct i2c_client *client)
  	if (wacom_data->variant->msg_coord_num > 7)
  		input_set_abs_params(input_dev, ABS_DISTANCE, 0, 255, 0, 0);
 
@@ -198,7 +238,7 @@ index 4a2629a54..69d44e46f 100644
  	touchscreen_parse_properties(input_dev, false, &wacom_data->prop);
 
  	dev_info(dev, "%s size X%uY%u\n", wacom_data->variant->name,
-@@ -412,10 +463,47 @@ static const struct wacom_w9000_variant w9007a_v1 = {
+@@ -412,10 +483,56 @@ static const struct wacom_w9000_variant w9007a_v1 = {
  	.name = "Wacom W9007A V1 Digitizer",
  };
 
@@ -223,19 +263,28 @@ index 4a2629a54..69d44e46f 100644
 +	 * no I2C ack, not just bad data). Real regulator/GPIO wiring is
 +	 * confirmed correct (see kernel/dts/sm8250-samsung-gts7l.dts's
 +	 * wacom@56/pm8150_l13 nodes and docs/phase4-spen-scoping.md).
-+	 * Tested and RULED OUT (2026-09-21): longer power-on settle time
-+	 * (500ms vs the driver's default 200ms) and real spacing between
-+	 * query retries (20ms vs back-to-back) - identical -ENXIO result
-+	 * either way, on real hardware. Kept at these values anyway since
-+	 * they're a real, harmless robustness margin over the defaults,
-+	 * but timing is confirmed NOT the cause of the remaining failure -
-+	 * the next thing to check is GPIO polarity on flash-mode-gpios (no
-+	 * way to verify without real chip documentation or a live UART
-+	 * capture of what the chip itself reports at power-up - see
-+	 * docs/phase4-spen-scoping.md for the full trail).
++	 * Three real, independently well-reasoned hypotheses tested and
++	 * RULED OUT on real hardware (2026-09-21), all with identical
++	 * -ENXIO: longer power-on settle time + spaced-out query retries;
++	 * flash-mode-gpios polarity (both directions); and this
++	 * force_power_cycle sequence itself - matched exactly against
++	 * Samsung's own downstream driver for this chip
++	 * (references/gts7l/drivers/input/wacom/wacom_i2c.c,
++	 * wacom_power()/wacom_reset_hw(): never trusts a bare
++	 * regulator_enable() to have produced a real electrical edge,
++	 * forces disable->100ms->enable->200ms once, specifically because
++	 * this rail can read back as already-enabled via RPMh aggregate
++	 * voting without this driver's own call ever toggling real
++	 * hardware) - confirmed via direct source reading, not guessed,
++	 * and it still didn't work. Kept enabled anyway since it's a real,
++	 * harmless robustness improvement matching downstream's own
++	 * behavior even though it didn't close this specific gap. See
++	 * docs/phase4-spen-scoping.md for what's left (needs the chip's
++	 * real datasheet or a live UART capture - neither available).
 +	 */
 +	.power_on_delay_ms	= 500,
 +	.query_retry_delay_ms	= 20,
++	.force_power_cycle	= true,
 +};
 +
  static const struct of_device_id wacom_w9000_of_match[] = {
@@ -246,7 +295,7 @@ index 4a2629a54..69d44e46f 100644
  	{ }
  };
  MODULE_DEVICE_TABLE(of, wacom_w9000_of_match);
-@@ -424,6 +512,7 @@ static const struct i2c_device_id wacom_w9000_id[] = {
+@@ -424,6 +541,7 @@ static const struct i2c_device_id wacom_w9000_id[] = {
  	{ .name = "w9002", .driver_data = (kernel_ulong_t)&w9002 },
  	{ .name = "w9007a-lt03", .driver_data = (kernel_ulong_t)&w9007a_lt03 },
  	{ .name = "w9007a-v1", .driver_data = (kernel_ulong_t)&w9007a_v1 },

@@ -263,20 +263,43 @@ its own I2C address at all" are both eliminated. Left the property at
 `GPIO_ACTIVE_LOW` rather than reverting - equally unconfirmed either
 way absent real evidence, no reason to prefer one over the other.
 
-**What's next, and why it's currently blocked**: with timing and FWE
-polarity both ruled out, remaining candidates are more speculative and
-harder to test blind - e.g. whether the chip needs an explicit command
-sequence to switch out of a "boot_addr" bootloader-mode listening
-address (downstream's overlay records `wacom,boot_addr = <0x9>` as a
-distinct alternate address; mainline's driver has no concept of this
-at all), or a real reset pulse rather than a static GPIO level, or
-something about the shared `vdd-l13-l16-l17-supply`/RPMh vote
-aggregation not actually energizing the rail the way a plain
-`regulator_enable()` call assumes. None of these are safely testable
-by guessing further - each needs either the chip's own real datasheet
-(not available - Wacom doesn't publish EMR digitizer specs publicly)
-or a live UART capture of whatever the chip itself reports at
-power-up, which this project's own prior research
+**Power-cycle sequencing tested and ruled out too (2026-09-21).**
+Deep online research (cross-checked directly against Samsung's real
+downstream driver source, `references/gts7l/drivers/input/wacom/
+wacom_i2c.c`) found a real, concrete difference: downstream's
+`wacom_power()`/`wacom_reset_hw()` never trusts a bare
+`regulator_enable()` to have produced a real electrical edge - it
+explicitly forces `regulator_disable()` -> `msleep(100)` ->
+`regulator_enable()` -> `msleep(200)` once, specifically because this
+rail can already read back as "enabled" (RPMh aggregate vote, firmware
+left it on) without any of *this* driver's own calls ever having
+toggled real hardware - confirmed via a `static bool boot_on = true`
+that forces the first enable through regardless of
+`regulator_is_enabled()`'s answer. Implemented the equivalent in
+mainline (`force_power_cycle` variant flag,
+`kernel/patches/0011-...patch`) and tested on real hardware: **identical
+`-ENXIO` result.** `regulator_disable()`/`regulator_enable()` both
+completed with no errors in dmesg. This was a well-sourced, high-
+confidence hypothesis and it still didn't work - ruled out.
+
+**What's next, and why it's currently blocked**: three real,
+independently well-reasoned hypotheses (power-on timing, FWE GPIO
+polarity, power-cycle sequencing matching downstream exactly) have all
+been tested on real hardware and cleanly ruled out. Remaining
+candidates are more speculative and not safely testable by guessing
+further - e.g. whether the chip needs an explicit command sequence to
+switch out of a "boot_addr" bootloader-mode listening address
+(downstream's overlay records `wacom,boot_addr = <0x9>` as a distinct
+alternate address; mainline's driver has no concept of this at all),
+what `wacom,support_aop_mode`/`wacom,use_garage`/`wacom,table_swap`
+actually configure (undocumented anywhere we could find), or whether a
+second, not-yet-identified power rail (a digital I/O supply distinct
+from AVDD) exists that downstream powers through a path we haven't
+found. Each of these needs either the chip's own real datasheet (not
+available - Wacom doesn't publish EMR digitizer specs publicly, and
+the two most likely-looking documents found online both returned
+HTTP 403) or a live UART capture of whatever the chip itself reports
+at power-up, which this project's own prior research
 (`docs/uart-debug-research.md`) documents a real method for (CC-line
 resistance detection via the MUIC, not the PD-VDM "AnyWay JIG"
 mechanism) but never actually built or tested - it needs physical
