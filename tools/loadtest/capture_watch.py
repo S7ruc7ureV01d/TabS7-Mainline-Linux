@@ -26,13 +26,18 @@ LIGHT (every SAMPLE_INTERVAL, ~0.3s) - cheap, bounded reads only:
   - /proc/loadavg
 
 HEAVY (every HEAVY_EVERY light samples, ~2s):
+  - GPU ring-buffer state (see above) - too costly for the light tier
   - top processes by CPU delta (pure /proc/*/stat scan, no `ps`)
   - per-thread CPU delta breakdown for the top 2 processes only
     (/proc/<pid>/task/*/stat) - bounded to just the busiest processes,
     not a system-wide thread scan
   - /proc/interrupts delta, specifically gpu-irq/gmu (did the GPU stop
     interrupting entirely, independent of what any thread looks like)
-  - new /dev/kmsg lines since last check (non-blocking, no `dmesg` exec)
+
+kmsg draining runs every LIGHT cycle, not just heavy - a real crash
+showed GPU fault/recover cascades arriving on almost exactly the same
+~2s cadence the old heavy-only drain used, risking missing the actual
+final message. It's a non-blocking read, cheap even at 0.3s.
 """
 import os
 import time
@@ -305,11 +310,18 @@ def main():
             prev_irq = cur_irq
             out.write(f"--- gpu irq delta @ {ts} --- {irq_deltas}\n")
 
-            new_kmsg = drain_kmsg(kmsg_fd)
-            if new_kmsg:
-                out.write(f"--- new kmsg @ {ts} ---\n")
-                for line in new_kmsg:
-                    out.write(f"  {line}\n")
+        # kmsg draining moved to every light cycle (~0.3s), not just the
+        # ~2s heavy tier - a real crash (docs/load-test-modules.md, "Real,
+        # non-self-inflicted evidence...") showed GPU fault/recover
+        # cascades arriving on almost exactly the same ~2s cadence as the
+        # old heavy-only drain, so the actual final fault/failed-recovery
+        # message may have been sitting undrained when the freeze hit.
+        # This is a plain non-blocking read - cheap even at 0.3s.
+        new_kmsg = drain_kmsg(kmsg_fd)
+        if new_kmsg:
+            out.write(f"--- new kmsg @ {ts} ---\n")
+            for line in new_kmsg:
+                out.write(f"  {line}\n")
 
         out.flush()
         os.fsync(fd_out)

@@ -191,6 +191,53 @@ per-thread breakdown, meminfo, per-core CPU%) was already confirmed
 clean across two earlier idle-desktop smoke tests before this addition
 - no reason to distrust those parts.
 
+## Real, non-self-inflicted evidence at last: repeated GPU fault/recover cascade (2026-09-21)
+
+With the DPU-read bug fixed, re-ran the real Minecraft repro. Crashed
+again, but this time `capture_watch.log` (zero self-inflicted WARN
+occurrences, confirmed) captured real, substantive lead-up - the
+clearest evidence this investigation has produced.
+
+**A rapid-fire sequence of genuine GPU fault -> recovery cycles, roughly
+every ~2.2 seconds, right as Minecraft's JVM was loading**, each
+independently confirmed via kmsg lines drained live:
+
+```
+05:06:30 - [drm:a6xx_irq] gpu fault ... -> hangcheck recover! (offending: kwin_wayland) -> recovered, rptr/wptr resynced
+05:06:32 - [drm:a6xx_irq] gpu fault ... -> hangcheck recover! (offending: plasmashell)  -> recovered
+05:06:32 - [drm:a6xx_irq] gpu fault ... -> hangcheck recover! (offending: plasmashell)  -> recovered (second one in the same ~2s window)
+05:06:34 - [drm:a6xx_irq] gpu fault ... -> hangcheck recover! (offending: plasmashell)  -> recovered
+```
+
+Every one of these **succeeded** - fence counters climbed monotonically
+each time, `rptr`/`wptr` resynced after each recovery. This is exactly
+the "recovery usually works, but it's a race" pattern the S9 Ultra
+project's own diagnosis needs - a single fault recovering cleanly proves
+nothing either way, but a *cascade* of several in quick succession,
+under rising load, is exactly the condition that would eventually hit
+the unlucky timing window.
+
+**Concurrently, real resource pressure was building fast**: `MemFree`
+dropped from ~2.9GB to ~1.08GB in under 10 seconds (JVM asset
+loading/JIT compilation, `Client thread`/`C2 CompilerThread` visible in
+the per-thread breakdown), and CPU load climbed across *multiple* cores
+simultaneously in the final samples (not just one - refines the earlier
+single-core observation; this run showed several cores at 90-100% at
+once, more consistent with genuine multi-threaded load than a lone
+spinning core).
+
+**Then the log stops mid-cascade** at `05:06:35`, matching the host
+monitor's last-alive reading almost exactly. No 5th fault message
+visible, no final failed-recovery attempt caught on camera, so to
+speak - **important caveat**: kmsg draining only happens on the ~2s
+heavy cadence, and the faults were arriving on almost exactly that same
+cadence. It's plausible a 5th fault started logging and was never
+drained before the freeze, rather than printk itself failing. Next
+tuning step: drain kmsg every light cycle (~0.3s, still cheap - it's a
+non-blocking read) instead of only every heavy cycle, specifically to
+try to catch the actual final fault/recovery-failure message rather
+than inferring it from where the log stops.
+
 ## Real Minecraft repro, same session (2026-09-21)
 
 Since all three synthetic modules survived, ran the actual Minecraft repro
