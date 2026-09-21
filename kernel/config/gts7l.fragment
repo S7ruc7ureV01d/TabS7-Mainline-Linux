@@ -476,3 +476,29 @@ CONFIG_PSTORE_CONSOLE=y
 # reproduction session, not left on permanently.
 CONFIG_ARM64_PSEUDO_NMI=y
 CONFIG_HARDLOCKUP_DETECTOR_PERF=y
+
+# Freeze investigation, continued (docs/kernel-boot-debugging.md, "Crash
+# #4"/"Crash #5") - the pseudo-NMI detector above never fires for this
+# freeze at all, and pstore captures nothing, twice, on independent real
+# repros. Research (a downstream-vs-mainline diff, docs/load-test-modules.md)
+# found the exact same bug class as CONFIG_INTERCONNECT_QCOM_OSM_L3 above,
+# on the DDR-bandwidth side instead of CPU L3: CONFIG_QCOM_ICC_BWMON was
+# left at defconfig's `=m` and confirmed never loaded on real hardware
+# (`lsmod` empty, no bwmon devfreq device under /sys/class/devfreq/ at
+# all - only `1d84000.ufshc` and `3d00000.gpu` exist). Mainline's own
+# sm8250.dtsi already ships a complete `qcom,sm8250-llcc-bwmon` node
+# (`pmu@9091000`) that watches aggregate DDR traffic from every bus
+# master (CPU + GPU + everything else combined) and scales DDR
+# frequency/bandwidth in response - currently completely inert. This
+# mechanically fits the observed signature better than a GPU-only
+# explanation: it's specifically the *combined* CPU+GPU traffic case that
+# needs adaptive DDR bandwidth, a stalled bus/NoC transaction leaves CPUs
+# architecturally alive (not looping, so no lockup detector fires) but
+# blocked on ordinary loads/stores to any device sharing that fabric
+# (display, USB/SSH, DDR itself - explaining why display and SSH die
+# simultaneously), and RPMh/BCM-level bus timeouts are independently
+# documented upstream as producing at most a bare WARN_ON with no pstore
+# trace, not a panic. Forced built-in for the same reason as OSM_L3
+# above: foundational, needed from early boot to track real traffic
+# patterns, not a late-attaching optional peripheral.
+CONFIG_QCOM_ICC_BWMON=y
