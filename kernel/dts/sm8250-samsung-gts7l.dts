@@ -1555,3 +1555,57 @@
 		local-bd-address = [29 ca 7a 8b 2e e6];
 	};
 };
+
+/*
+ * Freeze investigation (docs/kernel-boot-debugging.md, "Crash #4"/"Crash
+ * #5", docs/load-test-modules.md) - three independent real crash
+ * reproductions have left zero forensic trace anywhere (pstore, NMI
+ * hardlockup detector, nothing), and a raw I2C attempt to force the
+ * MAX77705 MUIC's analog switch into UART mode (bypassing its own
+ * Samsung-downstream JIG-detection gating) landed cleanly on the wire
+ * twice but produced no effect - the embedded MUIC/CCIC microcontroller
+ * simply didn't act on it, for reasons not resolvable from the Linux-side
+ * driver source alone. Qualcomm's EUD (Embedded USB Debugger) is a
+ * completely separate hardware block reachable over the same USB-C port,
+ * software-enabled via a plain sysfs `enable` attribute (mainline
+ * drivers/usb/misc/qcom_eud.c) - no cable trick, no MUIC dependency.
+ *
+ * No `eud` node exists anywhere in mainline's sm8250.dtsi (only present
+ * for newer chips like `kodiak.dtsi` as of this writing) - added here
+ * from scratch, using the real, confirmed-enabled register addresses
+ * from Samsung's own GPL source for this exact device
+ * (references/gts7l/arch/arm64/boot/dts/vendor/qcom/kona.dtsi:3759,
+ * `qcom,msm-eud@ff0000`, `status = "ok"` there - Samsung shipped this
+ * hardware enabled, not fused off). `qcom,secure-eud-en` there means the
+ * real enable register write goes through TrustZone via
+ * `qcom_scm_io_writel()` (confirmed in the mainline driver source, not
+ * guessed) - whether this device's TrustZone firmware actually permits
+ * that call is the one real unknown here, empirically testable exactly
+ * like the pseudo-NMI trial above (fails safe: an SCM error, not a
+ * crash, if firmware refuses it). The driver's `usb_role_switch_get()`
+ * dependency is satisfied with a clean NULL (no port/endpoint graph
+ * needed - confirmed by reading drivers/usb/roles/class.c directly, not
+ * assumed) since this project has no software role-switch node to point
+ * it at and doesn't need one for a debug-only use case.
+ *
+ * Downstream's node also has `clocks = <&clock_gcc
+ * GCC_USB_PHY_CFG_AHB2PHY_BCR>;` - deliberately NOT copied here.
+ * Checked directly: mainline's driver (drivers/usb/misc/qcom_eud.c) has
+ * zero clk/clock calls anywhere, and that exact symbol is defined in
+ * mainline's own GCC driver (drivers/clk/qcom/gcc-sm8250.c:3578) as a
+ * *reset* line (`gcc_resets[]`), not a clock - downstream's driver
+ * apparently manages this AHB2PHY reset/clock gating itself via a
+ * mechanism mainline's simpler driver doesn't replicate. Including it
+ * as a `clocks` property here would be a real type mismatch (reset
+ * index fed to a clock-consumer property), not just a harmless extra -
+ * left out entirely rather than guessed at.
+ */
+/ {
+	eud: eud@88e0000 {
+		compatible = "qcom,eud";
+		reg = <0x0 0x088e0000 0x0 0x2000>,
+		      <0x0 0x088e2000 0x0 0x1000>;
+		interrupts-extended = <&pdc 11 IRQ_TYPE_LEVEL_HIGH>;
+		status = "okay";
+	};
+};
