@@ -6233,3 +6233,30 @@ generates enough real disk I/O to hit the same path, not because of its
 GPU workload. Full detail, evidence, and next steps (untried: mounting
 with `nodelalloc` as both diagnostic and mitigation) in
 `docs/load-test-modules.md`.
+
+### Correction: the ext4 spinlock was likely a symptom, not the cause - a pure-memory trigger shows a different, hardware-adjacent signature (2026-09-21)
+
+`nodelalloc` could not actually be tested on the root filesystem itself
+(this boot chain's first real mount of root already has delalloc
+enabled before any cmdline/fstab option can change it, and ext4 refuses
+to disable it via remount). The only genuinely isolated test - a pure
+`tmpfs` mount, zero real storage/ext4 involvement at all - still froze
+running the identical `dd`/`fdatasync` workload. Separately, the owner
+found `stress-ng --vm 1 --vm-bytes 3G --vm-keep` (pure memory pressure,
+zero filesystem I/O) also reliably freezes the device.
+
+Retested that with the stuck-core detector + sysrq NMI backtrace: this
+time **nothing was actually stuck in the kernel** - the flagged core was
+running plain, valid userspace code (a real PC value, no kernel call
+trace), every other core was idling normally, and then *every* core
+dropped to 0% simultaneously with total silence following - a sudden,
+uniform stop, not a specific thread spinning on a lock. Qualitatively
+different from the ext4 case, and much closer to the original hardware/
+bus-level hypothesis from earlier in this project
+(`docs/crash-investigation-nmi-research.md`) than to a fixable software
+deadlock. Current best theory: a large/rapid memory-allocation or access
+event can trigger a genuine hardware/firmware-level stall on this
+hardware, and the ext4 spinlock caught earlier was very likely a
+downstream victim (waiting on a lock whose owner froze for the same
+underlying reason) rather than the actual root cause. Full detail in
+`docs/load-test-modules.md`.

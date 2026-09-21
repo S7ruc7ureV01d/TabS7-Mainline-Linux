@@ -544,3 +544,71 @@ exact code path as the cause. Also worth checking this kernel's exact
 `ext4_da_reserve_space()` source and superblock-level reservation lock
 for a known upstream bug/fix, now that the exact function is known
 rather than guessed at.
+
+## `nodelalloc` does not fix it - and a pure-memory trigger reveals a second, different failure signature (2026-09-21)
+
+Testing `nodelalloc` as a mitigation turned into its own investigation.
+`rootflags=nodelalloc` on the kernel cmdline, and separately
+`nodelalloc` in `/etc/fstab`, both proved unable to actually take effect
+on the *root* filesystem in this boot setup: whatever performs the
+first real mount of `/dev/sda37` (well before `systemd-fstab-generator`'s
+own unit ever runs) already has delalloc enabled, and ext4 hard-refuses
+to disable it via any later remount ("can't disable delalloc during
+remount") - confirmed directly via `/sys/fs/ext4/sda37/
+delayed_allocation_blocks` staying nonzero and climbing on new writes
+regardless of what the cmdline/fstab said.
+
+A genuinely isolated test needed a filesystem that was never mounted
+with delalloc in the first place - a loop-mounted image turned out not
+to qualify either (the backing file still lives on root, so the loop
+device's writes still flow through root's own delalloc/writeback path
+to persist that file). **`tmpfs` (pure RAM, and this device has zero
+swap configured, so genuinely no path to real storage at all) was the
+only truly clean test - and it still froze**, running the exact same
+`dd ... conv=fdatasync` workload with nothing touching a real block
+device or ext4 at all.
+
+**This means the ext4 spinlock captured earlier is very likely not the
+root cause - it's a plausible secondary victim.** A separate,
+completely storage-free trigger confirms this further: the owner found
+that `stress-ng --vm 1 --vm-bytes 3G --vm-keep` (pure memory allocation
+and access, zero filesystem I/O whatsoever) also reliably freezes the
+device. Retested with full instrumentation (stuck-core detector +
+sysrq NMI backtrace) running, and it froze again in seconds.
+
+**The resulting NMI backtrace shows something qualitatively different
+from the ext4 case.** `stress-ng-vm` (the pinned core) was not stuck in
+any kernel function at all - its captured PC was a plain userspace
+address, meaning it was simply, validly executing its own memory-touching
+loop, using CPU normally. Every other core was idling normally via the
+standard `cpu_suspend`/`do_idle` path - nothing anywhere in this
+snapshot looks wrong. **Then, immediately after that snapshot, every
+core drops to 0% simultaneously and the log goes completely silent** -
+no thread visibly spinning on anything, just a sudden, uniform stop
+across the whole system with nothing left running even to produce
+another log line. No OOM-killer activity in dmesg either - memory
+pressure was real (`MemFree` down to ~1GB) but never exhausted or
+`OutOfMemory`-triggering.
+
+**Interpretation**: this pure-memory trigger's signature (nothing
+software-visibly stuck, a sudden uniform stop) looks much more like the
+original hardware/bus/interconnect-level hypothesis from early in this
+investigation than like a software deadlock. A plausible unifying
+theory: something about a rapid, large memory-allocation/access event
+on this hardware (whether from a big single `write()`, a 3GB anonymous
+allocation, or Minecraft's own asset loading) can trigger a genuine
+hardware/firmware-level stall - and the ext4 spinlock captured earlier
+may simply be a *downstream* victim, a thread that happened to be
+waiting on a lock whose owner froze for the same underlying
+hardware-level reason, not the actual root cause itself. This would
+mean the freeze is not straightforwardly fixable from the Linux/driver
+side at all - consistent with `docs/crash-investigation-nmi-research.md`'s
+original conclusion, now revisited with much more evidence behind it.
+
+Not yet tried: retesting `stress-ng --vm` at smaller/graduated memory
+sizes to find a threshold, and checking whether a *slower* memory
+allocation pattern (vs. `dd`'s single massive `bs=1G` write or
+`stress-ng`'s abrupt 3G grab) avoids the freeze - which would help
+narrow down whether it's really about total memory pressure, or
+specifically about the *rate/burstiness* of a large allocation/access
+event.

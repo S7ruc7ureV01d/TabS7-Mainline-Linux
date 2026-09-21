@@ -42,7 +42,7 @@ final message. It's a non-blocking read, cheap even at 0.3s.
 import os
 import time
 
-LOGDIR = "/root/loadtest"
+LOGDIR = os.environ.get("CAPTURE_WATCH_LOGDIR", "/root/loadtest")
 OUTFILE = os.path.join(LOGDIR, "capture_watch.log")
 SAMPLE_INTERVAL = 0.05  # benchmarked: fsync ~1.3ms + reads ~0.3ms << 50ms,
                         # well under 5% duty cycle, safe to go this fast

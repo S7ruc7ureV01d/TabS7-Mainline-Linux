@@ -5,7 +5,7 @@
 # device was still alive - journalctl -f is documented as unreliable for
 # this (docs/dev-environment-quickref.md).
 
-LOGDIR=/root/loadtest
+LOGDIR="${LOADTEST_LOGDIR:-/root/loadtest}"
 mkdir -p "$LOGDIR"
 
 start_heartbeat() {

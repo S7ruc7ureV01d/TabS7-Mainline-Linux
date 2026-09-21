@@ -18,7 +18,11 @@ source "$SCRIPT_DIR/common.sh"
 
 SIZE_GB="${1:-1}"
 COUNT="${2:-10}"
-TESTFILE="/root/loadtest/storage_test.img"
+# Test file target directory overridable (e.g. a separate nodelalloc-
+# mounted filesystem, per docs/load-test-modules.md "isolated nodelalloc
+# test" - a loop file backed by root itself doesn't isolate anything if
+# the test file/logs are also written there).
+TESTFILE="${LOADTEST_TESTDIR:-/root/loadtest}/storage_test.img"
 
 log "=== Storage-only load test: start, ${SIZE_GB}G x ${COUNT} = $((SIZE_GB * COUNT))G total, fdatasync per block ==="
 start_heartbeat
