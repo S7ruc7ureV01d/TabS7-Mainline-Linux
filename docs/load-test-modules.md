@@ -63,5 +63,49 @@ stale exactly when the device dies, with no FIN/RST).
 
 ## Results log
 
-- (pending - modules smoke-tested for 10-15s each successfully on real
-  hardware 2026-09-21; full-duration runs not yet performed)
+**2026-09-21, all three full-duration runs, in sequence, same boot
+(`root@172.16.42.1` uptime continuous ~34min -> ~1h03m across all three -
+no reboot happened between runs):**
+
+- `gpu_load.sh 900` (01:47:33-02:02:35 UTC): **survived clean.**
+  `glmark2-wayland --run-forever --fullscreen` through the real
+  KWin/Freedreno (FD650) path, 90-1300+ FPS depending on scene (i.e. well
+  past display refresh, so a genuinely high sustained DPU commit rate) -
+  zero reachability gaps for the full 15 minutes.
+- `cpu_load.sh 900` (02:03:02-02:18:02 UTC): **survived clean.** All 8
+  cores pinned via `stress-ng --cpu-method all`, zero GPU/display work,
+  load average up to ~8.8 - zero reachability gaps for the full 15
+  minutes.
+- `burst_transition.sh` (20 cycles x 15s idle + 20s simultaneous CPU+GPU
+  burst, 02:18:28-02:30:49 UTC, ~12min): **survived clean, all 20
+  cycles.** Zero reachability gaps.
+
+**None of the three synthetic modules reproduced the freeze**, despite the
+GPU module in particular exceeding Minecraft's real GPU commit rate and the
+burst module specifically targeting a sudden simultaneous CPU+GPU edge
+after idle (the closest analog this project has to the loading -> gameplay
+transition). Minecraft itself reliably triggers the freeze within
+1-12 minutes (see `docs/kernel-boot-debugging.md`).
+
+**Interpretation:** raw CPU saturation, raw GPU/DPU throughput, and a sharp
+simultaneous CPU+GPU *amplitude* spike are each, individually and combined,
+insufficient. What none of these synthetic tools reproduce is Minecraft/
+JVM's actual behavior at that specific moment: heavy GC pressure together
+with rapid GL *object churn* - creating and destroying large numbers of
+VBOs/textures for newly-generated chunk meshes, not just resubmitting draws
+against scenes that already exist (glmark2's steady-state model) or doing
+generic ALU/cache/memory-bandwidth work with no allocator interaction
+(stress-ng's model). That points the next round of synthetic reproduction
+at allocator/driver-object-lifecycle pressure specifically - e.g.
+`stress-ng --vm`/`--bigheap`/`--mmapfork` for JVM-GC-like memory churn,
+combined with a GL workload that actually creates/destroys buffer objects
+per frame rather than reusing a fixed scene - rather than at more raw
+throughput on either axis, which this round has now ruled out.
+
+Also worth noting given the pasted note at the start of this session's
+handoff: this device is currently flashed with the pseudo-NMI trial kernel
+(`irqchip.gicv3_pseudo_nmi=1` still in `/proc/cmdline` as of this test
+round) - per the recommendation in `docs/kernel-boot-debugging.md`
+("Crash #4"), this should be reverted once the freeze investigation is
+considered closed, since it costs ~5% steady-state and didn't end up
+answering the deeper freeze question.

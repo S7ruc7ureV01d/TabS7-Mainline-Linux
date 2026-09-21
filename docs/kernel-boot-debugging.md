@@ -6077,3 +6077,42 @@ suspected: other demanding OpenGL workloads) is a real, reproducible
 trigger for an eventual freeze requiring a manual hard reset. No fix
 currently known. Lighter graphics workloads and the desktop session
 itself have not shown this issue.
+
+### Separated CPU/GPU/burst load-test modules: three negative results (2026-09-21)
+
+Built three isolated synthetic load modules (`tools/loadtest/`, full
+writeup in `docs/load-test-modules.md`) specifically to stop conflating
+Minecraft's CPU (JVM/GC) and GPU (Freedreno/DPU) load, and to target the
+owner's specific observation that the freeze lands right at the
+world-loading -> gameplay transition, not at an arbitrary point during
+sustained play.
+
+Ran all three back-to-back on the same boot: `gpu_load.sh` (15min,
+`glmark2-wayland --fullscreen` through the real KWin/Freedreno path,
+90-1300+ FPS depending on scene - a higher sustained DPU commit rate than
+Minecraft produces), `cpu_load.sh` (15min, `stress-ng` pinning all 8 cores,
+zero GPU/display work), and `burst_transition.sh` (20 cycles of 15s idle +
+20s *simultaneous* CPU+GPU burst - the closest analog to a sudden
+loading-transition spike this project has). **All three survived clean,
+zero reachability gaps.** Minecraft itself still reliably triggers the
+freeze within 1-12 minutes under equivalent or lesser raw load.
+
+**Conclusion:** raw CPU throughput, raw GPU/DPU throughput, and a sharp
+simultaneous CPU+GPU amplitude spike are each ruled out as sufficient
+causes on their own. The remaining, not-yet-tested candidate is
+allocator/driver-object-*lifecycle* pressure specifically - Minecraft's
+world-load-to-gameplay moment is when the JVM is under heavy GC pressure
+*while* creating/destroying large numbers of GL buffer/texture objects for
+newly-generated chunk meshes, which is qualitatively different from either
+synthetic tool's steady-state model (glmark2 resubmits draws against fixed
+scenes; stress-ng does generic ALU/memory work with no GL/allocator
+interaction). Next step, if this is picked back up: a module combining
+`stress-ng --vm`/`--bigheap` (JVM-GC-like memory churn) with a GL workload
+that actually allocates/frees buffer objects per frame, rather than more
+raw throughput on the axes already ruled out here.
+
+Also: this device is still running the pseudo-NMI trial kernel
+(`irqchip.gicv3_pseudo_nmi=1` in `CONFIG_CMDLINE`) as of this round. Per
+the "Crash #4" recommendation above, revert this once the investigation is
+considered closed - it costs ~5% steady-state and didn't end up answering
+the deeper freeze question.

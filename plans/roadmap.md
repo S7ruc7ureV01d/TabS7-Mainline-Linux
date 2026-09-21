@@ -1602,3 +1602,15 @@ decisions, scope changes) goes here instead of being forced into a phase log.
   project needed), and Wi-Fi/BT (QCA6390) has real mainline `ath11k` support.
   Next up: pick the closest `sm8250-mainline/linux` board file to fork for
   Phase 1's DTS, and start on toolchain/build-environment setup.
+- 2026-09-21: Ran three separated CPU-only/GPU-only/combined-burst
+  synthetic load-test modules (`tools/loadtest/`, see
+  `../docs/load-test-modules.md`) to isolate the still-unresolved hard-
+  freeze bug (`../docs/kernel-boot-debugging.md`, "Crash #4") from
+  Minecraft specifically. All three survived clean - raw CPU throughput,
+  raw GPU/DPU throughput, and a sharp simultaneous CPU+GPU spike are each
+  ruled out as sufficient on their own. Next candidate if resumed:
+  allocator/GL-object-lifecycle churn (JVM-GC-like memory pressure +
+  per-frame buffer/texture alloc/free), not more raw throughput. Freeze
+  remains unresolved; device is still on the pseudo-NMI trial kernel and
+  that bootarg should be reverted once this line of investigation is
+  considered closed.
