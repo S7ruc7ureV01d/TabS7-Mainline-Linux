@@ -110,6 +110,52 @@ round) - per the recommendation in `docs/kernel-boot-debugging.md`
 considered closed, since it costs ~5% steady-state and didn't end up
 answering the deeper freeze question.
 
+## `capture_watch.py`: first real lead-up visibility, but inconclusive (2026-09-21)
+
+Built `tools/loadtest/capture_watch.py` specifically because pstore's
+dead-simple memcpy() into a tiny reserved DRAM region had captured
+nothing useful across four independent real freezes. This instead
+samples per-core CPU% (from `/proc/stat`, ~0.3s cadence) plus a heavier
+top-processes/dmesg snapshot (~2s cadence) to a plain file on the real
+`/data`-backed rootfs, `fsync()`'d after every sample - doesn't need the
+crash to trigger anything, just needs to stay a fraction of a second
+ahead of it.
+
+**It worked, in the sense that it survived**: the log runs continuously
+right up to `04:49:22` (device-local, matches the host monitor's
+last-alive SSH check `2026-09-21T01:49:21-03:00` almost to the second) -
+our own capture script died at the same instant everything else did, six
+seconds of real lead-up finally recovered from a real crash.
+
+**What it shows is more ambiguous than hoped**, though. This session's
+new "one CPU core pegs to 100% right before the crash" observation (via
+KDE's CPU monitor widget) is real in the data - `cpu7` sits at 96-100%
+across every single sample in the visible window - but the concurrent
+top-processes snapshots show `java` at 215-224% CPU (multiple threads),
+not any specific kernel worker or GPU-related task by name. This is
+consistent with Minecraft's own render thread being legitimately
+CPU-bound under heavy load, not obviously a kernel-side busy-wait bug -
+the visual "100% core" signal may just be normal intensive gameplay, not
+direct evidence of the suspected GMU/HFI poll-loop theory. **Don't
+over-read this single data point** - it neither confirms nor rules out
+that theory, since a kernel-side busy loop competing for the same core
+would look similar from this vantage point alone (per-core %, not a
+per-thread breakdown of *why* a thread is running).
+
+**Separately informative**: zero new `dmesg` lines appear anywhere in
+the final 6 seconds - no hung-task warning (despite `hung_task_timeout_
+secs=5`, deliberately lowered from the 120s default specifically so it
+would have time to fire), no softlockup warning, nothing. Whatever
+happens, happens with no visible gradual buildup even at 0.3s
+resolution - looks abrupt, not a slowly-worsening cascade. This leans
+(weakly - one sample) back toward something below where even a 5-second
+hung-task check gets a chance to run, rather than confirming the
+software-deadlock theory.
+
+Full captured log for this crash: available in this project's scratch
+area; not committed to the repo (large, single-crash-specific raw data,
+not a durable artifact - the summary above is what's durable).
+
 ## Real Minecraft repro, same session (2026-09-21)
 
 Since all three synthetic modules survived, ran the actual Minecraft repro
