@@ -285,7 +285,9 @@ def drain_kmsg(fd):
 prev_thread_cache = {}
 stuck_core_streak = {}
 stuck_core_dumped = set()
-STUCK_CORE_SAMPLES = 4  # ~200ms at 50ms sampling
+STUCK_CORE_SAMPLES = 2  # ~100ms at 50ms sampling - lowered from 4 after a
+                        # real crash hit only 3 consecutive 100% samples
+                        # before dying, one short of the old threshold
 
 
 def main():
