@@ -357,7 +357,58 @@
  * 0 MB"), base address matches the placeholder's own existing `0x80000000`.
  */
 &{/memory@80000000} {
-	reg = <0x0 0x80000000 0x1 0x80000000>;
+	/*
+	 * 2026-09-22 (CPU hard-hang investigation, docs/kernel-boot-debugging.md):
+	 * the single flat 6 GiB range above was wrong. This device's live,
+	 * ABL-filled `/proc/device-tree/memory/reg` (pulled from TWRP) is two
+	 * ranges with a 52 MiB hole at 0xbcc00000-0xbfffffff, and stock's
+	 * `/proc/iomem` agrees (System RAM ends at 0xbcbfffff, resumes at
+	 * 0xc0000000). Our kernel was handing that hole out as ordinary pages.
+	 * It sits below 4 GiB, so the page allocator only reaches it once
+	 * ZONE_NORMAL is under pressure - or immediately with mem=2G - which
+	 * matches the "memory pressure -> CPU stops answering even NMI" hang.
+	 * Copied exactly from the live value.
+	 */
+	reg = <0x0 0x80000000 0x0 0x3cc00000>,
+	      <0x0 0xc0000000 0x1 0x40000000>;
+};
+
+/*
+ * 2026-09-22, same investigation: the other two ranges a full diff of our
+ * usable RAM against stock's `/proc/iomem` "System RAM" turned up (Round
+ * 34 only diffed `/reserved-memory`, never the memory node or the actual
+ * resulting RAM map):
+ *
+ *  - Live `cdsp_secure_heap` is 0x90400000-0x94a00000 (no-map); upstream's
+ *    node is still at the old 0x8bf00000 and only covers up to 0x90500000.
+ *    Reserved here only up to 0x94000000, not 0x94a00000: uniLoader's
+ *    CONFIG_PAYLOAD_ENTRY copies the kernel Image to 0x94000000 and runs
+ *    it in place, so that top 10 MiB must stay part of memory (and is
+ *    proven accessible by the kernel executing from it).
+ *    **This node does not actually take effect**: on real hardware the
+ *    kernel logs "failed to reserve memory for node
+ *    'cdsp_secure_heap_tail@90500000'" because the FDT itself is already
+ *    memblock-reserved at ~0x939a8000, inside this range, and a no-map
+ *    reservation can't overlap an existing one. That FDT sits at the end
+ *    of uniLoader's own ~54 MB image, i.e. ABL loaded and ran uniLoader
+ *    from ~0x90600000-0x93a2xxxx - so nearly this whole range is
+ *    demonstrably accessible at boot, and it is a weak suspect. Left in
+ *    as a harmless no-op (the tested DTB carries it); the freeze fix was
+ *    the memory-node hole above.
+ *  - 0xffc00000-0xffc1ffff (128 KiB) is inside ABL's memory range but
+ *    excluded from stock's System RAM by something outside
+ *    `/reserved-memory`; unknown owner, reserved to match stock.
+ */
+&{/reserved-memory} {
+	cdsp_secure_heap_tail@90500000 {
+		reg = <0x0 0x90500000 0x0 0x3b00000>;
+		no-map;
+	};
+
+	stock_nonram_hole@ffc00000 {
+		reg = <0x0 0xffc00000 0x0 0x20000>;
+		no-map;
+	};
 };
 
 /*

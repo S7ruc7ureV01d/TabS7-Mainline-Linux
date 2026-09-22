@@ -6850,3 +6850,90 @@ per-CPU register/PC dump of whichever CPU is the one *not* responding
 backtrace only shows the requester's own trace reliably; getting the
 stuck CPU's own PC would show what it's actually doing (or not doing)
 when it stops answering.
+
+### CPU hard-hang, root cause found (2026-09-22, evening): our DTS declared a 52 MiB non-RAM firmware hole as RAM
+
+**Finding.** Round 34 (2026-09-19) only diffed the live `/reserved-memory`
+node against ours. It never compared the `/memory` node or the RAM map
+that results from both. Doing that diff (TWRP runs the same ABL-merged
+stock DT as a normal boot):
+
+- Live `/proc/device-tree/memory/reg` is **two ranges**:
+  `<0x0 0x80000000 0x0 0x3cc00000>, <0x0 0xc0000000 0x1 0x40000000>`,
+  so `0xbcc00000-0xbfffffff` (52 MiB) is not RAM at all as far as the
+  firmware is concerned. Stock's `/proc/iomem` agrees: System RAM ends at
+  `bcbfffff` and resumes at `c0000000`.
+- Our DTS (Round 23's fix for the zero-size placeholder) used one flat
+  range, `<0x0 0x80000000 0x1 0x80000000>`, so the kernel was handing
+  that hole out as ordinary pages.
+- A full "our usable RAM minus stock's System RAM" diff also found
+  `0x90500000-0x949fffff` (the tail of the live `cdsp_secure_heap`,
+  which upstream still places at the old 0x8bf00000) and a 128 KiB range at
+  `0xffc00000`.
+
+Captured: `docs/logs/memmap-fix-stress-2026-09-22/iomem-stock-twrp.txt`
+(stock) and `iomem-mainline.txt` (ours, after the fix).
+
+**Why this explains every symptom.**
+
+- Pressure-only: the hole is below 4 GiB, in the DMA zone. The page
+  allocator prefers ZONE_NORMAL and only falls back to the lower zone
+  once memory runs short.
+- Different victim every time: whichever task got a bad page. The IPI
+  sender stuck in `smp_call_function_many_cond()` is just waiting on
+  the CPU that touched it.
+- Even NMI gets no answer: a CPU trapped in EL2/EL3 by the access, or
+  stalled on a bus transaction that never completes, can't take any EL1
+  interrupt, pseudo-NMI included.
+- Stock Android is fine: its kernel never maps the hole.
+- **The mem=2G test had been read backwards.** The carveouts are in the
+  low 2 GiB. mem=2G makes the hole about 3% of all usable RAM (about 7%
+  counting the cdsp tail), so early boot allocations hit it right away.
+  Freezing within 10s of boot was evidence *for* an address bug, not
+  against it.
+
+**Fix.** The memory node now uses ABL's exact two ranges, plus `no-map`
+nodes for `0x90500000-0x93ffffff` (stopping at uniLoader's
+`CONFIG_PAYLOAD_ENTRY=0x94000000`, where the kernel runs in place) and
+for `0xffc00000` (128 KiB). Image unchanged (md5 `0e01330d...`), so the
+DTB was the only variable.
+
+On real hardware the hole and the `0xffc00000` range are gone from System
+RAM. The `cdsp_secure_heap_tail` node **failed to reserve** (it overlaps
+the FDT, already memblock-reserved at `0x939a84a8`). That FDT lives at
+the end of uniLoader's own image, so ABL loaded and ran uniLoader from
+about `0x90600000-0x93a2xxxx`: that range is demonstrably accessible at
+boot and is a weak suspect. The node is left in as a no-op.
+
+**Result: the freeze did not reproduce.** Using
+`tools/loadtest/vmstress-android.c` built at three sizes (stress-ng isn't
+on the v3 rootfs):
+
+| Run | Result |
+|---|---|
+| 1500M, hold 30s | Passed (the old map froze at 1-1.46G) |
+| 3000M, hold 30s | Passed (the documented `--vm-bytes 3G` repro) |
+| 4600M (> MemAvailable, no swap), x3 | Global OOM kill at ~3.97 GB RSS each time, system stayed responsive |
+
+- The OOM report shows `Node 0 DMA free:17616kB` (min 2708kB): the low
+  zone was genuinely drained, so pages around the old hole were in use.
+- Zero RCU stalls, hung tasks, soft/hard lockups or "haven't responded
+  to the NMI" in the live `dmesg -w` capture.
+- 140/140 host pings answered at about 0.7 ms.
+
+Logs are in `docs/logs/memmap-fix-stress-2026-09-22/`.
+
+**Still to confirm:**
+
+- A mem=2G boot, which should now come up clean.
+- A real-workload soak (GPU/Minecraft, Bluetooth, the earlier crash
+  triggers).
+
+Once those hold, the investigation-only settings can come out:
+`irqchip.gicv3_pseudo_nmi=1` (costs about 5%), `CONFIG_TRANSPARENT_HUGEPAGE=n`,
+the qcom_scm tracing, and the panic-on-stall knobs.
+
+**Lesson:** when porting a device, diff the resulting RAM map (mainline
+`/proc/iomem` System RAM vs stock's), not just the `/reserved-memory`
+node. Holes in the firmware's own memory node never show up as
+reserved-memory entries.

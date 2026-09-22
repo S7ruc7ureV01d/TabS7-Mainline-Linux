@@ -1873,6 +1873,23 @@ decisions, scope changes) goes here instead of being forced into a phase log.
   `../docs/logs/freeze-2026-09-22-ssh-capture/`; full writeup in
   `../docs/kernel-boot-debugging.md`'s "CPU hard-hang, `qcom_scm`
   tracing added and tested" section.
+- 2026-09-22 (evening): **CPU hard-hang root cause found and fixed
+  (pending a real-workload soak).** Our DTS memory node was one flat 6 GiB
+  range, but the firmware's own (ABL-filled) memory node has a 52 MiB
+  non-RAM hole at `0xbcc00000-0xbfffffff`, and stock's `/proc/iomem`
+  agrees. The kernel was handing it out as ordinary pages, which it only
+  reaches under memory pressure (low zone) or right away with mem=2G.
+  Round 34 had only diffed `/reserved-memory`. Fixed by copying ABL's two
+  ranges (DTB-only change). Afterwards, 1500M/3000M holds and three
+  global-OOM (4600M) runs all passed, with zero stalls or lockups and
+  no lost pings, where the old map froze at 1-1.46G. Next steps:
+  - A mem=2G boot and a Minecraft/GPU soak to confirm.
+  - Then revert the investigation-only settings (pseudo-NMI bootarg,
+    THP=n, qcom_scm tracing, panic knobs).
+
+  Full writeup in `../docs/kernel-boot-debugging.md`'s "CPU hard-hang,
+  root cause found" section; logs in
+  `../docs/logs/memmap-fix-stress-2026-09-22/`.
 - 2026-09-22: Long session covering an accidental full `data`/`archroot`
   wipe and recovery, then a real chain of Phase 5/Phase 3/Phase 4 fixes.
   **S Pen**: tested the last well-reasoned GPIO hypothesis left from

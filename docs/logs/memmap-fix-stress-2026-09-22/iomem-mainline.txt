@@ -1,0 +1,133 @@
+00100000-002effff : 100000.clock-controller clock-controller@100000
+00408000-00408fff : 408000.mailbox mailbox@408000
+00784000-007848fe : 784000.efuse efuse@784000
+00800000-0086ffff : 800000.dma-controller dma-controller@800000
+0088c000-0088ffff : 88c000.i2c i2c@88c000
+008c0000-008c5fff : 8c0000.geniqup geniqup@8c0000
+00900000-0096ffff : 900000.dma-controller dma-controller@900000
+00980000-00983fff : 980000.i2c i2c@980000
+00994000-00997fff : 994000.i2c i2c@994000
+00998000-0099bfff : 998000.serial serial@998000
+009c0000-009c5fff : 9c0000.geniqup geniqup@9c0000
+00a80000-00a83fff : a80000.i2c i2c@a80000
+00ac0000-00ac5fff : ac0000.geniqup geniqup@ac0000
+01c00000-01c02fff : 1c00000.pcie parf
+01c03000-01c03fff : 1c00000.pcie mhi
+01c06000-01c06fff : 1c06000.phy phy@1c06000
+01d84000-01d86fff : 1d84000.ufshc ufshc@1d84000
+01d87000-01d87fff : 1d87000.phy phy@1d87000
+01dc4000-01de7fff : 1dc4000.dma-controller dma-controller@1dc4000
+01f40000-01f7ffff : 1f40000.hwlock hwlock@1f40000
+03d90000-03d98fff : 3d90000.clock-controller clock-controller@3d90000
+03da0000-03daffff : 3da0000.iommu iommu@3da0000
+03de0000-03deffff : 3d6a000.gmu rscc
+06002000-06002fff : stm-base
+06004000-06004fff : tpda@6004000
+06005000-06005fff : funnel@6005000
+06041000-06041fff : funnel@6041000
+06042000-06042fff : funnel@6042000
+06045000-06045fff : funnel@6045000
+06046000-06046fff : replicator@6046000
+06048000-06048fff : etr@6048000
+0684c000-0684cfff : tpdm@684c000
+06b04000-06b04fff : funnel@6b04000
+06b05000-06b05fff : etf@6b05000
+06b06000-06b06fff : replicator@6b06000
+06c08000-06c08fff : tpdm@6c08000
+06c0b000-06c0bfff : funnel@6c0b000
+06c2d000-06c2dfff : funnel@6c2d000
+07040000-07040fff : etm@7040000
+07140000-07140fff : etm@7140000
+07240000-07240fff : etm@7240000
+07340000-07340fff : etm@7340000
+07440000-07440fff : etm@7440000
+07540000-07540fff : etm@7540000
+07640000-07640fff : etm@7640000
+07740000-07740fff : etm@7740000
+07800000-07800fff : funnel@7800000
+07810000-07810fff : funnel@7810000
+088e0000-088e1fff : 88e0000.eud eud@88e0000
+088e3000-088e33ff : 88e3000.phy phy@88e3000
+088e7000-088e7083 : 88e7000.regulator regulator@88e7000
+09091000-09091fff : 9091000.pmu pmu@9091000
+090b6400-090b69ff : 90b6400.pmu pmu@90b6400
+09200000-0924ffff : 9200000.system-cache-controller llcc0_base
+09280000-092cffff : 9200000.system-cache-controller llcc1_base
+09300000-0934ffff : 9200000.system-cache-controller llcc2_base
+09380000-093cffff : 9200000.system-cache-controller llcc3_base
+09600000-0964ffff : 9200000.system-cache-controller llcc_broadcast_base
+0a60c100-0a60ccff : a600000.usb usb@a600000
+0a6f8800-0a6f8bff : a6f8800.usb usb@a6f8800
+0abf0000-0abfffff : abf0000.clock-controller clock-controller@abf0000
+0ae00000-0ae00fff : ae00000.display-subsystem mdss
+0af00000-0af0ffff : af00000.clock-controller clock-controller@af00000
+0b290000-0b29ffff : 3d6a000.gmu gmu_pdc
+0c222000-0c2221fe : c263000.thermal-sensor thermal-sensor@c263000
+0c223000-0c2231fe : c265000.thermal-sensor thermal-sensor@c265000
+0c263000-0c2631fe : c263000.thermal-sensor thermal-sensor@c263000
+0c265000-0c2651fe : c265000.thermal-sensor thermal-sensor@c265000
+0c300000-0c3003ff : c300000.power-management power-management@c300000
+0c40a000-0c42ffff : c440000.spmi cnfg
+0c600000-0e5fffff : c440000.spmi chnls
+0e600000-0e6fffff : c440000.spmi obsrvr
+0e700000-0e79ffff : c440000.spmi intr
+0f100000-0f3fffff : f100000.pinctrl west
+0f500000-0f7fffff : f100000.pinctrl south
+0f900000-0fbfffff : f100000.pinctrl north
+15000000-150fffff : 15000000.iommu iommu@15000000
+17a00000-17a0ffff : GICD
+17a60000-17b5ffff : GICR
+17c21000-17c21fff : arch_mem_timer
+18220000-1822ffff : 18200000.rsc drv-2
+18590000-18590fff : 18590000.interconnect interconnect@18590000
+18591000-18591fff : 18591000.cpufreq freq-domain0
+18592000-18592fff : 18591000.cpufreq freq-domain1
+18593000-18593fff : 18591000.cpufreq freq-domain2
+60000000-60000f1c : 1c00000.pcie dbi
+60000f20-60000fc7 : 1c00000.pcie elbi
+60001000-60001fff : 1c00000.pcie atu
+60100000-601fffff : 1c00000.pcie config
+60300000-63ffffff : pcie@1c00000
+  60300000-604fffff : PCI Bus 0000:01
+    60300000-603fffff : 0000:01:00.0
+      60300000-603fffff : ath11k_pci
+  60500000-606fffff : PCI Bus 0000:01
+  60700000-60700fff : 0000:00:00.0
+80000000-805fffff : reserved
+80600000-80602fff : System RAM
+80603000-8087ffff : reserved
+80880000-808fffff : System RAM
+80900000-8681bfff : reserved
+8681c000-868fffff : System RAM
+86900000-904fffff : reserved
+90500000-9bffffff : System RAM
+  939a8000-93a22fff : reserved
+  94000000-9683ffff : Kernel code
+  96840000-96c0ffff : reserved
+  96c10000-9738ffff : Kernel data
+  98000000-980bffff : reserved
+9c000000-9e3fffff : reserved
+9e400000-9effffff : System RAM
+9f000000-9f1fffff : reserved
+9f200000-9f3fffff : System RAM
+  9f200000-9f3fffff : reserved
+9f400000-9fb00fff : reserved
+9fb01000-a0000fff : System RAM
+a0001000-a0001fff : reserved
+a0002000-b00fffff : System RAM
+b0100000-b17fffff : reserved
+b1800000-bcbfffff : System RAM
+c0000000-ffbfffff : System RAM
+  f9c00000-ffbfffff : reserved
+ffc00000-ffc1ffff : reserved
+ffc20000-ffffffff : System RAM
+100000000-10acfffff : reserved
+10ad00000-1ffffffff : System RAM
+  1f8628000-1ff3fffff : reserved
+  1ff42b000-1ff42bfff : reserved
+  1ff42e000-1ff42ffff : reserved
+  1ff430000-1ff430fff : reserved
+  1ff431000-1ff445fff : reserved
+  1ff446000-1ff446fff : reserved
+  1ff447000-1ff508fff : reserved
+  1ff509000-1ffffffff : reserved

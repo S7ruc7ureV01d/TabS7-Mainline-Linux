@@ -1,0 +1,376 @@
+[  220.855206] input: Mi Mouse3C Mouse as /devices/virtual/misc/uhid/0005:2717:5071.0001/input/input4
+[  220.855880] hid-generic 0005:2717:5071.0001: input,hidraw0: BLUETOOTH HID v0.01 Mouse [Mi Mouse3C] on e6:2e:8b:7a:ca:29
+[  305.467268] kwin_wayland invoked oom-killer: gfp_mask=0x140cca(GFP_HIGHUSER_MOVABLE|__GFP_COMP), order=0, oom_score_adj=200
+[  305.467293] CPU: 4 UID: 1000 PID: 449 Comm: kwin_wayland Tainted: G        W           7.2.0-dirty #94 PREEMPT 
+[  305.467297] Tainted: [W]=WARN
+[  305.467299] Hardware name: Samsung Galaxy Tab S7 (DT)
+[  305.467301] Call trace:
+[  305.467302]  show_stack+0x24/0x38 (C)
+[  305.467313]  __dump_stack+0x28/0x38
+[  305.467316]  dump_stack_lvl+0xac/0xf0
+[  305.467318]  dump_stack+0x18/0x3c
+[  305.467321]  dump_header+0x48/0x120
+[  305.467328]  oom_kill_process+0x160/0x218
+[  305.467334]  out_of_memory+0x328/0x518
+[  305.467338]  __alloc_pages_may_oom+0xd0/0x198
+[  305.467344]  __alloc_pages_slowpath+0x3e8/0x5d8
+[  305.467347]  __alloc_frozen_pages_noprof+0x234/0x2b0
+[  305.467350]  alloc_pages_mpol+0xb0/0x1a0
+[  305.467353]  folio_alloc_noprof+0x60/0xb0
+[  305.467356]  filemap_alloc_folio_noprof+0x6c/0x190
+[  305.467358]  __filemap_get_folio_mpol+0x180/0x3e8
+[  305.467360]  filemap_fault+0x380/0x5b8
+[  305.467363]  __do_fault+0xb8/0x188
+[  305.467365]  handle_mm_fault+0xf88/0x1870
+[  305.467370]  do_page_fault+0x220/0x628
+[  305.467374]  do_translation_fault+0x54/0x78
+[  305.467377]  do_mem_abort+0x48/0xa0
+[  305.467381]  el0_ia+0x9c/0x160
+[  305.467386]  el0t_64_sync_handler+0xfc/0x130
+[  305.467389]  el0t_64_sync+0x1ac/0x1b0
+[  305.467393] Mem-Info:
+[  305.467489] active_anon:421 inactive_anon:1179756 isolated_anon:0
+                active_file:32 inactive_file:88 isolated_file:0
+                unevictable:134564 dirty:0 writeback:0
+                slab_reclaimable:6830 slab_unreclaimable:15880
+                mapped:1086 shmem:139790 pagetables:5431
+                sec_pagetables:533 bounce:0
+                kernel_misc_reclaimable:0
+                free:7570 free_pcp:0 free_cma:2
+[  305.467501] Node 0 active_anon:1684kB inactive_anon:4719024kB active_file:128kB inactive_file:352kB unevictable:538256kB isolated(anon):0kB isolated(file):0kB mapped:4344kB dirty:0kB writeback:0kB shmem:559160kB kernel_stack:6768kB pagetables:21724kB sec_pagetables:2132kB all_unreclaimable? yes Balloon:0kB gpu_active:0kB gpu_reclaim:0kB
+[  305.467511] Node 0 DMA free:17616kB boost:0kB min:2708kB low:4292kB high:5876kB reserved_highatomic:0KB free_highatomic:0KB active_anon:4kB inactive_anon:1545204kB active_file:156kB inactive_file:72kB unevictable:25960kB writepending:0kB zspages:0kB present:2043904kB managed:1591332kB mlocked:0kB bounce:0kB free_pcp:0kB local_pcp:0kB free_cma:8kB
+[  305.467525] lowmem_reserve[]: 0 0 3801 3801
+[  305.467547] Node 0 Normal free:12664kB boost:6144kB min:12792kB low:16684kB high:20576kB reserved_highatomic:0KB free_highatomic:0KB active_anon:1680kB inactive_anon:3173892kB active_file:52kB inactive_file:0kB unevictable:512296kB writepending:0kB zspages:0kB present:4194304kB managed:3892564kB mlocked:0kB bounce:0kB free_pcp:0kB local_pcp:0kB free_cma:0kB
+[  305.467560] lowmem_reserve[]: 0 0 0 0
+[  305.467579] Node 0 DMA: 37*4kB (UM) 17*8kB (UMC) 5*16kB (UM) 6*32kB (U) 8*64kB (UM) 8*128kB (UM) 4*256kB (UM) 3*512kB (UM) 3*1024kB (UM) 3*2048kB (UM) 1*4096kB (M) = 17964kB
+[  305.467657] Node 0 Normal: 164*4kB (UM) 75*8kB (UM) 85*16kB (UM) 34*32kB (UME) 38*64kB (UME) 24*128kB (UME) 14*256kB (UE) 0*512kB 0*1024kB 0*2048kB 0*4096kB = 12792kB
+[  305.467723] Node 0 hugepages_total=0 hugepages_free=0 hugepages_surp=0 hugepages_size=1048576kB
+[  305.467731] Node 0 hugepages_total=0 hugepages_free=0 hugepages_surp=0 hugepages_size=32768kB
+[  305.467738] Node 0 hugepages_total=0 hugepages_free=0 hugepages_surp=0 hugepages_size=2048kB
+[  305.467745] Node 0 hugepages_total=0 hugepages_free=0 hugepages_surp=0 hugepages_size=64kB
+[  305.467752] 139935 total pagecache pages
+[  305.467759] 0 pages in swap cache
+[  305.467765] Free swap  = 0kB
+[  305.467772] Total swap = 0kB
+[  305.467779] 1559552 pages RAM
+[  305.467785] 0 pages HighMem/MovableOnly
+[  305.467792] 188578 pages reserved
+[  305.467798] 8192 pages cma reserved
+[  305.467806] 0 pages hwpoisoned
+[  305.467812] Memory cgroup min protection 0kB -- low protection 0kB
+[  305.467815] Tasks state (memory values in pages):
+[  305.467826] [  pid  ]   uid  tgid total_vm      rss rss_anon rss_file rss_shmem pgtables_bytes swapents oom_score_adj name
+[  305.467844] [    196]     0   196      354      185       15        0       170    36864        0             0 busybox
+[  305.467857] [    237]     0   237    10994      277      272        3         2   102400        0          -250 systemd-journal
+[  305.467869] [    249]     0   249     2577      138      135        3         0    57344        0             0 systemd-userdbd
+[  305.467880] [    270]   974   270     6365      691      688        3         0    86016        0             0 systemd-resolve
+[  305.467891] [    275]     0   275    12113     2342     2339        3         0   114688        0         -1000 systemd-udevd
+[  305.467902] [    277]   977   277     4764      320      317        3         0    69632        0             0 systemd-network
+[  305.467914] [    344]    81   344     2678      233      229        3         1    57344        0          -900 dbus-broker-lau
+[  305.467925] [    349]    81   349     1678      532      531        1         0    53248        0          -900 dbus-broker
+[  305.467936] [    351]     0   351    89593     1106     1103        3         0   200704        0             0 NetworkManager
+[  305.467947] [    354]     0   354     2542      230      227        3         0    57344        0             0 systemd-logind
+[  305.467959] [    390]     0   390     3810      226      223        3         0    69632        0             0 bluetoothd
+[  305.467969] [    400]     0   400     3439      318      315        3         0    69632        0         -1000 sshd
+[  305.467980] [    404]     0   404     2397       96       94        2         0    53248        0             0 agetty
+[  305.467991] [    409]  1000   409    63911     1290     1288        2         0   307200        0             0 startplasma-way
+[  305.468002] [    414]  1000   414     5910     1072     1069        3         0    81920        0           100 systemd
+[  305.468012] [    416]  1000   416     7758      447      445        2         0    98304        0           100 (sd-pam)
+[  305.468023] [    424]     0   424     6163      525      523        2         0    90112        0             0 wpa_supplicant
+[  305.468034] [    428]  1000   428     8262      507      505        2         0   110592        0             0 (sd-pam)
+[  305.468045] [    434]  1000   434     2137       87       83        3         1    57344        0           200 dbus-broker-lau
+[  305.468056] [    435]  1000   435     1760      583      582        1         0    53248        0           200 dbus-broker
+[  305.468067] [    442]  1000   442    42633      592      590        2         0   172032        0           200 kwin_wayland_wr
+[  305.468078] [    446]  1000   446 67172686     1618     1615        3         0   204800        0           200 baloo_file
+[  305.468089] [    449]  1000   449   525722    15478    14857        3       618  1249280        0           200 kwin_wayland
+[  305.468099] [    457]     0   457    81280      504      501        3         0   135168        0             0 upowerd
+[  305.468110] [    464]   102   464    97392      778      775        3         0   126976        0             0 polkitd
+[  305.468121] [    478]     0   478   123347     1959     1956        3         0   184320        0             0 udisksd
+[  305.468132] [    504]  1000   504    25819      682      675        3         4    98304        0           200 pipewire
+[  305.468143] [    505]  1000   505   163171     1203     1198        3         2   212992        0           200 wireplumber
+[  305.468154] [    531]  1000   531   171667     5000     4987        3        10   528384        0           200 Xwayland
+[  305.468165] [    555]  1000   555    95771      216      213        2         1   106496        0           200 at-spi-bus-laun
+[  305.468177] [    558]  1000   558   241053     3300     3297        3         0   491520        0           200 kded6
+[  305.468188] [    559]  1000   559    87502     1830     1827        3         0   360448        0           200 ksmserver
+[  305.468199] [    568]  1000   568     2231       73       69        3         1    57344        0           200 dbus-broker-lau
+[  305.468210] [    573]  1000   573     1518       51       50        1         0    49152        0           200 dbus-broker
+[  305.468221] [    581]  1000   581  1156573    68591    67890        3       698  2101248        0           200 plasmashell
+[  305.468231] [    583]  1000   583    43026      212      210        2         0    94208        0           200 at-spi2-registr
+[  305.468242] [    584]  1000   584    27165      541      538        3         0   102400        0           200 pipewire-pulse
+[  305.468254] [    598]  1000   598   152955     1296     1294        2         0   319488        0           200 kactivitymanage
+[  305.468264] [    600]  1000   600    62412      775      773        2         0   204800        0           200 gmenudbusmenupr
+[  305.468275] [    602]  1000   602    86835     1836     1834        2         0   352256        0           200 kaccess
+[  305.468286] [    603]  1000   603   143679     1852     1850        2         0   389120        0           200 polkit-kde-auth
+[  305.468297] [    604]  1000   604   163869     1932     1929        3         0   405504        0           200 org_kde_powerde
+[  305.468308] [    607]  1000   607    62429      774      772        2         0   200704        0           200 xembedsniproxy
+[  305.468320] [    645]  1000   645    42262      180      178        2         0    90112        0           200 dconf-service
+[  305.468331] [    724]     0   724     3295      179      176        3         0    61440        0             0 systemd-userwor
+[  305.468342] [    726]     0   726     3466      179      176        3         0    61440        0             0 systemd-userwor
+[  305.468354] [    731]  1000   731 67138764      821      819        2         0   221184        0           200 kioworker
+[  305.468365] [    737]  1000   737   122607      854      850        3         1   192512        0           200 xdg-desktop-por
+[  305.468377] [    740]  1000   740   170004    48060    48058        2         0   757760        0           200 DiscoverNotifie
+[  305.468389] [    751]  1000   751    78009      151      149        2         0   106496        0           200 xdg-permission-
+[  305.468399] [    777]  1000   777   105589     1882     1880        2         0   364544        0           200 xdg-desktop-por
+[  305.468410] [    779]     0   779   150044      859      857        2         0   212992        0             0 packagekitd
+[  305.468421] [    796]  1000   796    66683      889      887        2         0   233472        0           200 kioworker
+[  305.468431] [    809]  1000   809   105983     1872     1870        2         0   372736        0           200 ksecretd
+[  305.468442] [    951]     0   951     5704      936      933        3         0    86016        0           100 systemd
+[  305.468453] [    953]     0   953     6894      416      414        2         0    90112        0           100 (sd-pam)
+[  305.468464] [    993]     0   993     8619      573      570        3         0   110592        0             0 sshd-session
+[  305.468476] [    996]     0   996     8619      635      632        3         0   110592        0             0 sshd-session
+[  305.468488] [    997]     0   997     1179       66       64        2         0    49152        0             0 bash
+[  305.468498] [    998]     0   998      937       32       30        2         0    45056        0             0 dmesg
+[  305.468510] [   1039]     0  1039     3309      166      163        3         0    65536        0             0 systemd-userwor
+[  305.468521] [   1069]  1000  1069    51738     1626     1623        3         0   249856        0           200 ksystemstats
+[  305.468533] [   1084]     0  1084     8442      573      570        3         0   114688        0             0 sshd-session
+[  305.468545] [   1087]     0  1087     8442      635      632        3         0   114688        0             0 sshd-session
+[  305.468556] [   1088]     0  1088     1328       68       66        2         0    49152        0             0 bash
+[  305.468568] [   1090]     0  1090  1177641   992338   992338        0         0  7983104        0             0 vm4600
+[  305.468575] oom-kill:constraint=CONSTRAINT_NONE,nodemask=(null),cpuset=/,mems_allowed=0,global_oom,task_memcg=/user.slice/user-0.slice/session-c20.scope,task=vm4600,pid=1090,uid=0
+[  305.468622] Out of memory: Killed process 1090 (vm4600) total-vm:4710564kB, anon-rss:3969352kB, file-rss:0kB, shmem-rss:0kB, UID:0 pgtables:7796kB oom_score_adj:0
+[  326.582460] vm4600 invoked oom-killer: gfp_mask=0x140dca(GFP_HIGHUSER_MOVABLE|__GFP_ZERO|__GFP_COMP), order=0, oom_score_adj=0
+[  326.582485] CPU: 7 UID: 0 PID: 1104 Comm: vm4600 Tainted: G        W           7.2.0-dirty #94 PREEMPT 
+[  326.582489] Tainted: [W]=WARN
+[  326.582491] Hardware name: Samsung Galaxy Tab S7 (DT)
+[  326.582493] Call trace:
+[  326.582495]  show_stack+0x24/0x38 (C)
+[  326.582505]  __dump_stack+0x28/0x38
+[  326.582507]  dump_stack_lvl+0xac/0xf0
+[  326.582509]  dump_stack+0x18/0x3c
+[  326.582511]  dump_header+0x48/0x120
+[  326.582517]  oom_kill_process+0x160/0x218
+[  326.582521]  out_of_memory+0x328/0x518
+[  326.582524]  __alloc_pages_may_oom+0xd0/0x198
+[  326.582529]  __alloc_pages_slowpath+0x3e8/0x5d8
+[  326.582532]  __alloc_frozen_pages_noprof+0x234/0x2b0
+[  326.582535]  alloc_pages_mpol+0xb0/0x1a0
+[  326.582537]  vma_alloc_folio_noprof+0x128/0x1d0
+[  326.582540]  vma_alloc_zeroed_movable_folio+0x40/0x58
+[  326.582544]  handle_mm_fault+0x868/0x1870
+[  326.582548]  do_page_fault+0x220/0x628
+[  326.582550]  do_translation_fault+0x54/0x78
+[  326.582553]  do_mem_abort+0x48/0xa0
+[  326.582556]  el0_da+0x5c/0x100
+[  326.582561]  el0t_64_sync_handler+0x90/0x130
+[  326.582564]  el0t_64_sync+0x1ac/0x1b0
+[  326.582568] Mem-Info:
+[  326.582646] active_anon:421 inactive_anon:1177564 isolated_anon:0
+                active_file:1704 inactive_file:213 isolated_file:0
+                unevictable:134366 dirty:0 writeback:0
+                slab_reclaimable:6785 slab_unreclaimable:16008
+                mapped:2505 shmem:139805 pagetables:5331
+                sec_pagetables:540 bounce:0
+                kernel_misc_reclaimable:0
+                free:8275 free_pcp:76 free_cma:2006
+[  326.582657] Node 0 active_anon:1684kB inactive_anon:4710256kB active_file:6816kB inactive_file:852kB unevictable:537464kB isolated(anon):0kB isolated(file):0kB mapped:10020kB dirty:0kB writeback:0kB shmem:559220kB kernel_stack:6592kB pagetables:21324kB sec_pagetables:2160kB all_unreclaimable? no Balloon:0kB gpu_active:0kB gpu_reclaim:0kB
+[  326.582666] Node 0 DMA free:17776kB boost:0kB min:2708kB low:4292kB high:5876kB reserved_highatomic:0KB free_highatomic:0KB active_anon:4kB inactive_anon:1542236kB active_file:184kB inactive_file:48kB unevictable:25960kB writepending:0kB zspages:0kB present:2043904kB managed:1591332kB mlocked:0kB bounce:0kB free_pcp:0kB local_pcp:0kB free_cma:8024kB
+[  326.582678] lowmem_reserve[]: 0 0 3801 3801
+[  326.582697] Node 0 Normal free:15324kB boost:13456kB min:20104kB low:23996kB high:27888kB reserved_highatomic:0KB free_highatomic:0KB active_anon:1680kB inactive_anon:3167976kB active_file:6772kB inactive_file:860kB unevictable:511504kB writepending:0kB zspages:0kB present:4194304kB managed:3892564kB mlocked:0kB bounce:0kB free_pcp:304kB local_pcp:0kB free_cma:0kB
+[  326.582708] lowmem_reserve[]: 0 0 0 0
+[  326.582727] Node 0 DMA: 26*4kB (UMC) 15*8kB (UMC) 3*16kB (UC) 4*32kB (U) 7*64kB (UC) 4*128kB (UC) 4*256kB (UC) 2*512kB (U) 4*1024kB (UC) 3*2048kB (UC) 1*4096kB (C) = 17744kB
+[  326.582795] Node 0 Normal: 80*4kB (ME) 48*8kB (ME) 8*16kB (ME) 7*32kB (UME) 71*64kB (UE) 27*128kB (UE) 16*256kB (UE) 4*512kB (U) 0*1024kB 0*2048kB 0*4096kB = 15200kB
+[  326.582857] Node 0 hugepages_total=0 hugepages_free=0 hugepages_surp=0 hugepages_size=1048576kB
+[  326.582864] Node 0 hugepages_total=0 hugepages_free=0 hugepages_surp=0 hugepages_size=32768kB
+[  326.582871] Node 0 hugepages_total=0 hugepages_free=0 hugepages_surp=0 hugepages_size=2048kB
+[  326.582877] Node 0 hugepages_total=0 hugepages_free=0 hugepages_surp=0 hugepages_size=64kB
+[  326.582883] 141965 total pagecache pages
+[  326.582890] 0 pages in swap cache
+[  326.582895] Free swap  = 0kB
+[  326.582901] Total swap = 0kB
+[  326.582907] 1559552 pages RAM
+[  326.582913] 0 pages HighMem/MovableOnly
+[  326.582919] 188578 pages reserved
+[  326.582925] 8192 pages cma reserved
+[  326.582931] 0 pages hwpoisoned
+[  326.582937] Memory cgroup min protection 0kB -- low protection 0kB
+[  326.582941] Tasks state (memory values in pages):
+[  326.582949] [  pid  ]   uid  tgid total_vm      rss rss_anon rss_file rss_shmem pgtables_bytes swapents oom_score_adj name
+[  326.582964] [    196]     0   196      354      185       15        0       170    36864        0             0 busybox
+[  326.582976] [    237]     0   237    10994      346      272       72         2   102400        0          -250 systemd-journal
+[  326.582987] [    249]     0   249     2577      138      135        3         0    57344        0             0 systemd-userdbd
+[  326.582997] [    270]   974   270     6365      728      688       40         0    86016        0             0 systemd-resolve
+[  326.583008] [    275]     0   275    12113     2342     2339        3         0   114688        0         -1000 systemd-udevd
+[  326.583019] [    277]   977   277     4764      362      317       45         0    69632        0             0 systemd-network
+[  326.583029] [    344]    81   344     2678      233      229        3         1    57344        0          -900 dbus-broker-lau
+[  326.583040] [    349]    81   349     1678      589      531       58         0    53248        0          -900 dbus-broker
+[  326.583051] [    351]     0   351    89593     1203     1103      100         0   200704        0             0 NetworkManager
+[  326.583061] [    354]     0   354     2542      295      227       68         0    57344        0             0 systemd-logind
+[  326.583071] [    390]     0   390     3810      325      223      102         0    69632        0             0 bluetoothd
+[  326.583081] [    400]     0   400     3439      407      315       92         0    69632        0         -1000 sshd
+[  326.583091] [    404]     0   404     2397       96       94        2         0    53248        0             0 agetty
+[  326.583101] [    409]  1000   409    63911     1290     1288        2         0   307200        0             0 startplasma-way
+[  326.583111] [    414]  1000   414     5910     1131     1069       62         0    81920        0           100 systemd
+[  326.583121] [    416]  1000   416     7758      447      445        2         0    98304        0           100 (sd-pam)
+[  326.583131] [    424]     0   424     6163      587      523       64         0    90112        0             0 wpa_supplicant
+[  326.583141] [    428]  1000   428     8262      507      505        2         0   110592        0             0 (sd-pam)
+[  326.583151] [    434]  1000   434     2137       87       83        3         1    57344        0           200 dbus-broker-lau
+[  326.583161] [    435]  1000   435     1760      640      582       58         0    53248        0           200 dbus-broker
+[  326.583170] [    442]  1000   442    42633      592      590        2         0   172032        0           200 kwin_wayland_wr
+[  326.583181] [    446]  1000   446 67172686     1618     1615        3         0   204800        0           200 baloo_file
+[  326.583191] [    449]  1000   449   525724    16467    14857      992       618  1249280        0           200 kwin_wayland
+[  326.583201] [    457]     0   457    81280      584      501       83         0   135168        0             0 upowerd
+[  326.583211] [    464]   102   464    97392      873      775       98         0   126976        0             0 polkitd
+[  326.583221] [    478]     0   478   123347     2039     1956       83         0   184320        0             0 udisksd
+[  326.583231] [    504]  1000   504    25819      682      675        3         4    98304        0           200 pipewire
+[  326.583242] [    505]  1000   505   163171     1294     1198       94         2   212992        0           200 wireplumber
+[  326.583251] [    531]  1000   531   171667     5000     4987        3        10   528384        0           200 Xwayland
+[  326.583261] [    555]  1000   555    95771      216      213        2         1   106496        0           200 at-spi-bus-laun
+[  326.583271] [    558]  1000   558   241053     3506     3297      209         0   491520        0           200 kded6
+[  326.583281] [    559]  1000   559    87502     1955     1827      128         0   360448        0           200 ksmserver
+[  326.583291] [    568]  1000   568     2231       73       69        3         1    57344        0           200 dbus-broker-lau
+[  326.583300] [    573]  1000   573     1518      106       50       56         0    49152        0           200 dbus-broker
+[  326.583310] [    581]  1000   581  1156549    69744    68197      849       698  2101248        0           200 plasmashell
+[  326.583320] [    583]  1000   583    43026      279      210       69         0    94208        0           200 at-spi2-registr
+[  326.583329] [    584]  1000   584    27165      541      538        3         0   102400        0           200 pipewire-pulse
+[  326.583339] [    598]  1000   598   152955     1296     1294        2         0   319488        0           200 kactivitymanage
+[  326.583350] [    600]  1000   600    62412      896      773      123         0   204800        0           200 gmenudbusmenupr
+[  326.583360] [    602]  1000   602    86835     1954     1834      120         0   352256        0           200 kaccess
+[  326.583370] [    603]  1000   603   143679     1990     1850      140         0   389120        0           200 polkit-kde-auth
+[  326.583380] [    604]  1000   604   163869     2077     1929      148         0   405504        0           200 org_kde_powerde
+[  326.583390] [    607]  1000   607    62429      893      772      121         0   200704        0           200 xembedsniproxy
+[  326.583401] [    645]  1000   645    42262      180      178        2         0    90112        0           200 dconf-service
+[  326.583412] [    724]     0   724     3295      252      176       76         0    61440        0             0 systemd-userwor
+[  326.583421] [    726]     0   726     3466      255      179       76         0    61440        0             0 systemd-userwor
+[  326.583431] [    737]  1000   737   122607      937      850       86         1   192512        0           200 xdg-desktop-por
+[  326.583442] [    740]  1000   740   170004    48060    48058        2         0   757760        0           200 DiscoverNotifie
+[  326.583451] [    751]  1000   751    78009      151      149        2         0   106496        0           200 xdg-permission-
+[  326.583461] [    777]  1000   777   105589     1882     1880        2         0   364544        0           200 xdg-desktop-por
+[  326.583471] [    779]     0   779   150044      944      857       87         0   212992        0             0 packagekitd
+[  326.583480] [    809]  1000   809   105983     1872     1870        2         0   372736        0           200 ksecretd
+[  326.583490] [    951]     0   951     5704      936      933        3         0    86016        0           100 systemd
+[  326.583500] [    953]     0   953     6894      416      414        2         0    90112        0           100 (sd-pam)
+[  326.583510] [    993]     0   993     8619      573      570        3         0   110592        0             0 sshd-session
+[  326.583520] [    996]     0   996     8619      690      633       57         0   110592        0             0 sshd-session
+[  326.583531] [    997]     0   997     1179       66       64        2         0    49152        0             0 bash
+[  326.583542] [    998]     0   998      937       81       30       51         0    45056        0             0 dmesg
+[  326.583552] [   1039]     0  1039     3309      245      173       72         0    65536        0             0 systemd-userwor
+[  326.583562] [   1069]  1000  1069    51738     1784     1623      161         0   249856        0           200 ksystemstats
+[  326.583572] [   1099]     0  1099     8658      687      570      117         0   106496        0             0 sshd-session
+[  326.583583] [   1102]     0  1102     8658      734      632      102         0   106496        0             0 sshd-session
+[  326.583593] [   1103]     0  1103     1618      155       64       91         0    45056        0             0 bash
+[  326.583603] [   1104]     0  1104  1177641   991254   991252        2         0  7974912        0             0 vm4600
+[  326.583610] oom-kill:constraint=CONSTRAINT_NONE,nodemask=(null),cpuset=/,mems_allowed=0,global_oom,task_memcg=/user.slice/user-0.slice/session-c22.scope,task=vm4600,pid=1104,uid=0
+[  326.583655] Out of memory: Killed process 1104 (vm4600) total-vm:4710564kB, anon-rss:3965008kB, file-rss:8kB, shmem-rss:0kB, UID:0 pgtables:7788kB oom_score_adj:0
+[  329.604913] vm4600 invoked oom-killer: gfp_mask=0x440dc0(GFP_KERNEL_ACCOUNT|__GFP_ZERO|__GFP_COMP), order=0, oom_score_adj=0
+[  329.604939] CPU: 7 UID: 0 PID: 1111 Comm: vm4600 Tainted: G        W           7.2.0-dirty #94 PREEMPT 
+[  329.604943] Tainted: [W]=WARN
+[  329.604944] Hardware name: Samsung Galaxy Tab S7 (DT)
+[  329.604947] Call trace:
+[  329.604948]  show_stack+0x24/0x38 (C)
+[  329.604958]  __dump_stack+0x28/0x38
+[  329.604960]  dump_stack_lvl+0xac/0xf0
+[  329.604962]  dump_stack+0x18/0x3c
+[  329.604964]  dump_header+0x48/0x120
+[  329.604968]  oom_kill_process+0x160/0x218
+[  329.604972]  out_of_memory+0x328/0x518
+[  329.604975]  __alloc_pages_may_oom+0xd0/0x198
+[  329.604981]  __alloc_pages_slowpath+0x3e8/0x5d8
+[  329.604984]  __alloc_frozen_pages_noprof+0x234/0x2b0
+[  329.604987]  alloc_pages_mpol+0xb0/0x1a0
+[  329.604990]  alloc_pages_noprof+0x5c/0xa8
+[  329.604992]  __pte_alloc+0x48/0x188
+[  329.604996]  handle_mm_fault+0x13a0/0x1870
+[  329.605000]  do_page_fault+0x220/0x628
+[  329.605003]  do_translation_fault+0x54/0x78
+[  329.605006]  do_mem_abort+0x48/0xa0
+[  329.605009]  el0_da+0x5c/0x100
+[  329.605014]  el0t_64_sync_handler+0x90/0x130
+[  329.605018]  el0t_64_sync+0x1ac/0x1b0
+[  329.605020] Mem-Info:
+[  329.605096] active_anon:421 inactive_anon:1180440 isolated_anon:0
+                active_file:38 inactive_file:182 isolated_file:0
+                unevictable:134368 dirty:0 writeback:0
+                slab_reclaimable:6752 slab_unreclaimable:16035
+                mapped:908 shmem:139816 pagetables:5347
+                sec_pagetables:554 bounce:0
+                kernel_misc_reclaimable:0
+                free:7044 free_pcp:189 free_cma:1854
+[  329.605106] Node 0 active_anon:1684kB inactive_anon:4721760kB active_file:152kB inactive_file:728kB unevictable:537472kB isolated(anon):0kB isolated(file):0kB mapped:3632kB dirty:0kB writeback:0kB shmem:559264kB kernel_stack:6592kB pagetables:21388kB sec_pagetables:2216kB all_unreclaimable? yes Balloon:0kB gpu_active:0kB gpu_reclaim:0kB
+[  329.605114] Node 0 DMA free:17440kB boost:0kB min:2708kB low:4292kB high:5876kB reserved_highatomic:0KB free_highatomic:0KB active_anon:4kB inactive_anon:1542264kB active_file:0kB inactive_file:4kB unevictable:25960kB writepending:0kB zspages:0kB present:2043904kB managed:1591332kB mlocked:0kB bounce:0kB free_pcp:752kB local_pcp:0kB free_cma:7416kB
+[  329.605127] lowmem_reserve[]: 0 0 3801 3801
+[  329.605147] Node 0 Normal free:10736kB boost:6144kB min:12792kB low:16684kB high:20576kB reserved_highatomic:0KB free_highatomic:0KB active_anon:1680kB inactive_anon:3179496kB active_file:152kB inactive_file:720kB unevictable:511512kB writepending:0kB zspages:0kB present:4194304kB managed:3892564kB mlocked:0kB bounce:0kB free_pcp:4kB local_pcp:0kB free_cma:0kB
+[  329.605159] lowmem_reserve[]: 0 0 0 0
+[  329.605177] Node 0 DMA: 1*4kB (U) 5*8kB (U) 9*16kB (UC) 2*32kB (U) 0*64kB 2*128kB (UC) 7*256kB (UC) 7*512kB (UC) 5*1024kB (UC) 3*2048kB (UC) 0*4096kB = 17148kB
+[  329.605240] Node 0 Normal: 304*4kB (UME) 7*8kB (U) 60*16kB (UE) 48*32kB (UE) 56*64kB (UE) 17*128kB (UE) 5*256kB (UE) 0*512kB 0*1024kB 0*2048kB 0*4096kB = 10808kB
+[  329.605298] Node 0 hugepages_total=0 hugepages_free=0 hugepages_surp=0 hugepages_size=1048576kB
+[  329.605305] Node 0 hugepages_total=0 hugepages_free=0 hugepages_surp=0 hugepages_size=32768kB
+[  329.605311] Node 0 hugepages_total=0 hugepages_free=0 hugepages_surp=0 hugepages_size=2048kB
+[  329.605317] Node 0 hugepages_total=0 hugepages_free=0 hugepages_surp=0 hugepages_size=64kB
+[  329.605323] 140155 total pagecache pages
+[  329.605328] 0 pages in swap cache
+[  329.605334] Free swap  = 0kB
+[  329.605340] Total swap = 0kB
+[  329.605346] 1559552 pages RAM
+[  329.605352] 0 pages HighMem/MovableOnly
+[  329.605357] 188578 pages reserved
+[  329.605363] 8192 pages cma reserved
+[  329.605369] 0 pages hwpoisoned
+[  329.605374] Memory cgroup min protection 0kB -- low protection 0kB
+[  329.605378] Tasks state (memory values in pages):
+[  329.605386] [  pid  ]   uid  tgid total_vm      rss rss_anon rss_file rss_shmem pgtables_bytes swapents oom_score_adj name
+[  329.605402] [    196]     0   196      354      185       15        0       170    36864        0             0 busybox
+[  329.605413] [    237]     0   237    10994      277      272        3         2   102400        0          -250 systemd-journal
+[  329.605424] [    249]     0   249     2577      138      135        3         0    57344        0             0 systemd-userdbd
+[  329.605434] [    270]   974   270     6365      691      688        3         0    86016        0             0 systemd-resolve
+[  329.605444] [    275]     0   275    12113     2342     2339        3         0   114688        0         -1000 systemd-udevd
+[  329.605455] [    277]   977   277     4764      320      317        3         0    69632        0             0 systemd-network
+[  329.605465] [    344]    81   344     2678      233      229        3         1    57344        0          -900 dbus-broker-lau
+[  329.605476] [    349]    81   349     1678      532      531        1         0    53248        0          -900 dbus-broker
+[  329.605486] [    351]     0   351    89593     1106     1103        3         0   200704        0             0 NetworkManager
+[  329.605496] [    354]     0   354     2542      230      227        3         0    57344        0             0 systemd-logind
+[  329.605507] [    390]     0   390     3810      226      223        3         0    69632        0             0 bluetoothd
+[  329.605517] [    400]     0   400     3439      318      315        3         0    69632        0         -1000 sshd
+[  329.605527] [    404]     0   404     2397       96       94        2         0    53248        0             0 agetty
+[  329.605538] [    409]  1000   409    63911     1290     1288        2         0   307200        0             0 startplasma-way
+[  329.605548] [    414]  1000   414     5910     1072     1069        3         0    81920        0           100 systemd
+[  329.605558] [    416]  1000   416     7758      447      445        2         0    98304        0           100 (sd-pam)
+[  329.605568] [    424]     0   424     6163      525      523        2         0    90112        0             0 wpa_supplicant
+[  329.605579] [    428]  1000   428     8262      507      505        2         0   110592        0             0 (sd-pam)
+[  329.605590] [    434]  1000   434     2137       87       83        3         1    57344        0           200 dbus-broker-lau
+[  329.605600] [    435]  1000   435     1760      583      582        1         0    53248        0           200 dbus-broker
+[  329.605611] [    442]  1000   442    42633      592      590        2         0   172032        0           200 kwin_wayland_wr
+[  329.605621] [    446]  1000   446 67172686     1618     1615        3         0   204800        0           200 baloo_file
+[  329.605631] [    449]  1000   449   525726    15478    14857        3       618  1249280        0           200 kwin_wayland
+[  329.605642] [    457]     0   457    81280      504      501        3         0   135168        0             0 upowerd
+[  329.605653] [    464]   102   464    97392      778      775        3         0   126976        0             0 polkitd
+[  329.605663] [    478]     0   478   123347     1959     1956        3         0   184320        0             0 udisksd
+[  329.605673] [    504]  1000   504    25819      682      675        3         4    98304        0           200 pipewire
+[  329.605683] [    505]  1000   505   163171     1203     1198        3         2   212992        0           200 wireplumber
+[  329.605694] [    531]  1000   531   171667     5000     4987        3        10   528384        0           200 Xwayland
+[  329.605704] [    555]  1000   555    95771      216      213        2         1   106496        0           200 at-spi-bus-laun
+[  329.605714] [    558]  1000   558   241053     3302     3299        3         0   491520        0           200 kded6
+[  329.605723] [    559]  1000   559    87502     1830     1827        3         0   360448        0           200 ksmserver
+[  329.605733] [    568]  1000   568     2231       73       69        3         1    57344        0           200 dbus-broker-lau
+[  329.605743] [    573]  1000   573     1518       51       50        1         0    49152        0           200 dbus-broker
+[  329.605753] [    581]  1000   581  1156553    68907    68206        3       698  2101248        0           200 plasmashell
+[  329.605762] [    583]  1000   583    43026      212      210        2         0    94208        0           200 at-spi2-registr
+[  329.605772] [    584]  1000   584    27165      541      538        3         0   102400        0           200 pipewire-pulse
+[  329.605783] [    598]  1000   598   152955     1296     1294        2         0   319488        0           200 kactivitymanage
+[  329.605793] [    600]  1000   600    62412      775      773        2         0   204800        0           200 gmenudbusmenupr
+[  329.605803] [    602]  1000   602    86835     1836     1834        2         0   352256        0           200 kaccess
+[  329.605813] [    603]  1000   603   143679     1852     1850        2         0   389120        0           200 polkit-kde-auth
+[  329.605823] [    604]  1000   604   163869     1932     1929        3         0   405504        0           200 org_kde_powerde
+[  329.605833] [    607]  1000   607    62429      774      772        2         0   200704        0           200 xembedsniproxy
+[  329.605844] [    645]  1000   645    42262      180      178        2         0    90112        0           200 dconf-service
+[  329.605855] [    724]     0   724     3295      179      176        3         0    61440        0             0 systemd-userwor
+[  329.605865] [    726]     0   726     3466      183      180        3         0    61440        0             0 systemd-userwor
+[  329.605874] [    737]  1000   737   122607      854      850        3         1   192512        0           200 xdg-desktop-por
+[  329.605884] [    740]  1000   740   170004    48060    48058        2         0   757760        0           200 DiscoverNotifie
+[  329.605894] [    751]  1000   751    78009      151      149        2         0   106496        0           200 xdg-permission-
+[  329.605904] [    777]  1000   777   105589     1882     1880        2         0   364544        0           200 xdg-desktop-por
+[  329.605915] [    779]     0   779   150044      859      857        2         0   212992        0             0 packagekitd
+[  329.605925] [    809]  1000   809   105983     1872     1870        2         0   372736        0           200 ksecretd
+[  329.605935] [    951]     0   951     5704      936      933        3         0    86016        0           100 systemd
+[  329.605945] [    953]     0   953     6894      416      414        2         0    90112        0           100 (sd-pam)
+[  329.605955] [    993]     0   993     8619      573      570        3         0   110592        0             0 sshd-session
+[  329.605965] [    996]     0   996     8619      635      632        3         0   110592        0             0 sshd-session
+[  329.605975] [    997]     0   997     1179       66       64        2         0    49152        0             0 bash
+[  329.605985] [    998]     0   998      937       32       30        2         0    45056        0             0 dmesg
+[  329.605995] [   1039]     0  1039     3309      176      173        3         0    65536        0             0 systemd-userwor
+[  329.606005] [   1069]  1000  1069    51738     1626     1623        3         0   249856        0           200 ksystemstats
+[  329.606016] [   1105]     0  1105     8562      573      570        3         0   118784        0             0 sshd-session
+[  329.606026] [   1109]     0  1109     8562      635      632        3         0   114688        0             0 sshd-session
+[  329.606036] [   1110]     0  1110     1334       66       64        2         0    49152        0             0 bash
+[  329.606045] [   1111]     0  1111  1177641   994085   994085        0         0  7995392        0             0 vm4600
+[  329.606052] oom-kill:constraint=CONSTRAINT_NONE,nodemask=(null),cpuset=/,mems_allowed=0,global_oom,task_memcg=/user.slice/user-0.slice/session-c23.scope,task=vm4600,pid=1111,uid=0
+[  329.606096] Out of memory: Killed process 1111 (vm4600) total-vm:4710564kB, anon-rss:3976340kB, file-rss:0kB, shmem-rss:0kB, UID:0 pgtables:7808kB oom_score_adj:0

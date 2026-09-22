@@ -48,6 +48,11 @@ alone without asking, and getting this wrong wastes a round-trip):
     ```
     ssh -i ~/.ssh/id_ed25519_gts7l -o BatchMode=yes root@172.16.42.1
     ```
+  - If the key is suddenly rejected (`Permission denied (publickey,...)`),
+    check `/root/.ssh/authorized_keys` ownership: the v3 rootfs shipped it
+    owned by `alarm:alarm`, which sshd's StrictModes refuses for root. Log in
+    with the password and `chown root:root /root/.ssh/authorized_keys`
+    (done on the live install 2026-09-22; the tarball itself is still wrong).
   - Password root login is also enabled (`/etc/ssh/sshd_config.d/`) as a
     fallback, but the key is the normal path. Both `root` and `alarm`'s
     password is `make.believe` (2026-09-22, baked into
@@ -154,6 +159,12 @@ Round-trip, used identically every time a kernel/DTS change needs testing:
    unrelated-looking parent Kconfig dependency (documented at length in
    `docs/kernel-config-notes.md` and throughout `kernel-boot-debugging.md`).
    Don't trust `olddefconfig`'s silence as confirmation.
+   **Also diff the result against the previous build's `.config`**: as of
+   2026-09-22 a fresh fragment merge gives `PHY_QCOM_QMP_PCIE_8996`,
+   `PHY_QCOM_QMP_USB` and `RTL_CARDS` as `=m`, while the last known-good
+   build had them `=y` (not set by the fragment - origin unknown). Until
+   they're pinned in the fragment, keep the old `.config` for DTS-only
+   rounds.
 4. If the DTS changed:
    ```
    make -j20 ARCH=arm64 LLVM=1 LLVM_IAS=1 dtbs
@@ -176,8 +187,12 @@ Round-trip, used identically every time a kernel/DTS change needs testing:
    cd kernel/uniloader && make ARCH=aarch64 LLVM=1
    ```
 8. Package: unpack a stock template `boot.img`
-   (`work/round48-build/new-boot.img`, byte-identical stock base kept around
-   for exactly this purpose) with
+   (`work/round-nothp-build/stock-template.img` - unpacks to Samsung's own
+   `4.19.81-19993249` kernel; confirm with `strings -n 20 kernel | grep
+   "Linux version"` after unpacking. **Not** `work/round48-build/new-boot.img`,
+   which the older version of this line named: as of 2026-09-22 that file
+   is one of our own packed images, and repacking from it overflowed the
+   size ceiling below) with
    `work/twrp/external/magisk-prebuilt/prebuilt/magiskboot_x86_64`, replace
    **only** the `kernel` component with the freshly built `uniLoader` binary
    (leave `dtb`/`ramdisk.cpio` stock, untouched), repack.
@@ -237,3 +252,10 @@ this carries a real ~5% runtime cost while flashed. See
 `CONFIG_CMDLINE`'s `irqchip.gicv3_pseudo_nmi=1`** (and optionally
 `CONFIG_ARM64_PSEUDO_NMI` itself) once the crash investigation concludes,
 so normal use doesn't permanently pay this cost.
+
+**2026-09-22 (evening):** the hard-hang's root cause appears found and
+fixed. The DTS memory node now matches ABL's real two ranges, and a 52 MiB
+non-RAM hole at `0xbcc00000` is no longer treated as RAM
+(`kernel-boot-debugging.md`, "CPU hard-hang, root cause found"). Once a
+real-workload soak confirms it, revert the investigation-only settings
+above.
