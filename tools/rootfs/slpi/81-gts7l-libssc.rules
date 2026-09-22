@@ -1,0 +1,11 @@
+# Galaxy Tab S7 LTE (gts7l): the LSM6DSO accelerometer sits behind the SLPI
+# (Snapdragon Sensor Core), served over /dev/fastrpc-sdsp. Upstream
+# 80-iio-sensor-proxy.rules only tags light + compass on SSC DSPs;
+# accelerometers are added per device.
+SUBSYSTEM=="misc", KERNEL=="fastrpc-sdsp", ENV{IIO_SENSOR_PROXY_TYPE}+="ssc-accel"
+# Mount matrix, measured 2026-09-22 with libssc's raw (Android-convention)
+# readings: portrait, USB-C down = (0.33, 9.81, 0.44) - the panel's native
+# orientation; landscape as the desktop is normally used = (9.96, 0.01,
+# 0.43); flat, screen up = (0.21, 0.19, 9.78). iio-sensor-proxy wants the
+# opposite (IIO) sign in-plane, so this is a 180-degree turn about Z.
+SUBSYSTEM=="misc", KERNEL=="fastrpc-sdsp", ENV{ACCEL_MOUNT_MATRIX}="-1, 0, 0; 0, -1, 0; 0, 0, 1"

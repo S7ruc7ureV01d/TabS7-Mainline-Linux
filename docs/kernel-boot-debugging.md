@@ -7123,3 +7123,78 @@ From `kona_lsm6dso_0_0.json`: the LSM6DSO IMU is on the SLPI's own
 one rail, `vddio_rail = /pmic/client/sensor_vddio` (voted by the SLPI's
 own PMIC client). Its orientation is `x=-y, y=+x, z=+z`, applied inside
 SSC.
+
+
+### SLPI sensor hub, stage 2: accelerometer and auto-rotation working (2026-09-22, night)
+
+The owner confirmed KDE auto-rotation is correct in all four
+orientations. The chain:
+SLPI (stock firmware) -> QRTR service 400 -> libssc -> iio-sensor-proxy
+-> KWin, with hexagonrpcd serving the DSP's files over
+`/dev/fastrpc-sdsp`.
+
+Steps, in the order the problems showed up:
+
+1. **libssc and iio-sensor-proxy were already there.** Arch ships
+   libssc 0.4.4 (with `ssccli`) and iio-sensor-proxy 3.9 linked
+   against it. Without hexagonrpcd, `ssccli` reached SSC but looped
+   on "'registry' sensor unavailable".
+2. **hexagonrpcd**: linux-msm/hexagonrpc `598b591` plus the Galaxy Tab
+   S8 Ultra port's 7 patches (aaronsb/sm-x800-linux PR #37). They add
+   write support, map the registry's parent directory, and serve
+   Samsung's `sns_registry` interface. Plus our patch 0008 with this
+   unit's property values (`ro.revision` 7 from
+   `androidboot.revision=7`, SM-T875, gts7l). The unpatched daemon
+   showed exactly the three requests that port documents: the Samsung
+   `ssc_hw_rev` path, "Could not find local interface sns_registry",
+   and refused writes to `sns_reg_version`. The once-per-second
+   `Handover signaled, but it already happened` came from the SLPI
+   retrying those refused writes, and it stops once they succeed.
+   Patches and build notes: `tools/rootfs/hexagonrpcd/`.
+3. **HexagonFS** (`tools/rootfs/slpi/build-hexagonfs.sh`,
+   `/usr/share/qcom/sm8250/Samsung/gts7l`):
+   - the stock `etc/sensors/config` (55 configs);
+   - `sns_reg.conf` with its revision line pointed at
+     `socinfo/ssc_hw_rev`;
+   - a `socinfo/` directory with `hw_platform=MTP` (this unit's
+     `kona_lsm6dso_0_0.json` only matches MTP/Surf/RCM), `soc_id=356`
+     and `ssc_hw_rev=7`;
+   - a writable, fastrpc-owned `sensors/persist/registry`, seeded
+     from this unit's stock `persist` registry.
+4. **The crash:** with the registry being served, the SLPI crashed
+   about 7 s after every boot: `fatal error received:
+   ...sns_thread_manager.c:434:SEE Sensor exceeded processing time
+   limit` (the same class as the S8 Ultra's I2C-timeout crash). Stock's
+   `qcom,ssc@5c00000` holds `sensor_vdd-supply = pm8150a_l8` at 1.8V,
+   and mainline's SLPI node has no supply properties. **Fix:** DTS
+   `vreg_l8c_1p8` (PM8150L LDO8, 1.8V = an exact pmic5_pldo_lv step,
+   always-on). Afterwards: no crash, and `ssccli --sensor accelerometer`
+   streams about 30 Hz, |g| of about 10.0 m/s^2.
+5. **iio-sensor-proxy**: upstream's `80-iio-sensor-proxy.rules` tags
+   SSC DSPs only as `ssc-light ssc-compass`.
+   `tools/rootfs/slpi/81-gts7l-libssc.rules` adds `ssc-accel` on
+   `fastrpc-sdsp` and the mount matrix.
+6. **Mount matrix, measured with libssc's raw readings:**
+
+   | Pose | Raw reading |
+   |---|---|
+   | portrait, USB-C down (the panel's native orientation) | (0.33, 9.81, 0.44) |
+   | landscape, as the desktop is normally used | (9.96, 0.01, 0.43) |
+   | flat, screen up | (0.21, 0.19, 9.78) |
+
+   These form a right-handed Android frame aligned with the native
+   screen, and iio-sensor-proxy wants the in-plane signs flipped, so
+   `ACCEL_MOUNT_MATRIX="-1, 0, 0; 0, -1, 0; 0, 0, 1"`. Note KWin's
+   default `autoRotation: InTabletMode`; the owner set Orientation to
+   Automatic.
+
+**Rootfs state (live install; not yet in tarball v7):**
+
+- `/lib/firmware/qcom/sm8250/samsung/gts7l/slpi.*`
+- hexagonrpcd in `/usr` (built from source)
+- the HexagonFS tree
+- a `fastrpc` system user
+- `slpi-start.service`
+- `hexagonrpcd-sdsp.service` plus the drop-in `gts7l.conf`
+- udev rules 81 and 90
+- `base-devel`/`meson`/`git` (installed for the build)

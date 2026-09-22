@@ -1,0 +1,2 @@
+# hexagonrpcd runs as the fastrpc user; let it open the SLPI's FastRPC node.
+KERNEL=="fastrpc-*", SUBSYSTEM=="misc", GROUP="fastrpc", MODE="0660"

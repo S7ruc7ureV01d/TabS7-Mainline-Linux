@@ -1433,6 +1433,25 @@
 			regulator-initial-mode = <RPMH_REGULATOR_MODE_AUTO>;
 		};
 
+		/*
+		 * SLPI sensor rail (2026-09-22, motion sensors stage 2): stock's
+		 * qcom,ssc@5c00000 node holds `sensor_vdd-supply = pm8150a_l8`
+		 * at 1.8V (`qcom,sensor_vdd-uV-uA = <1800000 0>`, "active"
+		 * reg). Mainline's SLPI node has no supply properties, so
+		 * nothing held it: with hexagonrpcd serving the registry, the
+		 * SLPI's sensor process crashed ~7s after every boot with
+		 * "SEE Sensor exceeded processing time limit" (a sensor bus
+		 * transaction to an unpowered chip). Always-on, like the Galaxy
+		 * Tab S8 Ultra port's equivalent fix. 1.8V is an exact
+		 * pmic5_pldo_lv step (1.504V + 37 * 8mV).
+		 */
+		vreg_l8c_1p8: ldo8 {
+			regulator-name = "vreg_l8c_1p8";
+			regulator-min-microvolt = <1800000>;
+			regulator-max-microvolt = <1800000>;
+			regulator-always-on;
+		};
+
 		vreg_s8c_1p35: smps8 {
 			regulator-name = "vreg_s8c_1p35";
 			regulator-min-microvolt = <1350000>;

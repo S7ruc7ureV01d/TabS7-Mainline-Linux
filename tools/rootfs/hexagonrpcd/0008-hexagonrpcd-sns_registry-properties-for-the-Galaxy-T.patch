@@ -1,0 +1,36 @@
+From fb6049838b301437e751439af6f155da20ad6e74 Mon Sep 17 00:00:00 2001
+From: S7ruc7ureV01d <xh64bit.mail@protonmail.com>
+Date: Tue, 22 Sep 2026 22:49:41 +0000
+Subject: [PATCH 8/8] hexagonrpcd: sns_registry properties for the Galaxy Tab
+ S7 LTE (gts7l)
+
+The property table from the previous patch answers with the Galaxy Tab
+S8 Ultra's values. Use this device's: ro.revision 7 (stock kernel
+command line: androidboot.revision=7), SM-T875, gts7l.
+
+---
+ hexagonrpcd/sns_registry.c | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/hexagonrpcd/sns_registry.c b/hexagonrpcd/sns_registry.c
+index 21c21da..33bdb98 100644
+--- a/hexagonrpcd/sns_registry.c
++++ b/hexagonrpcd/sns_registry.c
+@@ -43,11 +43,11 @@ struct sns_registry_property {
+ };
+ 
+ static const struct sns_registry_property sns_registry_properties[] = {
+-	{ "ro.revision", "4" },
++	{ "ro.revision", "7" },
+ 	{ "ro.boot.hardware", "qcom" },
+ 	{ "ro.hardware", "qcom" },
+-	{ "ro.product.model", "SM-X800" },
+-	{ "ro.product.device", "gts8pwifi" },
++	{ "ro.product.model", "SM-T875" },
++	{ "ro.product.device", "gts7l" },
+ };
+ 
+ static const char *sns_registry_lookup(const char *name)
+-- 
+2.55.0
+
