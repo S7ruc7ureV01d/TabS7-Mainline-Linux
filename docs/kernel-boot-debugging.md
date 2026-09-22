@@ -7198,3 +7198,41 @@ Steps, in the order the problems showed up:
 - `hexagonrpcd-sdsp.service` plus the drop-in `gts7l.conf`
 - udev rules 81 and 90
 - `base-devel`/`meson`/`git` (installed for the build)
+
+### Ambient light sensor: found, enables, but never streams (2026-09-22, night) - open
+
+- **Upstream libssc can't find it.** libssc (0.4.4) looks for SSC data
+  type `ambient_light`, and SSC has none ("No 'ambient_light' sensor
+  available"), so iio-sensor-proxy reports "No ambient light sensor".
+- **It exists as `ambient_light_v`.** This unit's stock sensor list and
+  stock HAL (`vendor/lib64/sensors.ssc.so` strings: `ambient_light_v`,
+  `light_cct_v`) use Samsung's `ambient_light_v`. A test libssc build
+  asking for it (`/root/libssc` on the device, *not installed*, with
+  temporary `SSC_FORCE_CONTINUOUS`/`SSC_UID_INDEX` debug switches)
+  finds exactly one SUID: `VEML3235 Light` / CAPELLA, on-change, sample
+  rate 0. An SSC physical driver only registers after a successful
+  hardware probe, so the chip answered on its SLPI I2C bus (instance 4,
+  0x10; rails `sensor_vdd` + `sensor_vddio`).
+- **Enable is acknowledged, then silence.** On-change or continuous
+  5 Hz, the enable gets its 768 acknowledgement, but no 1022 config
+  event and no 1025 data follow - even while covering the sensor or
+  shining a light at it. For comparison, the accelerometer gets 768 x3,
+  1022, then a 1025 stream. The SLPI doesn't crash.
+- **Ruled out:**
+  - Registry `is_dri` 1 -> 0 (polling), tried in our HexagonFS copy
+    only and reverted: no change.
+  - Display-state notification: downstream `veml3xxx_light.c`
+    `lcd_onoff` is a no-op.
+- **Stock does work on this unit** (stock logcat): `VEML3235 Light
+  Ambient Light Sensor` batched at 200 ms, standard
+  `sns_std_sensor_event`s ("[SSC_LIGHT] ambient_light lux: 150"), plus
+  Samsung `light_cct` at 50 ms. Samsung's HAL has its own
+  `ambient_light` and `light_cct` classes that override `activate()`
+  (`_ZN13ambient_light8activateEv`). **That override is the likely
+  missing step:** it presumably sends an extra request beyond the
+  generic enable. Next: disassemble it, the same way the S8 Ultra port
+  derived `sns_registry` from `libsns_registry_skel.so`.
+- **No desktop consumer yet.** KDE Plasma 6.7.5 / PowerDevil has no
+  ambient-light code at all, so automatic brightness would also need a
+  small daemon: iio-sensor-proxy's `net.hadess.SensorProxy`
+  `LightLevel` -> PowerDevil's brightness D-Bus API.
