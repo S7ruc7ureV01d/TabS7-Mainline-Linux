@@ -1,0 +1,7 @@
+[Unit]
+Description=Save RTC offset while the clock is NTP-synchronized
+After=time-sync.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/rtc-offset.sh save

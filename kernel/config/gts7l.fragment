@@ -530,3 +530,8 @@ CONFIG_POWER_RESET_QCOM_PON=y
 # same reason as other input drivers in this fragment - no reliable
 # module loading in this project's minimal initramfs.
 CONFIG_TOUCHSCREEN_WACOM_W9000=y
+
+# 2026-09-22: PM8150's RTC driver was =m (same no-module-loading bug class
+# as the other =m entries here), so there was never an rtc0 at boot and
+# RTC_HCTOSYS had nothing to read - every boot started at 1970.
+CONFIG_RTC_DRV_PM8XXX=y

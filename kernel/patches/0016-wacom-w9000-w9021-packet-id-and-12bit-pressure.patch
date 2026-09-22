@@ -1,0 +1,86 @@
+From: gts7l project
+Subject: [PATCH] Input: wacom_w9000 - handle the W9021's packet type and
+ 12-bit pressure
+
+The Galaxy Tab S7's W9021 (ic_type 0x233d) coordinate messages differ
+from the older chips this driver was written for, as confirmed against
+Samsung's downstream driver (wacom_i2c.c, wacom_i2c_coord_handler() and
+wacom_event_handler()):
+
+- The low nibble of byte 0 is a packet type. Only type 1 (COORD_PACKET)
+  carries pen coordinates; notification and AOP packets share the same
+  interrupt and must not be parsed as coordinates.
+- Pressure is 12-bit, ((data[5] & 0x0f) << 8) | data[6]. Byte 5's upper
+  nibble holds unrelated flag bits, so reading a plain big-endian 16-bit
+  value gave 32768 whenever a flag was set. Every report then failed the
+  max_pressure check ("Pressure out of range 32768") and never reached
+  userspace.
+
+Both are opt-in per variant (coord_packet_id, pressure_12bit) and
+enabled only for w9021-gts7l, so existing variants are unchanged.
+Confirmed on real hardware 2026-09-22: hover, contact, pressure and the
+side button all work in KDE (together with the DTS fixes for AVDD
+voltage, IRQ polarity, resolution and axis mapping).
+
+--- a/drivers/input/touchscreen/wacom_w9000.c
++++ b/drivers/input/touchscreen/wacom_w9000.c
+@@ -41,6 +41,10 @@
+ #define COORD_TILT_X_IDX	8
+ #define COORD_TILT_Y_IDX	9
+ 
++/* Packet type in byte 0's low nibble, for variants with coord_packet_id */
++#define PACKET_TYPE_MASK	0x0f
++#define PACKET_TYPE_COORD	0x01
++
+ struct wacom_w9000_variant {
+ 	const u8 cmd_query_num;
+ 	const u8 msg_coord_num;
+@@ -66,6 +70,16 @@
+ 	 * false preserves every existing variant's original behavior.
+ 	 */
+ 	const bool force_power_cycle;
++	/*
++	 * Coordinate-message layout quirks of newer chips in this family
++	 * (confirmed against a downstream driver for the W9021/ic_type
++	 * 0x233d): the low nibble of byte 0 is a packet type, and only
++	 * type 1 carries pen coordinates (others are notifications/AOP
++	 * events); and pressure is 12-bit, with byte 5's upper nibble
++	 * holding unrelated flag bits.
++	 */
++	const bool coord_packet_id;
++	const bool pressure_12bit;
+ };
+ 
+ struct wacom_w9000_data {
+@@ -214,6 +228,10 @@
+ 
+ 	dev_dbg(dev, "data: %*ph\n", wacom_data->variant->msg_coord_num, data);
+ 
++	if (wacom_data->variant->coord_packet_id &&
++	    (data[0] & PACKET_TYPE_MASK) != PACKET_TYPE_COORD)
++		return;
++
+ 	if (data[0] & BIT(7)) {
+ 		wacom_data->pen_proximity = true;
+ 
+@@ -223,7 +241,10 @@
+ 
+ 		x = get_unaligned_be16(&data[1]);
+ 		y = get_unaligned_be16(&data[3]);
+-		pressure = get_unaligned_be16(&data[5]);
++		if (wacom_data->variant->pressure_12bit)
++			pressure = ((data[5] & 0x0f) << 8) | data[6];
++		else
++			pressure = get_unaligned_be16(&data[5]);
+ 
+ 		if (wacom_data->variant->msg_coord_num > 7)
+ 			distance = data[7];
+@@ -588,6 +609,8 @@
+ 	.power_on_delay_ms	= 500,
+ 	.query_retry_delay_ms	= 20,
+ 	.force_power_cycle	= false,
++	.coord_packet_id	= true,
++	.pressure_12bit		= true,
+ };
+ 
+ static const struct of_device_id wacom_w9000_of_match[] = {

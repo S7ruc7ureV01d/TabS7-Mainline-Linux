@@ -8,6 +8,64 @@ whether it needs a from-scratch port. Nothing here has been built or
 tested yet - pure research, same methodology as the other Phase 2/3
 scoping docs (real sources cited, nothing assumed).
 
+## RESOLVED (2026-09-22): the S Pen works - four stacked bugs
+
+Confirmed by the owner on real hardware: hover, contact, pressure and
+the side button all work in KDE. The rest of this doc is the history.
+Several of its conclusions (the "brownout" root cause, "every
+software-visible detail matches stock") were wrong, as corrected
+below.
+
+The digitizer was failing four separate ways at once. Each one hid the
+next, which is why the six earlier hypotheses (timing, flash-mode
+polarity x2, forced/conditional power cycle, RPMh HPM) all showed
+identical `-ENXIO`: none of them was tested with the chip actually
+powered.
+
+1. **AVDD never had a voltage vote (the -ENXIO).** mainline's
+   `pmic5_pldo` table is 1.504V + n x 8mV, so **3.3V isn't
+   representable**: the nearest steps are 3.296V and 3.304V.
+   Downstream sends raw millivolts to RPMh and never hits this. Our
+   original `min = max = 3300000` made `set_machine_constraints()` fail
+   its apply_uV step. Regulator registration failed, and the whole
+   pm8150 rpmh-regulator probe went down with it, display and USB
+   supplies included. That was the 2026-09-21 "brownout", not an
+   electrical fault and not a spurious vote. (The claim below that
+   `voltage_selector` "defaults to 0" is also wrong: it starts at
+   `-ENOTRECOVERABLE`, `qcom-rpmh-regulator.c:494`.) The "fix" of
+   dropping the constraints left the rail with no voltage vote at all,
+   so the chip sat underpowered and NACKed every query.
+   **Fix:** `pm8150_l13` min = max = **3296000**. Confirmed at probe
+   ("Setting 3296000-3296000uV"), no brownout, and the chip's first
+   query returned X23585 x Y14741, exactly what stock reads.
+2. **IRQ polarity.** Downstream requests the pen IRQ as
+   `IRQF_TRIGGER_LOW`; the line idles high. Our DTS had
+   `IRQ_TYPE_LEVEL_HIGH`. **Fix:** `IRQ_TYPE_LEVEL_LOW`.
+3. **libinput ignored the device** ("missing tablet capabilities:
+   resolution. Ignoring this device"). Because KWin never opened it, the
+   driver never powered the chip. **Fix:** `touchscreen-x-mm = <237>`,
+   `touchscreen-y-mm = <148>` (the 11" 16:10 panel, about 100
+   units/mm), which the driver already turns into axis resolution.
+4. **Coordinate packets were misparsed.** Every report was dropped with
+   "Pressure out of range 32768". The W9021 puts a packet type in byte
+   0's low nibble (only type 1 is coordinates) and uses 12-bit pressure
+   (`(data[5] & 0x0f) << 8 | data[6]`); byte 5's upper nibble is flags.
+   **Fix:** `kernel/patches/0016-wacom-w9000-w9021-packet-id-and-12bit-pressure.patch`
+   (opt-in per variant, gts7l only).
+
+Also set: `touchscreen-inverted-x` + `touchscreen-swapped-x-y`, from
+downstream's `wacom,invert = <1 0 1>`. `wacom_i2c_coord_modify()`
+inverts raw X and then swaps, the same order mainline applies these
+properties. Tilt isn't transformed by mainline, so tilt direction is
+unverified. The chip needs no start command: it reports as soon as it
+is powered and opened. The i2c17 bus runs at 100 kHz here versus 400
+kHz on stock; that works fine, so it was left alone.
+
+**Lesson for any RPMh LDO on this SoC:** check that every
+`regulator-*-microvolt` value is an exact step of the driver's linear
+range. A non-representable fixed voltage doesn't just get rounded - it
+fails the whole regulator block.
+
 ## The headline finding: mainline has the right driver family, missing one variant and tilt support
 
 **This is not a from-scratch port.** `work/linux/drivers/input/

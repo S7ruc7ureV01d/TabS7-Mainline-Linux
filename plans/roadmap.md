@@ -1445,7 +1445,13 @@ Progress log:
 Goal: everything else the hardware has, to the extent it's feasible.
 
 Exit criteria:
-- [ ] S Pen hover/pressure/tilt input — confirmed **Wacom W90xx-series EMR
+- [x] S Pen hover/pressure/tilt input. **Done, 2026-09-22**: hover,
+      contact, pressure and the side button confirmed working in KDE.
+      There were four stacked bugs: a non-representable 3.3V AVDD (now
+      3.296V), IRQ polarity, missing axis resolution (libinput ignored the
+      device), and W9021 packet parsing (patch 0016). See
+      `../docs/phase4-spen-scoping.md` "RESOLVED". Tilt direction is
+      unverified. Original scope note: confirmed **Wacom W90xx-series EMR
       digitizer over I2C** (`../docs/hardware-inventory.md`; reference driver
       at `references/gts7l/drivers/input/wacom/wacom_i2c.c`), no BLE — scope
       confirmed, not just assumed.
@@ -1464,6 +1470,15 @@ Exit criteria:
 - [ ] USB-C DisplayPort output working, if hardware supports it on this model.
 
 Progress log:
+- 2026-09-22 (night): **S Pen working.** It was four stacked bugs: a
+  non-representable 3.3V AVDD (the old "brownout" was really
+  regulator-block registration failing; 3.296V fixes it), the IRQ needed
+  active-low, the axis resolution was missing (libinput ignored the
+  device), and W9021 packet parsing needed fixing (patch 0016). Details
+  in `../docs/phase4-spen-scoping.md` "RESOLVED". The same round fixed the
+  clock: RTC driver built in, the RTC turned out read-only, so a
+  userspace offset service was added; `/.dockerenv` was making systemd
+  skip timesyncd; rootfs tarball is now v7.
 - 2026-09-21: Scoped and implemented S Pen driver support
   (`docs/phase4-spen-scoping.md`). Mainline already had the right
   driver family (`drivers/input/touchscreen/wacom_w9000.c`) - added a

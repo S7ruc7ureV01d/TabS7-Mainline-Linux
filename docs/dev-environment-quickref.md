@@ -59,19 +59,23 @@ alone without asking, and getting this wrong wastes a round-trip):
     `/etc/sudoers.d/10-wheel` (`%wheel ALL=(ALL:ALL) ALL`, password
     required).
   - **Current rootfs tarball:**
-    `work/archroot-build/archroot-rootfs-v5.tar` (2026-09-22, sha256
-    `f7c24bcf0f498583ea48fa7c48264069bf5614b13eb350bce34ce5ecd14c870e`).
-    It is v4 with exactly two changes: the `authorized_keys` ownership fix
-    and the sudoers rule. It was made by stream-rewriting v4 with Python's
-    `tarfile`, because GNU `tar --delete` corrupted this archive. The file
-    capabilities on `kwin_wayland`, `newuidmap` and others are preserved
-    byte-for-byte; whether they get applied depends on the extracting tar,
-    same as with v4. Python tags two of those entries with a
-    `hdrcharset=BINARY` pax keyword. GNU tar ignores it with a warning,
-    and bsdtar extracts cleanly. TWRP's own tar hasn't been tried on v5
-    yet. v1-v4 were deleted
-    for disk space; `ArchLinuxARM-aarch64-latest.tar.gz` (the upstream
-    base) is kept.
+    `work/archroot-build/archroot-rootfs-v7.tar` (2026-09-22, sha256
+    `a2145afe283314228adcb8acb1c982b27e38462d963d3443502f74c5c4ca6679`).
+    Lineage, each step a verified stream-rewrite of the previous one with
+    Python's `tarfile` (GNU `tar --delete` corrupted this archive):
+    - v5 = v4 + `authorized_keys` owned by root + `/etc/sudoers.d/10-wheel`
+    - v6 = v5 minus `/.dockerenv`. That empty Docker build artifact made
+      systemd think it was in a container (`systemd-detect-virt` said
+      `docker`), which silently skipped timesyncd, systemd-pstore,
+      random-seed, fstrim and ModemManager.
+    - v7 = v6 + the RTC offset service (`tools/rootfs/rtc-offset/`),
+      enabled
+
+    File capabilities (`kwin_wayland`, `newuidmap`, ...) are preserved
+    byte-for-byte. Python tags two entries with a `hdrcharset=BINARY` pax
+    keyword, which GNU tar ignores with a warning and bsdtar handles
+    cleanly. TWRP's own tar hasn't been tried on v5+ yet. Only v7 and
+    `ArchLinuxARM-aarch64-latest.tar.gz` (the upstream base) are kept.
   - Internet access on-device works via NAT: the host does
     `iptables -t nat -A POSTROUTING -s 172.16.42.0/24 -o wlan0 -j MASQUERADE`
     plus `ip_forward=1`, and the device gets a default route via
@@ -88,14 +92,21 @@ alone without asking, and getting this wrong wastes a round-trip):
     ```
     (the USB gadget interface name varies by host - check `ip addr`
     for the `172.16.42.2/24` interface if not `enp0s20f0u3`).
-  - **No RTC** - the device's clock is always stuck at 1970-01-01 on a
-    fresh boot, which breaks `pacman`'s PGP signature checks (looks
-    like "corrupted package (PGP signature)" but is really a clock
-    problem). `systemd-timesyncd` is enabled and self-corrects once the
-    device has a real route/DNS, but if you need `pacman` to work
-    *before* that (or the fix hasn't landed on the running instance
-    yet), set the clock manually first: `date -u -s 'YYYY-MM-DD
-    HH:MM:SS'`.
+  - **Clock (2026-09-22):** the PM8150 RTC works (`CONFIG_RTC_DRV_PM8XXX=y`,
+    `/dev/rtc0`) but is **read-only for Linux**. The PMIC arbiter refuses
+    writes: `disallowed SPMI write to sid=0, addr=0x6046`. Its raw count
+    is arbitrary (around 1971), so `rtc-offset.service`
+    (`tools/rootfs/rtc-offset/`) keeps offset = real time - raw RTC in
+    `/var/lib/rtc-offset/offset`. It restores time at boot, before
+    timesyncd, and saves the offset every 15 min while NTP-synced and at
+    shutdown - same idea as stock Android's time daemon.
+    `systemd-timesyncd` does the actual syncing.
+    **Don't set the time by hand in KDE's Date & Time settings or with
+    `timedatectl set-time`:** either one silently turns NTP off
+    (`systemd-timedated: Set NTP to be disabled`). If that happens, run
+    `timedatectl set-ntp true`. A clock that jumps mid-session (for
+    example 1970 -> now) also leaves KDE's app-launcher cache stale;
+    `kbuildsycoca6` in the user session fixes it.
   - **Known flaky bit**: the default route on the device side sometimes
     races against interface bring-up and doesn't get set, causing DNS/
     internet failures right after boot even though the point-to-point link

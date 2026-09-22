@@ -356,6 +356,18 @@
  * (`work/last_kmsg_*.txt`, XBL: "Rank 0 size = 6144 MB, Rank 1 size =
  * 0 MB"), base address matches the placeholder's own existing `0x80000000`.
  */
+/*
+ * PM8150 RTC (2026-09-22): the hardware clock exists and is enabled in
+ * pm8150.dtsi, but was never usable - CONFIG_RTC_DRV_PM8XXX was =m (now
+ * =y in kernel/config/gts7l.fragment), so there was no rtc0 at boot and
+ * every boot started at 1970. It's read-only for Linux: tested with
+ * allow-set-time, and the PMIC arbiter refused the write ("disallowed
+ * SPMI write to sid=0, addr=0x6046" - write access belongs to another
+ * execution environment, as on stock Android). So no allow-set-time
+ * here; wall-clock time across reboots comes from a userspace offset
+ * (tools/rootfs/rtc-offset/, same idea as Android's time daemon).
+ */
+
 &{/memory@80000000} {
 	/*
 	 * 2026-09-22 (CPU hard-hang investigation, docs/kernel-boot-debugging.md):
@@ -1299,121 +1311,33 @@
 		};
 
 		/*
-		 * S Pen AVDD (docs/phase4-spen-scoping.md's one remaining
-		 * gap, now closed): 3.3V confirmed by DIRECT LIVE MEASUREMENT
-		 * on this exact physical device while the S Pen was confirmed
-		 * physically working (booted stock TWRP/Android kernel,
-		 * `/sys/class/regulator/regulator.24` -> name "pm8150_l13",
-		 * sysfs device path "10-0056-pm8150_l13" - "0056" is the
-		 * wacom digitizer's own I2C address, confirming this is
-		 * unambiguously the right rail, not just a same-named
-		 * coincidence - `state: enabled`, `microvolts: 3300000`,
-		 * `min_microvolts: 3300000`, `max_microvolts: 3300000`, i.e a
-		 * fixed, non-adjustable 3.3V rail on real, running hardware).
-		 * This beats every web-research candidate (a structurally
-		 * plausible but SoC-reference-board-only 3.008V guess, and
-		 * two 3.3V matches from unrelated Wacom products/chips) - it's
-		 * a direct measurement of THIS rail on THIS device, not
-		 * inference. See kernel/dts/sm8250-samsung-gts7l.dts's own
-		 * wacom@56 node for the vdd-supply wiring this enables.
+		 * S Pen AVDD (docs/phase4-spen-scoping.md). Stock runs this
+		 * rail at a fixed 3.3V in High Power Mode (live sysfs on stock:
+		 * regulator.24 "pm8150_l13", consumer 10-0056, min = max =
+		 * 3300000; downstream's r07 overlay sets min/max/init-voltage
+		 * to 3.3V plus qcom,init-mode HPM).
+		 *
+		 * 3.3V itself is NOT representable here: mainline's
+		 * pmic5_pldo table is 1.504V + n * 8mV, so the nearest steps
+		 * are 3.296V and 3.304V (downstream sends raw millivolts to
+		 * RPMh and never hits this). An earlier min = max = 3300000
+		 * made set_machine_constraints() fail its apply_uV step, which
+		 * fails regulator registration and takes the whole pm8150
+		 * rpmh-regulator probe down - display and USB supplies
+		 * included. That was the 2026-09-21 "brownout", not an
+		 * electrical fault. Dropping the constraints stopped it but left
+		 * the rail with no voltage vote at all, so the digitizer sat
+		 * underpowered and NACKed every query. 3.296V fixes both.
+		 *
+		 * regulator-initial-mode/allowed-modes use the RPMh driver's
+		 * own encoding (RPMH_REGULATOR_MODE_HPM = 3); the generic
+		 * REGULATOR_MODE_* constants are silently ignored by its
+		 * of_map_mode().
 		 */
 		pm8150_l13: ldo13 {
 			regulator-name = "pm8150_l13";
-			/*
-			 * CORRECTION (2026-09-21): this node originally used a
-			 * fixed `regulator-min-microvolt = regulator-max-
-			 * microvolt = <3300000>;` (the real, live-measured
-			 * voltage - see docs/phase4-spen-scoping.md) plus
-			 * `regulator-boot-on;`. Both caused a real hardware
-			 * brownout (screen backlight off, no USB at all - not a
-			 * Linux-side hang) on every boot, bisected down to just
-			 * this node EXISTING - reproduced with zero consumers
-			 * wired to it at all, so regulator_enable() was never
-			 * even the trigger. `regulator-boot-on;` alone did not
-			 * fix it either.
-			 *
-			 * Real root cause, confirmed by reading mainline source
-			 * directly, not inferred: `drivers/regulator/
-			 * of_regulator.c` sets `constraints->apply_uV = true`
-			 * automatically whenever BOTH regulator-min-microvolt
-			 * and regulator-max-microvolt are present, regardless of
-			 * whether they're equal (no special "fixed voltage"
-			 * opt-in needed). Meanwhile `drivers/regulator/qcom-
-			 * rpmh-regulator.c`'s `rpmh_regulator_vrm_get_voltage_
-			 * sel()` returns a purely software-tracked counter
-			 * (`vreg->voltage_selector`), never a real hardware
-			 * register read - for a freshly-probed regulator this
-			 * defaults to 0, which on this LDO's real linear range
-			 * (`pmic5_pldo`, `drivers/regulator/qcom-rpmh-
-			 * regulator.c`: `REGULATOR_LINEAR_RANGE(1504000, 0, 255,
-			 * 8000)`) computes to 1.504V - nowhere near the real
-			 * 3.3V. `set_machine_constraints()`
-			 * (`drivers/regulator/core.c`), which runs at
-			 * `regulator_register()` time regardless of enable/
-			 * consumer state - matching the bisection exactly - sees
-			 * this wrongly-assumed 1.504V is below our fixed 3.3V
-			 * constraint and issues a REAL, live RPMh SET_VOLTAGE
-			 * command to correct it, based entirely on software's
-			 * own wrong bookkeeping, not anything actually wrong
-			 * with the hardware. That live voltage-transition
-			 * command hitting an already-active rail is the
-			 * brownout.
-			 *
-			 * Fix: omit regulator-min-microvolt/regulator-max-
-			 * microvolt entirely. Neither is actually needed - the
-			 * wacom driver only ever calls `regulator_enable()`/
-			 * `regulator_disable()`, never `regulator_set_voltage()`
-			 * - and `apply_uV` in `of_regulator.c` only becomes true
-			 * when BOTH properties are present. Omitting them means
-			 * `set_machine_constraints()`'s voltage-forcing block
-			 * never runs at all, which is simpler and more robust
-			 * than widening the range to bracket the wrongly-assumed
-			 * value (an earlier version of this fix) - it removes
-			 * the whole code path instead of just steering around
-			 * it. Confirmed via a second, independent research pass
-			 * that traced the exact same call chain.
-			 *
-			 * regulator-allowed-modes/regulator-initial-mode
-			 * (2026-09-22): a real stock Android boot capture
-			 * (docs/phase4-spen-scoping.md) showed this exact
-			 * regulator running in RPMh's High Power Mode (`opmode`
-			 * sysfs reads "fast") under a working boot - forced
-			 * there by this device's own downstream devicetree
-			 * (`qcom,init-mode = <RPMH_REGULATOR_MODE_HPM>`).
-			 *
-			 * First attempt used the generic Linux
-			 * `REGULATOR_MODE_NORMAL` (0x2,
-			 * `include/linux/regulator/consumer.h`) for this
-			 * property and it had zero effect - confirmed on real
-			 * hardware, still "mode operation not allowed" and
-			 * `regulator_get_mode()` still reporting 0 (invalid)
-			 * afterward. Root cause, found by reading
-			 * `drivers/regulator/of_regulator.c` directly: this
-			 * property's value is passed through the *driver's own*
-			 * `of_map_mode()` callback
-			 * (`drivers/regulator/qcom-rpmh-regulator.c`), which
-			 * expects the `RPMH_REGULATOR_MODE_*` encoding from
-			 * `include/dt-bindings/regulator/qcom,rpmh-regulator.h`
-			 * (`_LPM = 1`, `_HPM = 3`) - a completely different
-			 * numbering than the generic Linux API constant used
-			 * for the runtime `regulator_set_mode()` call itself.
-			 * Passing the wrong encoding here means
-			 * `of_map_mode()` returns `REGULATOR_MODE_INVALID`, so
-			 * `valid_modes_mask`/`REGULATOR_CHANGE_MODE` never get
-			 * set at all - silently, no error, matching exactly
-			 * what was observed.
-			 *
-			 * Fixed to use the correct `RPMH_REGULATOR_MODE_HPM`
-			 * (3) encoding, and added `regulator-initial-mode` too
-			 * so RPMh starts in HPM at registration time - matching
-			 * downstream's `qcom,init-mode` exactly, rather than
-			 * relying solely on a runtime `regulator_set_mode()`
-			 * call from this one consumer's own probe(). Same
-			 * safety profile as omitting voltage constraints above
-			 * - a mode-only property doesn't trigger a live vote at
-			 * registration by itself the way `apply_uV` does. Not
-			 * yet tested with this exact fix.
-			 */
+			regulator-min-microvolt = <3296000>;
+			regulator-max-microvolt = <3296000>;
 			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
 			regulator-allowed-modes = <RPMH_REGULATOR_MODE_HPM>;
 		};
@@ -1750,23 +1674,10 @@
  * reset line distinct from irq/pdct/fwe, and mainline's driver treats
  * it as optional (`devm_gpiod_get_optional`).
  *
- * vdd-supply: "pm8150_l13" (PM8150 LDO13). Real voltage (3.3V)
- * confirmed by direct live measurement on this exact physical device
- * (see the `pm8150_l13: ldo13` node under `&apps_rsc`/`regulators-0`
- * below) - but that node deliberately does NOT encode this voltage as
- * a regulator-min/max-microvolt constraint. Wiring it that way caused
- * a real hardware brownout on every boot (bisected down to the node
- * merely existing, no consumer needed) - root cause confirmed by
- * reading mainline's regulator core directly: `regulator-min/max-
- * microvolt` together trigger `apply_uV`, and this RPMh regulator
- * driver's `get_voltage_sel` can't actually read hardware state (RPMh
- * is a write-only voting protocol), so `set_machine_constraints()`
- * assumes a wrong starting voltage and issues a real, live,
- * uncommanded SET_VOLTAGE RPMh vote to "correct" a rail that was
- * already correct - see the `ldo13` node's own comment for the full
- * trail. `regulator_enable()`/`regulator_disable()` (all this driver
- * actually needs) work correctly without any voltage constraint at
- * all - it's what closed this gap for real.
+ * vdd-supply: "pm8150_l13" (PM8150 LDO13), fixed at 3.296V - the
+ * nearest representable step to stock's 3.3V. See the `pm8150_l13:
+ * ldo13` node under `&apps_rsc`/`regulators-0` for why exactly 3.3V
+ * can't be used and what the old "brownout" really was.
  *
  * Same recurring QUP-enablement pattern as i2c5/i2c8 above: i2c17's
  * parent QUP wrapper (`qupv3_id_2: geniqup@8c0000`) defaults to
@@ -1807,7 +1718,37 @@
 		pinctrl-0 = <&epen_int_gts7l>, <&epen_fwe_gts7l>;
 
 		interrupt-parent = <&tlmm>;
-		interrupts = <136 IRQ_TYPE_LEVEL_HIGH>;
+		/*
+		 * Active-LOW (2026-09-22): downstream's wacom_i2c.c requests
+		 * this line as IRQF_ONESHOT | IRQF_TRIGGER_LOW. It idles high
+		 * (confirmed live, gpio136 reads high with no pen), so the
+		 * original LEVEL_HIGH never delivered real pen events once
+		 * the chip was actually powered.
+		 */
+		interrupts = <136 IRQ_TYPE_LEVEL_LOW>;
+
+		/*
+		 * Physical active area (2026-09-22): libinput refuses any
+		 * tablet without an axis resolution ("missing tablet
+		 * capabilities: resolution. Ignoring this device"), so KWin
+		 * never opened the device and the chip was never powered.
+		 * 11" 16:10 panel is ~237 x 148 mm; with the chip's reported
+		 * 23585 x 14741 range that's ~99-100 units/mm, the usual
+		 * Wacom EMR pitch. The driver derives resolution from these.
+		 */
+		touchscreen-x-mm = <237>;
+		touchscreen-y-mm = <148>;
+
+		/*
+		 * Axis mapping to the panel's native (portrait, 1600x2560)
+		 * orientation, from downstream's `wacom,invert = <1 0 1>`
+		 * (x_invert, y_invert, xy_switch): wacom_i2c_coord_modify()
+		 * inverts raw X first, then swaps - the same order mainline's
+		 * touchscreen_apply_prop_to_x_y() uses for these properties.
+		 * (Tilt isn't transformed by mainline; direction may be off.)
+		 */
+		touchscreen-inverted-x;
+		touchscreen-swapped-x-y;
 
 		vdd-supply = <&pm8150_l13>;
 		/*
