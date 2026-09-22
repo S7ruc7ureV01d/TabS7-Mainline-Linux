@@ -5575,6 +5575,9 @@ clean, monotonic trajectory with no more reversals or garbage - the
 corruption is genuinely fixed. Owner confirmed: "still choppy touch but it
 does work."
 
+> **RESOLVED (2026-09-22):** the choppiness was the IRQ trigger type,
+> not the chip. See "Choppy touch: root cause" right after this section.
+
 **Remaining choppiness - investigated, not resolved.** Even with clean
 data, real position updates land only every ~150-700ms despite the IRQ
 itself still firing at a constant ~88Hz. Live register reads during this
@@ -5613,6 +5616,41 @@ registers.
 Full driver diff: `kernel/patches/0004-touchscreen-firmware-flash-fix.patch`.
 
 ---
+
+
+### Choppy touch: root cause and fix (2026-09-22)
+
+The "unexplained chip characteristic" above was a DTS bug: the touch IRQ
+had the wrong trigger type.
+
+- **Bus speed (partial).** Mainline's `i2c-qcom-geni` defaults to
+  100 kHz with no `clock-frequency`; stock logs "994000.i2c: Bus
+  frequency not specified, default to 400KHz" for the same bus. At
+  100 kHz each 109-byte point read takes ~10 ms, about 90% of an 11.4 ms
+  frame. Setting 400 kHz felt better but was still choppy.
+- **The measurement that cracked it.** At 400 kHz the touch IRQ rate went
+  from ~88/s to **357/s**, exactly the bus-speed ratio, and stayed at
+  355/s with no finger down. `gpio15` read `low` on every sample. The
+  IRQs weren't frames at all: the line idles low, the DTS said
+  `IRQ_TYPE_LEVEL_LOW`, so the IRQ refired as soon as each read
+  finished. The driver was polling the point buffer back to back at ~90%
+  bus occupancy, and the chip rarely got to publish a fresh frame. evtest
+  while dragging: 4.9 position updates/s, median gap 146 ms, p90 437 ms.
+- **Stock uses falling edge.** Downstream parses
+  `novatek,irq-gpio = <... 15 0x2002>` with `of_get_named_gpio_flags()`.
+  `0x2002` is `IRQF_ONESHOT | IRQF_TRIGGER_FALLING`; its
+  `IRQF_TRIGGER_LOW` is only the fallback for a flag-less DT, which is
+  what got misread earlier. The bring-up notes above the `&tlmm`
+  `nvt_ts_int_gts7l` node already recorded stock's `/proc/interrupts` as
+  "Edge". TWRP (Samsung's kernel) shows `msmgpio 15 Edge nvt-ts` with
+  only 92 IRQs since boot.
+- **Fix:** `interrupts = <15 IRQ_TYPE_EDGE_FALLING>` and
+  `clock-frequency = <400000>` on `&i2c5`, a DTB-only change. The owner
+  confirms touch is smooth.
+
+Lesson: an IRQ rate that tracks the bus clock means the line is stuck
+asserted and you're polling, not receiving frames. Always decode
+downstream's GPIO flag cells rather than trusting a driver's default.
 
 ## Phase 3: Wi-Fi bring-up (QCA6390 over PCIe), real hardware confirmed (2026-09-20)
 

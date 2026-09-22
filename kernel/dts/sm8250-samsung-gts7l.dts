@@ -1188,12 +1188,33 @@
 
 &i2c5 {
 	status = "okay";
+	/*
+	 * 2026-09-22 (choppy touch): mainline's i2c-qcom-geni defaults
+	 * to 100 kHz without this; stock logs "994000.i2c: Bus frequency not
+	 * specified, default to 400KHz" for this same bus. At 100 kHz each
+	 * 109-byte touch report takes ~10 ms - ~90% of the 11.4 ms frame
+	 * at the chip's ~88 Hz IRQ rate - so reads can overrun the next
+	 * frame and the chip keeps serving the old one.
+	 */
+	clock-frequency = <400000>;
 
 	touchscreen@62 {
 		compatible = "novatek,nt36523-ts";
 		reg = <0x62>;
 		interrupt-parent = <&tlmm>;
-		interrupts = <15 IRQ_TYPE_LEVEL_LOW>;
+		/*
+		 * Falling edge, matching stock (2026-09-22, choppy-touch fix):
+		 * downstream's `novatek,irq-gpio = <... 15 0x2002>` flags are
+		 * IRQF_ONESHOT | IRQF_TRIGGER_FALLING - its IRQF_TRIGGER_LOW
+		 * is only a fallback for flag-less DTs - and stock's live
+		 * /proc/interrupts shows this line as Edge (see the tlmm note
+		 * above). The line idles LOW, so LEVEL_LOW fired continuously
+		 * (~88/s at 100 kHz, ~357/s at 400 kHz, even with no finger
+		 * down): back-to-back point-buffer reads at ~90% bus occupancy
+		 * starved the chip's own frame updates, so positions only
+		 * landed ~5 times/s.
+		 */
+		interrupts = <15 IRQ_TYPE_EDGE_FALLING>;
 		pinctrl-names = "default";
 		pinctrl-0 = <&nvt_ts_int_gts7l>;
 	};

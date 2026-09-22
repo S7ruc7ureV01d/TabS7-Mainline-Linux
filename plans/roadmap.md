@@ -1062,18 +1062,19 @@ Exit criteria:
       TDDI)**, wired in DT as `novatek,nt36523-ts`
       (`drivers/input/touchscreen/nt36523-gts7l.c`, new driver - not a match
       for mainline's existing, flatly-addressed `novatek-nvt-ts.c`). **Done** -
-      real multi-touch input confirmed on hardware, 2026-09-20. **Known
-      open issue, not blocking**: touch is clean and functional (no more
+      real multi-touch input confirmed on hardware, 2026-09-20. **Choppy
+      touch fixed 2026-09-22**: the IRQ was `IRQ_TYPE_LEVEL_LOW`, but the
+      line idles low and stock triggers on the falling edge (its DT flags
+      `0x2002` = `IRQF_TRIGGER_FALLING | IRQF_ONESHOT`). Level-low fired
+      nonstop (~88/s, even with no finger down), and back-to-back
+      point-buffer reads starved the chip's frame updates, so positions
+      landed only ~5 times/s. Fixed with `IRQ_TYPE_EDGE_FALLING`, plus
+      `clock-frequency = <400000>` on `&i2c5` to match stock. The owner
+      confirms it's smooth. See `../docs/kernel-boot-debugging.md` "Touch
+      debugging" (resolution at the end of that section).
+      Original note: touch was clean and functional (no more
       corruption/phantom-hold after `kernel/patches/
-      0004-touchscreen-firmware-flash-fix.patch`) but still feels choppy
-      under real use - real position updates land only every ~150-700ms
-      even though the IRQ itself fires continuously at ~90Hz. Investigated
-      at length (live register reads ruled out low-power/stuck-calibration
-      and noise-avoidance modes; reviewed Samsung's downstream `sec_fn.c`
-      and the real in-flight mainline NT36xxx driver submission, neither
-      shows a documented fix) with no root cause found - see
-      `../docs/kernel-boot-debugging.md` "touch debugging" section. Left
-      for a future session rather than more blind trial-and-error.
+      0004-touchscreen-firmware-flash-fix.patch`) but felt choppy.
 - [x] Adreno 650 GPU acceleration working (kernel driver + Mesa/Freedreno
       confirmed - Vulkan/Turnip not separately tested). **Done** - real
       sustained 3D rendering (kmscube, 3000 frames at a vsync-locked
