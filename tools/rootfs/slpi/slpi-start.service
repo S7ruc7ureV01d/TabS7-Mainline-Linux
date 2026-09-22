@@ -1,0 +1,18 @@
+[Unit]
+Description=Boot the SLPI sensor DSP (firmware lives on the rootfs)
+Documentation=https://github.com/S7ruc7ureV01d/tabs7-mainlinelinux/blob/main/docs/kernel-boot-debugging.md
+# qcom_q6v5_pas is built in and probes before the rootfs is mounted, so
+# the kernel's own auto-boot can't find the firmware ("Direct firmware
+# load ... failed with error -2"). Start it once the firmware is there.
+DefaultDependencies=no
+After=local-fs.target
+Before=sysinit.target
+ConditionPathExists=/lib/firmware/qcom/sm8250/samsung/gts7l/slpi.mdt
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/sh -c 'for r in /sys/class/remoteproc/remoteproc*; do [ "$(cat $r/name)" = slpi ] || continue; [ "$(cat $r/state)" = offline ] && echo start > $r/state; cat $r/state; done'
+
+[Install]
+WantedBy=sysinit.target

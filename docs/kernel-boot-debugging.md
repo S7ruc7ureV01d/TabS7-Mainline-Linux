@@ -7041,3 +7041,62 @@ three-symbol drift noted in the quickref.
 
 The idle states, THP and memory pressure that were each suspected along
 the way all coexist fine once the RAM map is right.
+
+
+### SLPI sensor hub, stage 1: the sensor DSP boots on mainline (2026-09-22, night)
+
+**Prior art exists; no kernel QMI client is needed.** Qualcomm
+Snapdragon Sensor Core (SSC) sensors are handled in userspace on
+mainline: **hexagonrpcd** serves the DSP's filesystem requests
+(HexagonFS, built from stock `/vendor/etc/sensors`) over
+`/dev/fastrpc-*`; **libssc** is a QMI client speaking SSC's protobuf
+messages over QRTR; and **iio-sensor-proxy** built with libssc feeds
+KDE. This started with postmarketOS SDM845 (pmaports MR !4050), and the
+**Samsung Galaxy Tab S8 Ultra (SM8450)** shipped it on 2026-09-22
+(aaronsb/sm-x800-linux PR #37): motion/light/magnetometer plus
+orientation. That port needed a Samsung `sns_registry` `get_property`
+patch to hexagonrpcd, and sensor supply rails declared always-on,
+because otherwise "the sensor process crashed 13 s after every SLPI
+boot on an I2C transfer timeout".
+
+**Why the SLPI had never booted here.** `&slpi` was already "okay", but:
+
+1. The whole chain was `=m`: `QCOM_Q6V5_PAS`, `RPMSG_QCOM_GLINK_SMEM`,
+   `QCOM_SYSMON`, `QRTR_SMD`, `QCOM_FASTRPC`, `QCOM_PD_MAPPER`,
+   `QCOM_PDR_HELPERS`, `QCOM_SOCINFO`. And `/lib/modules/` on the rootfs
+   is **empty**, so no `=m` driver can ever load. All are now `=y`.
+2. `firmware-name` said `qcom/sm8250/Samsung/...` (capital S), but the
+   rootfs dir is lowercase; and no DSP firmware was installed at all. It
+   now uses the stock split image `slpi.mdt` + `slpi.b00`-`b20` (7 MiB,
+   from `work/stock-dump/.../vendor-firmware_mnt-image/`), installed to
+   `/lib/firmware/qcom/sm8250/samsung/gts7l/`.
+3. Upstream's `slpi_mem` is at `0x88c00000`; stock loads the SLPI at
+   `0x89200000`+`0x1500000`. It's moved to stock's placement, and
+   `adsp_mem` is trimmed so the two don't overlap. ADSP and CDSP are
+   **disabled** until their (also shifted) carveouts get the same
+   treatment.
+
+**Result (manual `echo start` via sysfs):**
+
+- The PAS driver is built in and probes before the rootfs is mounted,
+  so its own auto-boot fails with -2; `slpi-start.service`
+  (`tools/rootfs/slpi/`) now starts it after `local-fs.target`.
+- `remote processor slpi is now up`, state `running`, and
+  `/dev/fastrpc-sdsp` appears with 3 compute banks.
+- `tools/rootfs/slpi/qrtr_lookup.py` shows the SLPI as QRTR node 9, with
+  **service 400 (`SNS_CLIENT`)**, ssctl (43, 15), servreg-notif (66) and
+  others. It was still running after several minutes (no 13 s crash so
+  far - but no sensor has been activated yet).
+- Open: `qcom_q6v5_pas 5c00000.remoteproc: Handover signaled, but it
+  already happened` repeats about once a second. It looks harmless so
+  far, but it's worth understanding (the smp2p handover bit / IRQ
+  trigger?).
+
+**Stage 2:**
+- `vendor` sits inside the `super` dynamic partition (`/dev/block/sda29`),
+  and TWRP doesn't auto-mount it; dump it read-only and lpunpack it on
+  the host.
+- Build hexagonrpcd, with the S8 Ultra's Samsung registry patches.
+- Build libssc, and iio-sensor-proxy with SSC.
+- Find the sensor supply rails from the downstream DT.
+- Set a mount matrix; this panel is portrait-native.

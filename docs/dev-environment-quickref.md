@@ -92,6 +92,15 @@ alone without asking, and getting this wrong wastes a round-trip):
     ```
     (the USB gadget interface name varies by host - check `ip addr`
     for the `172.16.42.2/24` interface if not `enp0s20f0u3`).
+  - **SLPI sensor DSP (2026-09-22):** firmware `slpi.mdt` + `slpi.b00`-`b20`
+    lives on the rootfs in `/lib/firmware/qcom/sm8250/samsung/gts7l/`
+    (copied from `work/stock-dump/dump/vendor-firmware_mnt-image/`;
+    not in tarball v7 yet). `slpi-start.service` (`tools/rootfs/slpi/`)
+    boots it after the rootfs is mounted. Check with
+    `cat /sys/class/remoteproc/remoteproc0/state` and
+    `python3 tools/rootfs/slpi/qrtr_lookup.py` (look for service 400).
+    **Note:** the rootfs has no `/lib/modules`, so any `=m` kernel option
+    is effectively absent; build what you need `=y`.
   - **Clock (2026-09-22):** the PM8150 RTC works (`CONFIG_RTC_DRV_PM8XXX=y`,
     `/dev/rtc0`) but is **read-only for Linux**. The PMIC arbiter refuses
     writes: `disallowed SPMI write to sid=0, addr=0x6046`. Its raw count

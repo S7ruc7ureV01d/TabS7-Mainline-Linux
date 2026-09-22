@@ -742,18 +742,46 @@
  * See plans/roadmap.md for the phase breakdown these map to.
  */
 
+/*
+ * DSPs (2026-09-22, motion sensors stage 1 - docs/kernel-boot-debugging.md
+ * "SLPI sensor hub, stage 1"). These nodes were "okay" before, but nothing
+ * ever probed them: the PAS/GLINK/fastrpc drivers were all =m with no
+ * /lib/modules on the rootfs, the firmware path had a capital "Samsung"
+ * (the rootfs dir is lowercase), and no DSP firmware was installed at all.
+ *
+ * SLPI (sensor hub) only for now. Firmware is the stock split image
+ * (slpi.mdt + slpi.b00-b20 from vendor firmware_mnt), which the PAS
+ * loader takes directly. Its carveout is moved to where stock actually
+ * loads it: live stock pil_slpi_region = 0x89200000 + 0x1500000 ("slpi:
+ * loading from 0x89200000 to 0x8a700000", docs/logs/stock-boot-2026-09-22/
+ * 07-slpi-sensorhub-remoteproc-trace.txt), not upstream's 0x88c00000 -
+ * TrustZone validates the load region at PAS auth.
+ *
+ * ADSP/CDSP are disabled until their carveouts are fixed the same way
+ * (stock pil_adsp_region = 0x8a700000 + 0x2c00000, pil_cdsp_region =
+ * 0x8e300000 + 0x1a00000 - both shifted from upstream). adsp_mem is
+ * trimmed to 0x8a700000-0x8be00000 here only so it doesn't overlap the
+ * moved slpi_mem; 0x88c00000-0x89200000 becomes RAM, matching stock's
+ * /proc/iomem (System RAM 86600000-891fffff).
+ */
+&slpi_mem {
+	reg = <0x0 0x89200000 0x0 0x1500000>;
+};
+
+&adsp_mem {
+	reg = <0x0 0x8a700000 0x0 0x1700000>;
+};
+
 &adsp {
-	firmware-name = "qcom/sm8250/Samsung/gts7l/adsp.mbn";
-	status = "okay";
+	status = "disabled";
 };
 
 &cdsp {
-	firmware-name = "qcom/sm8250/Samsung/gts7l/cdsp.mbn";
-	status = "okay";
+	status = "disabled";
 };
 
 &slpi {
-	firmware-name = "qcom/sm8250/Samsung/gts7l/slpi.mbn";
+	firmware-name = "qcom/sm8250/samsung/gts7l/slpi.mdt";
 	status = "okay";
 };
 

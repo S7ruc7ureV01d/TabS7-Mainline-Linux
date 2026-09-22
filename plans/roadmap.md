@@ -1297,9 +1297,23 @@ Exit criteria:
       (`kernel/config/gts7l.fragment`). Confirmed fixed on real
       hardware: both buttons now register as real input devices and
       respond.
-- [ ] Motion sensors (accelerometer/gyro, rotation) working. **Scoped,
-      2026-09-22, not implemented - genuinely bigger than a devicetree
-      fix.** This device's IMU is a real chip (ST LSM6DSO, per
+- [ ] Motion sensors (accelerometer/gyro, rotation) working. **Stage 1
+      done, 2026-09-22 (night): the SLPI boots on mainline** and registers
+      QRTR service 400 (`SNS_CLIENT`, the Snapdragon Sensor Core endpoint).
+      `/dev/fastrpc-sdsp` exists too. No kernel QMI client is needed: the
+      known mainline path is userspace hexagonrpcd + libssc +
+      iio-sensor-proxy, as on the Galaxy Tab S8 Ultra port
+      (aaronsb/sm-x800-linux PR #37). **Stage 2 (pending):**
+      - pull `/vendor/etc/sensors` from the `super` partition (read-only)
+      - build hexagonrpcd (with the S8 Ultra's Samsung `sns_registry`
+        patches), libssc, and iio-sensor-proxy with SSC support
+      - sensor supply rails (the S8 Ultra hit a sensor-process crash
+        from undeclared rails)
+      - mount matrix
+
+      See `../docs/kernel-boot-debugging.md` "SLPI sensor hub, stage 1".
+      Earlier scoping note (2026-09-22) - its "from-scratch subsystem
+      port" conclusion was wrong: This device's IMU is a real chip (ST LSM6DSO, per
       `references/kernel_samsung_sm8250/drivers/adsp_factory/
       lsm6dso_accel.c`), but Samsung wires it exclusively to Qualcomm's
       SLPI (Sensor DSP) coprocessor, not to the AP's own I2C bus at all

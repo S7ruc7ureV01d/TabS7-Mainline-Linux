@@ -535,3 +535,20 @@ CONFIG_TOUCHSCREEN_WACOM_W9000=y
 # as the other =m entries here), so there was never an rtc0 at boot and
 # RTC_HCTOSYS had nothing to read - every boot started at 1970.
 CONFIG_RTC_DRV_PM8XXX=y
+
+# 2026-09-22, motion sensors stage 1 (docs/kernel-boot-debugging.md, "SLPI
+# sensor hub, stage 1"): the whole remoteproc/sensor-IPC chain was =m, and
+# this rootfs has no /lib/modules at all - so the SLPI (sensor DSP) was
+# never even probed. Built in so it can boot. Upper layers are userspace
+# (hexagonrpcd + libssc + iio-sensor-proxy), same as the Galaxy Tab S8
+# Ultra port (aaronsb/sm-x800-linux PR #37).
+CONFIG_QCOM_Q6V5_PAS=y
+CONFIG_RPMSG_QCOM_GLINK_SMEM=y
+CONFIG_QCOM_SYSMON=y
+CONFIG_QRTR_SMD=y
+CONFIG_QCOM_FASTRPC=y
+CONFIG_QCOM_PD_MAPPER=y
+CONFIG_QCOM_PDR_HELPERS=y
+CONFIG_QCOM_SOCINFO=y
+CONFIG_RPMSG_CHAR=y
+CONFIG_RPMSG_CTRL=y
