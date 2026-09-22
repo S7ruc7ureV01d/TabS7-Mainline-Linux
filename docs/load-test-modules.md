@@ -757,6 +757,15 @@ per-CPU idle-state disable was diagnostic-only (real, unnecessary
 battery cost) and has been reverted; only the cluster-level fix
 (`kernel/patches/0008-...patch`) is being kept.
 
+> **Correction (2026-09-22):** the "has been reverted" above was never
+> true. Patch 0009 stayed applied in `work/linux`, and every build up to
+> and including the memory-map fix ran with no CPU idle states at all.
+> Both 0008 and 0009, and 0007's genpd backport, were removed on
+> 2026-09-22 once the real root cause turned out to be the DTS
+> memory-node firmware hole (`docs/kernel-boot-debugging.md`, "CPU
+> hard-hang, root cause found"). The "moderate-pressure freeze is fixed"
+> reading below was most likely changed timing, not a real fix.
+
 **Where this leaves things:** the moderate-pressure freeze
 (`lru_add_drain_all()` racing a cluster idle-state collapse) is fixed.
 The heavier, real-OOM-killer freeze (`--vm-bytes 3G` with no swap) is a

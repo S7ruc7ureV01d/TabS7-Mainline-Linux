@@ -1,0 +1,2119 @@
+[    0.013748] CPU features: detected: SSBS not fully self-synchronizing
+[    0.013761] Detected PIPT I-cache on CPU4
+[    0.014089] GICv3: CPU4: found redistributor 400 region 0:0x0000000017ae0000
+[    0.014132] CPU4: Booted secondary processor 0x0000000400 [0x411fd0d0]
+[    0.015217] Detected PIPT I-cache on CPU5
+[    0.015588] GICv3: CPU5: found redistributor 500 region 0:0x0000000017b00000
+[    0.015636] CPU5: Booted secondary processor 0x0000000500 [0x411fd0d0]
+[    0.016759] Detected PIPT I-cache on CPU6
+[    0.017132] GICv3: CPU6: found redistributor 600 region 0:0x0000000017b20000
+[    0.017179] CPU6: Booted secondary processor 0x0000000600 [0x411fd0d0]
+[    0.018347] Detected PIPT I-cache on CPU7
+[    0.018489] GICv3: CPU7: found redistributor 700 region 0:0x0000000017b40000
+[    0.018511] CPU7: Booted secondary processor 0x0000000700 [0x411fd0d0]
+[    0.018607] smp: Brought up 1 node, 8 CPUs
+[    0.018763] SMP: Total of 8 processors activated.
+[    0.018774] CPU: All CPU(s) started at EL1
+[    0.018805] CPU features: detected: 32-bit EL0 Support
+[    0.018817] CPU features: detected: Data cache clean to the PoU not required for I/D coherence
+[    0.018831] CPU features: detected: Common not Private translations
+[    0.018842] CPU features: detected: CRC32 instructions
+[    0.018856] CPU features: detected: RCpc load-acquire (LDAPR)
+[    0.018867] CPU features: detected: LSE atomic instructions
+[    0.018878] CPU features: detected: Privileged Access Never
+[    0.018888] CPU features: detected: PMUv3
+[    0.018898] CPU features: detected: RAS Extension Support
+[    0.018909] CPU features: detected: XNX
+[    0.018921] CPU features: detected: Speculative Store Bypassing Safe (SSBS)
+[    0.018984] alternatives: applying system-wide alternatives
+[    0.024798] CPU features: detected: Hardware dirty bit management on CPU4-7
+[    0.025710] Memory: 5449788K/6238208K available (20352K kernel code, 5354K rwdata, 15660K rodata, 2944K init, 704K bss, 751144K reserved, 32768K cma-reserved)
+[    0.027485] devtmpfs: initialized
+[    0.038057] posixtimers hash table entries: 4096 (order: 4, 65536 bytes, linear)
+[    0.038120] futex hash table entries: 2048 (131072 bytes on 1 NUMA nodes, total 128 KiB, linear).
+[    0.038317] 21456 pages in range for non-PLT usage
+[    0.038320] 512976 pages in range for PLT usage
+[    0.041536] DMI: not present or invalid.
+[    0.046040] NET: Registered PF_NETLINK/PF_ROUTE protocol family
+[    0.046479] DMA: preallocated 1024 KiB GFP_KERNEL pool for atomic allocations
+[    0.046586] DMA: preallocated 1024 KiB GFP_KERNEL|GFP_DMA pool for atomic allocations
+[    0.046612] audit: initializing netlink subsys (disabled)
+[    0.046702] audit: type=2000 audit(0.040:1): state=initialized audit_enabled=0 res=1
+[    0.049666] thermal_sys: Registered thermal governor 'step_wise'
+[    0.049670] thermal_sys: Registered thermal governor 'power_allocator'
+[    0.049732] cpuidle: using governor menu
+[    0.049821] NET: Registered PF_QIPCRTR protocol family
+[    0.049910] hw-breakpoint: found 6 breakpoint and 4 watchpoint registers.
+[    0.050032] ASID allocator initialised with 65536 entries
+[    0.052325] Serial: AMBA PL011 UART driver
+[    0.053074] ramoops: found existing invalid buffer, size 0, start 64
+[    0.053100] ramoops: found existing invalid buffer, size 258036, start 99303
+[    0.053170] printk: legacy console [ramoops-1] enabled
+[    0.053636] pstore: Registered ramoops as persistent store backend
+[    0.053645] ramoops: using 0x100000@0x9fa00000, ecc: 0
+[    0.055196] CPUidle PSCI: Initialized CPU PM domain topology using OSI mode
+[    0.062201] /soc@0/ufshc@1d84000: Fixed dependency cycle(s) with /soc@0/phy@1d87000
+[    0.062234] /soc@0/phy@1d87000: Fixed dependency cycle(s) with /soc@0/ufshc@1d84000
+[    0.062347] /soc@0/stm@6002000: Fixed dependency cycle(s) with /soc@0/funnel@6041000
+[    0.062366] /soc@0/tpda@6004000: Fixed dependency cycle(s) with /soc@0/tpdm@684c000
+[    0.062384] /soc@0/tpda@6004000: Fixed dependency cycle(s) with /soc@0/funnel@6c2d000
+[    0.062426] /soc@0/tpda@6004000: Fixed dependency cycle(s) with /soc@0/funnel@6005000
+[    0.062451] /soc@0/funnel@6005000: Fixed dependency cycle(s) with /soc@0/tpda@6004000
+[    0.062492] /soc@0/funnel@6005000: Fixed dependency cycle(s) with /soc@0/funnel@6041000
+[    0.062511] /soc@0/funnel@6041000: Fixed dependency cycle(s) with /soc@0/stm@6002000
+[    0.062533] /soc@0/funnel@6041000: Fixed dependency cycle(s) with /soc@0/funnel@6005000
+[    0.062571] /soc@0/funnel@6041000: Fixed dependency cycle(s) with /soc@0/funnel@6045000
+[    0.062604] /soc@0/funnel@6042000: Fixed dependency cycle(s) with /soc@0/funnel@7810000
+[    0.062638] /soc@0/funnel@6042000: Fixed dependency cycle(s) with /soc@0/funnel@6045000
+[    0.062671] /soc@0/funnel@6045000: Fixed dependency cycle(s) with /soc@0/funnel@6042000
+[    0.062696] /soc@0/funnel@6045000: Fixed dependency cycle(s) with /soc@0/funnel@6041000
+[    0.062717] /soc@0/funnel@6045000: Fixed dependency cycle(s) with /soc@0/funnel@6b04000
+[    0.062768] /soc@0/replicator@6046000: Fixed dependency cycle(s) with /soc@0/replicator@6b06000
+[    0.062784] /soc@0/replicator@6046000: Fixed dependency cycle(s) with /soc@0/etr@6048000
+[    0.062837] /soc@0/etr@6048000: Fixed dependency cycle(s) with /soc@0/replicator@6046000
+[    0.062888] /soc@0/tpdm@684c000: Fixed dependency cycle(s) with /soc@0/tpda@6004000
+[    0.062934] /soc@0/funnel@6b04000: Fixed dependency cycle(s) with /soc@0/funnel@6045000
+[    0.062954] /soc@0/funnel@6b04000: Fixed dependency cycle(s) with /soc@0/etf@6b05000
+[    0.063001] /soc@0/etf@6b05000: Fixed dependency cycle(s) with /soc@0/funnel@6b04000
+[    0.063019] /soc@0/etf@6b05000: Fixed dependency cycle(s) with /soc@0/replicator@6b06000
+[    0.063068] /soc@0/replicator@6b06000: Fixed dependency cycle(s) with /soc@0/etf@6b05000
+[    0.063085] /soc@0/replicator@6b06000: Fixed dependency cycle(s) with /soc@0/replicator@6046000
+[    0.063137] /soc@0/tpdm@6c08000: Fixed dependency cycle(s) with /soc@0/funnel@6c0b000
+[    0.063156] /soc@0/funnel@6c0b000: Fixed dependency cycle(s) with /soc@0/tpdm@6c08000
+[    0.063203] /soc@0/funnel@6c0b000: Fixed dependency cycle(s) with /soc@0/funnel@6c2d000
+[    0.063223] /soc@0/funnel@6c2d000: Fixed dependency cycle(s) with /soc@0/funnel@6c0b000
+[    0.063269] /soc@0/funnel@6c2d000: Fixed dependency cycle(s) with /soc@0/tpda@6004000
+[    0.063321] /soc@0/etm@7040000: Fixed dependency cycle(s) with /soc@0/funnel@7800000
+[    0.063372] /soc@0/etm@7140000: Fixed dependency cycle(s) with /soc@0/funnel@7800000
+[    0.063424] /soc@0/etm@7240000: Fixed dependency cycle(s) with /soc@0/funnel@7800000
+[    0.063475] /soc@0/etm@7340000: Fixed dependency cycle(s) with /soc@0/funnel@7800000
+[    0.063526] /soc@0/etm@7440000: Fixed dependency cycle(s) with /soc@0/funnel@7800000
+[    0.063576] /soc@0/etm@7540000: Fixed dependency cycle(s) with /soc@0/funnel@7800000
+[    0.063627] /soc@0/etm@7640000: Fixed dependency cycle(s) with /soc@0/funnel@7800000
+[    0.063678] /soc@0/etm@7740000: Fixed dependency cycle(s) with /soc@0/funnel@7800000
+[    0.063695] /soc@0/funnel@7800000: Fixed dependency cycle(s) with /soc@0/etm@7740000
+[    0.063710] /soc@0/funnel@7800000: Fixed dependency cycle(s) with /soc@0/etm@7640000
+[    0.063725] /soc@0/funnel@7800000: Fixed dependency cycle(s) with /soc@0/etm@7540000
+[    0.063739] /soc@0/funnel@7800000: Fixed dependency cycle(s) with /soc@0/etm@7440000
+[    0.063754] /soc@0/funnel@7800000: Fixed dependency cycle(s) with /soc@0/etm@7340000
+[    0.063769] /soc@0/funnel@7800000: Fixed dependency cycle(s) with /soc@0/etm@7240000
+[    0.063783] /soc@0/funnel@7800000: Fixed dependency cycle(s) with /soc@0/etm@7140000
+[    0.063797] /soc@0/funnel@7800000: Fixed dependency cycle(s) with /soc@0/etm@7040000
+[    0.063834] /soc@0/funnel@7800000: Fixed dependency cycle(s) with /soc@0/funnel@7810000
+[    0.063868] /soc@0/funnel@7810000: Fixed dependency cycle(s) with /soc@0/funnel@7800000
+[    0.063904] /soc@0/funnel@7810000: Fixed dependency cycle(s) with /soc@0/funnel@6042000
+[    0.064044] /soc@0/display-subsystem@ae00000/display-controller@ae01000: Fixed dependency cycle(s) with /soc@0/display-subsystem@ae00000/dsi@ae96000
+[    0.064111] /soc@0/display-subsystem@ae00000/display-controller@ae01000: Fixed dependency cycle(s) with /soc@0/display-subsystem@ae00000/dsi@ae94000
+[    0.064195] /soc@0/display-subsystem@ae00000/dsi@ae94000: Fixed dependency cycle(s) with /soc@0/display-subsystem@ae00000/dsi@ae94000/panel@0
+[    0.064255] /soc@0/display-subsystem@ae00000/dsi@ae94000: Fixed dependency cycle(s) with /soc@0/display-subsystem@ae00000/display-controller@ae01000
+[    0.064364] /soc@0/display-subsystem@ae00000/dsi@ae94000/panel@0: Fixed dependency cycle(s) with /soc@0/display-subsystem@ae00000/dsi@ae96000
+[    0.064444] /soc@0/display-subsystem@ae00000/dsi@ae94000/panel@0: Fixed dependency cycle(s) with /soc@0/display-subsystem@ae00000/dsi@ae94000
+[    0.064475] /soc@0/display-subsystem@ae00000/phy@ae94400: Fixed dependency cycle(s) with /soc@0/clock-controller@af00000
+[    0.064534] /soc@0/display-subsystem@ae00000/dsi@ae96000: Fixed dependency cycle(s) with /soc@0/display-subsystem@ae00000/dsi@ae94000/panel@0
+[    0.064596] /soc@0/display-subsystem@ae00000/dsi@ae96000: Fixed dependency cycle(s) with /soc@0/display-subsystem@ae00000/display-controller@ae01000
+[    0.064650] /soc@0/display-subsystem@ae00000/phy@ae96400: Fixed dependency cycle(s) with /soc@0/clock-controller@af00000
+[    0.064672] /soc@0/clock-controller@af00000: Fixed dependency cycle(s) with /soc@0/display-subsystem@ae00000/phy@ae96400
+[    0.064691] /soc@0/clock-controller@af00000: Fixed dependency cycle(s) with /soc@0/display-subsystem@ae00000/phy@ae94400
+[    0.064812] /soc@0/interrupt-controller@17a00000: Fixed dependency cycle(s) with /soc@0/interrupt-controller@17a00000
+[    0.070507] /soc@0/ufshc@1d84000: Fixed dependency cycle(s) with /soc@0/phy@1d87000
+[    0.070874] /soc@0/ufshc@1d84000: Fixed dependency cycle(s) with /soc@0/phy@1d87000
+[    0.070923] /soc@0/phy@1d87000: Fixed dependency cycle(s) with /soc@0/ufshc@1d84000
+[    0.074598] /soc@0/stm@6002000: Fixed dependency cycle(s) with /soc@0/funnel@6041000
+[    0.074660] /soc@0/tpda@6004000: Fixed dependency cycle(s) with /soc@0/tpdm@684c000
+[    0.074677] /soc@0/tpda@6004000: Fixed dependency cycle(s) with /soc@0/funnel@6c2d000
+[    0.074713] /soc@0/tpda@6004000: Fixed dependency cycle(s) with /soc@0/funnel@6005000
+[    0.074787] /soc@0/tpda@6004000: Fixed dependency cycle(s) with /soc@0/funnel@6005000
+[    0.074832] /soc@0/funnel@6005000: Fixed dependency cycle(s) with /soc@0/tpda@6004000
+[    0.074888] /soc@0/funnel@6005000: Fixed dependency cycle(s) with /soc@0/funnel@6041000
+[    0.074964] /soc@0/funnel@6005000: Fixed dependency cycle(s) with /soc@0/funnel@6041000
+[    0.075026] /soc@0/stm@6002000: Fixed dependency cycle(s) with /soc@0/funnel@6041000
+[    0.075062] /soc@0/funnel@6041000: Fixed dependency cycle(s) with /soc@0/stm@6002000
+[    0.075103] /soc@0/funnel@6041000: Fixed dependency cycle(s) with /soc@0/funnel@6005000
+[    0.075154] /soc@0/funnel@6041000: Fixed dependency cycle(s) with /soc@0/funnel@6045000
+[    0.075219] /soc@0/funnel@6042000: Fixed dependency cycle(s) with /soc@0/funnel@7810000
+[    0.075248] /soc@0/funnel@6042000: Fixed dependency cycle(s) with /soc@0/funnel@6045000
+[    0.075314] /soc@0/funnel@6042000: Fixed dependency cycle(s) with /soc@0/funnel@6045000
+[    0.075369] /soc@0/funnel@6041000: Fixed dependency cycle(s) with /soc@0/funnel@6045000
+[    0.075414] /soc@0/funnel@6045000: Fixed dependency cycle(s) with /soc@0/funnel@6042000
+[    0.075457] /soc@0/funnel@6045000: Fixed dependency cycle(s) with /soc@0/funnel@6041000
+[    0.075496] /soc@0/funnel@6045000: Fixed dependency cycle(s) with /soc@0/funnel@6b04000
+[    0.075573] /soc@0/replicator@6046000: Fixed dependency cycle(s) with /soc@0/replicator@6b06000
+[    0.075589] /soc@0/replicator@6046000: Fixed dependency cycle(s) with /soc@0/etr@6048000
+[    0.075644] /soc@0/replicator@6046000: Fixed dependency cycle(s) with /soc@0/etr@6048000
+[    0.075705] /soc@0/etr@6048000: Fixed dependency cycle(s) with /soc@0/replicator@6046000
+[    0.075776] /soc@0/tpda@6004000: Fixed dependency cycle(s) with /soc@0/tpdm@684c000
+[    0.075836] /soc@0/tpdm@684c000: Fixed dependency cycle(s) with /soc@0/tpda@6004000
+[    0.075921] /soc@0/funnel@6045000: Fixed dependency cycle(s) with /soc@0/funnel@6b04000
+[    0.075978] /soc@0/funnel@6b04000: Fixed dependency cycle(s) with /soc@0/funnel@6045000
+[    0.076016] /soc@0/funnel@6b04000: Fixed dependency cycle(s) with /soc@0/etf@6b05000
+[    0.076072] /soc@0/funnel@6b04000: Fixed dependency cycle(s) with /soc@0/etf@6b05000
+[    0.076130] /soc@0/etf@6b05000: Fixed dependency cycle(s) with /soc@0/funnel@6b04000
+[    0.076169] /soc@0/etf@6b05000: Fixed dependency cycle(s) with /soc@0/replicator@6b06000
+[    0.076226] /soc@0/etf@6b05000: Fixed dependency cycle(s) with /soc@0/replicator@6b06000
+[    0.076286] /soc@0/replicator@6046000: Fixed dependency cycle(s) with /soc@0/replicator@6b06000
+[    0.076347] /soc@0/replicator@6b06000: Fixed dependency cycle(s) with /soc@0/etf@6b05000
+[    0.076382] /soc@0/replicator@6b06000: Fixed dependency cycle(s) with /soc@0/replicator@6046000
+[    0.076480] /soc@0/tpdm@6c08000: Fixed dependency cycle(s) with /soc@0/funnel@6c0b000
+[    0.076558] /soc@0/tpdm@6c08000: Fixed dependency cycle(s) with /soc@0/funnel@6c0b000
+[    0.076594] /soc@0/funnel@6c0b000: Fixed dependency cycle(s) with /soc@0/tpdm@6c08000
+[    0.076652] /soc@0/funnel@6c0b000: Fixed dependency cycle(s) with /soc@0/funnel@6c2d000
+[    0.076727] /soc@0/funnel@6c0b000: Fixed dependency cycle(s) with /soc@0/funnel@6c2d000
+[    0.076765] /soc@0/tpda@6004000: Fixed dependency cycle(s) with /soc@0/funnel@6c2d000
+[    0.076803] /soc@0/funnel@6c2d000: Fixed dependency cycle(s) with /soc@0/funnel@6c0b000
+[    0.076860] /soc@0/funnel@6c2d000: Fixed dependency cycle(s) with /soc@0/tpda@6004000
+[    0.076957] /soc@0/etm@7040000: Fixed dependency cycle(s) with /soc@0/funnel@7800000
+[    0.077038] /soc@0/etm@7140000: Fixed dependency cycle(s) with /soc@0/funnel@7800000
+[    0.077115] /soc@0/etm@7240000: Fixed dependency cycle(s) with /soc@0/funnel@7800000
+[    0.077188] /soc@0/etm@7340000: Fixed dependency cycle(s) with /soc@0/funnel@7800000
+[    0.077261] /soc@0/etm@7440000: Fixed dependency cycle(s) with /soc@0/funnel@7800000
+[    0.077334] /soc@0/etm@7540000: Fixed dependency cycle(s) with /soc@0/funnel@7800000
+[    0.077408] /soc@0/etm@7640000: Fixed dependency cycle(s) with /soc@0/funnel@7800000
+[    0.077481] /soc@0/etm@7740000: Fixed dependency cycle(s) with /soc@0/funnel@7800000
+[    0.077571] /soc@0/etm@7740000: Fixed dependency cycle(s) with /soc@0/funnel@7800000
+[    0.077631] /soc@0/etm@7640000: Fixed dependency cycle(s) with /soc@0/funnel@7800000
+[    0.077698] /soc@0/etm@7540000: Fixed dependency cycle(s) with /soc@0/funnel@7800000
+[    0.077755] /soc@0/etm@7440000: Fixed dependency cycle(s) with /soc@0/funnel@7800000
+[    0.077814] /soc@0/etm@7340000: Fixed dependency cycle(s) with /soc@0/funnel@7800000
+[    0.077873] /soc@0/etm@7240000: Fixed dependency cycle(s) with /soc@0/funnel@7800000
+[    0.077931] /soc@0/etm@7140000: Fixed dependency cycle(s) with /soc@0/funnel@7800000
+[    0.077990] /soc@0/etm@7040000: Fixed dependency cycle(s) with /soc@0/funnel@7800000
+[    0.078024] /soc@0/funnel@7800000: Fixed dependency cycle(s) with /soc@0/etm@7740000
+[    0.078058] /soc@0/funnel@7800000: Fixed dependency cycle(s) with /soc@0/etm@7640000
+[    0.078091] /soc@0/funnel@7800000: Fixed dependency cycle(s) with /soc@0/etm@7540000
+[    0.078124] /soc@0/funnel@7800000: Fixed dependency cycle(s) with /soc@0/etm@7440000
+[    0.078158] /soc@0/funnel@7800000: Fixed dependency cycle(s) with /soc@0/etm@7340000
+[    0.078192] /soc@0/funnel@7800000: Fixed dependency cycle(s) with /soc@0/etm@7240000
+[    0.078226] /soc@0/funnel@7800000: Fixed dependency cycle(s) with /soc@0/etm@7140000
+[    0.078259] /soc@0/funnel@7800000: Fixed dependency cycle(s) with /soc@0/etm@7040000
+[    0.078308] /soc@0/funnel@7800000: Fixed dependency cycle(s) with /soc@0/funnel@7810000
+[    0.078386] /soc@0/funnel@7800000: Fixed dependency cycle(s) with /soc@0/funnel@7810000
+[    0.078431] /soc@0/funnel@6042000: Fixed dependency cycle(s) with /soc@0/funnel@7810000
+[    0.078476] /soc@0/funnel@7810000: Fixed dependency cycle(s) with /soc@0/funnel@7800000
+[    0.078526] /soc@0/funnel@7810000: Fixed dependency cycle(s) with /soc@0/funnel@6042000
+[    0.082038] /soc@0/display-subsystem@ae00000: Fixed dependency cycle(s) with /soc@0/clock-controller@af00000
+[    0.082187] /soc@0/display-subsystem@ae00000/display-controller@ae01000: Fixed dependency cycle(s) with /soc@0/display-subsystem@ae00000/dsi@ae96000
+[    0.082290] /soc@0/display-subsystem@ae00000/display-controller@ae01000: Fixed dependency cycle(s) with /soc@0/display-subsystem@ae00000/dsi@ae94000
+[    0.082404] /soc@0/display-subsystem@ae00000/dsi@ae94000: Fixed dependency cycle(s) with /soc@0/display-subsystem@ae00000/dsi@ae94000/panel@0
+[    0.082494] /soc@0/display-subsystem@ae00000/dsi@ae94000: Fixed dependency cycle(s) with /soc@0/display-subsystem@ae00000/display-controller@ae01000
+[    0.082674] /soc@0/display-subsystem@ae00000/dsi@ae94000/panel@0: Fixed dependency cycle(s) with /soc@0/display-subsystem@ae00000/dsi@ae96000
+[    0.082793] /soc@0/display-subsystem@ae00000/dsi@ae94000/panel@0: Fixed dependency cycle(s) with /soc@0/display-subsystem@ae00000/dsi@ae94000
+[    0.082825] /soc@0/display-subsystem@ae00000/phy@ae94400: Fixed dependency cycle(s) with /soc@0/clock-controller@af00000
+[    0.082913] /soc@0/display-subsystem@ae00000/dsi@ae96000: Fixed dependency cycle(s) with /soc@0/display-subsystem@ae00000/dsi@ae94000/panel@0
+[    0.083002] /soc@0/display-subsystem@ae00000/dsi@ae96000: Fixed dependency cycle(s) with /soc@0/display-subsystem@ae00000/display-controller@ae01000
+[    0.083064] /soc@0/display-subsystem@ae00000/phy@ae96400: Fixed dependency cycle(s) with /soc@0/clock-controller@af00000
+[    0.083309] /soc@0/display-subsystem@ae00000/phy@ae96400: Fixed dependency cycle(s) with /soc@0/clock-controller@af00000
+[    0.083367] /soc@0/display-subsystem@ae00000/phy@ae94400: Fixed dependency cycle(s) with /soc@0/clock-controller@af00000
+[    0.083408] /soc@0/display-subsystem@ae00000: Fixed dependency cycle(s) with /soc@0/clock-controller@af00000
+[    0.083427] /soc@0/clock-controller@af00000: Fixed dependency cycle(s) with /soc@0/display-subsystem@ae00000/phy@ae96400
+[    0.083448] /soc@0/clock-controller@af00000: Fixed dependency cycle(s) with /soc@0/display-subsystem@ae00000/phy@ae94400
+[    0.091283] /soc@0/rsc@18200000/regulators-0: Fixed dependency cycle(s) with /soc@0/rsc@18200000/regulators-0/smps5
+[    0.091309] /soc@0/rsc@18200000/regulators-0: Fixed dependency cycle(s) with /soc@0/rsc@18200000/regulators-0/smps6
+[    0.091548] /soc@0/rsc@18200000/regulators-1: Fixed dependency cycle(s) with /soc@0/rsc@18200000/regulators-1/bob
+[    0.091569] /soc@0/rsc@18200000/regulators-1: Fixed dependency cycle(s) with /soc@0/rsc@18200000/regulators-1/smps8
+[    0.091590] /soc@0/rsc@18200000/regulators-1: Fixed dependency cycle(s) with /soc@0/rsc@18200000/regulators-0/smps4
+[    0.095151] HugeTLB: registered 1.00 GiB page size, pre-allocated 0 pages
+[    0.095165] HugeTLB: 0 KiB vmemmap can be freed for a 1.00 GiB page
+[    0.095176] HugeTLB: registered 32.0 MiB page size, pre-allocated 0 pages
+[    0.095185] HugeTLB: 0 KiB vmemmap can be freed for a 32.0 MiB page
+[    0.095195] HugeTLB: registered 2.00 MiB page size, pre-allocated 0 pages
+[    0.095204] HugeTLB: 0 KiB vmemmap can be freed for a 2.00 MiB page
+[    0.095213] HugeTLB: registered 64.0 KiB page size, pre-allocated 0 pages
+[    0.095222] HugeTLB: 0 KiB vmemmap can be freed for a 64.0 KiB page
+[    0.096821] ACPI: Interpreter disabled.
+[    0.102083] iommu: Default domain type: Translated
+[    0.102095] iommu: DMA domain TLB invalidation policy: strict mode
+[    0.102570] SCSI subsystem initialized
+[    0.102663] libata version 3.00 loaded.
+[    0.102879] usbcore: registered new interface driver usbfs
+[    0.102914] usbcore: registered new interface driver hub
+[    0.102941] usbcore: registered new device driver usb
+[    0.103949] pps_core: LinuxPPS API ver. 1 registered
+[    0.103959] pps_core: Software ver. 5.3.6 - Copyright 2005-2007 Rodolfo Giometti <giometti@linux.it>
+[    0.103976] PTP clock support registered
+[    0.104102] EDAC MC: Ver: 3.0.0
+[    0.104512] scmi_core: SCMI protocol bus registered
+[    0.104608] qcom_scm: convention: smc arm 64
+[    0.106439] qcom_scm firmware:scm: qseecom: found qseecom with version 0x1402000
+[    0.106482] qcom_scm firmware:scm: qseecom: untested machine, skipping
+[    0.107781] FPGA manager framework
+[    0.108245] Bluetooth: Core ver 2.22
+[    0.108269] NET: Registered PF_BLUETOOTH protocol family
+[    0.108278] Bluetooth: HCI device and connection manager initialized
+[    0.108289] Bluetooth: HCI socket layer initialized
+[    0.108299] Bluetooth: L2CAP socket layer initialized
+[    0.108311] Bluetooth: SCO socket layer initialized
+[    0.108738] vgaarb: loaded
+[    0.109070] clocksource: Switched to clocksource arch_sys_counter
+[    0.109242] VFS: Disk quotas dquot_6.6.0
+[    0.109259] VFS: Dquot-cache hash table entries: 512 (4096 bytes)
+[    0.109424] pnp: PnP ACPI: disabled
+[    0.113407] NET: Registered PF_INET protocol family
+[    0.113560] IP idents hash table entries: 131072 (order: 8, 1048576 bytes, linear)
+[    0.116885] tcp_listen_portaddr_hash hash table entries: 4096 (order: 4, 65536 bytes, linear)
+[    0.116921] Table-perturb hash table entries: 65536 (order: 6, 262144 bytes, linear)
+[    0.116938] TCP established hash table entries: 65536 (order: 7, 524288 bytes, linear)
+[    0.117088] TCP bind hash table entries: 65536 (order: 9, 2097152 bytes, linear)
+[    0.117548] TCP: Hash tables configured (established 65536 bind 65536)
+[    0.117602] UDP hash table entries: 4096 (order: 6, 262144 bytes, linear)
+[    0.117750] NET: Registered PF_UNIX/PF_LOCAL protocol family
+[    0.118006] RPC: Registered named UNIX socket transport module.
+[    0.118018] RPC: Registered udp transport module.
+[    0.118027] RPC: Registered tcp transport module.
+[    0.118036] RPC: Registered tcp-with-tls transport module.
+[    0.118045] RPC: Registered tcp NFSv4.1 backchannel transport module.
+[    0.118356] PCI: CLS 0 bytes, default 64
+[    0.118559] Unpacking initramfs...
+[    0.125293] kvm [1]: HYP mode not available
+[    0.125837] Initialise system trusted keyrings
+[    0.125939] workingset: timestamp_bits=42 (anon: 37) max_order=21 bucket_order=0 (anon: 0)
+[    0.126145] squashfs: version 4.0 (2009/01/31) Phillip Lougher
+[    0.126306] NFS: Registering the id_resolver key type
+[    0.126322] Key type id_resolver registered
+[    0.126330] Key type id_legacy registered
+[    0.126345] nfs4filelayout_init: NFSv4 File Layout Driver Registering...
+[    0.126353] nfs4flexfilelayout_init: NFSv4 Flexfile Layout Driver Registering...
+[    0.126576] Key type asymmetric registered
+[    0.126585] Asymmetric key parser 'x509' registered
+[    0.126617] Block layer SCSI generic (bsg) driver version 0.4 loaded (major 242)
+[    0.126626] io scheduler mq-deadline registered
+[    0.126634] io scheduler kyber registered
+[    0.126657] io scheduler bfq registered
+[    0.140956] ledtrig-cpu: registered to indicate activity on CPUs
+[    0.148698] Initramfs unpacking failed: junk within compressed archive
+[    0.148883] Freeing initrd memory: 764K
+[    0.184379] vreg_bob: Setting 3352000-3960000uV
+[    0.184470] vreg_s4a_1p8: Setting 1800000-1920000uV
+[    0.184580] vreg_s8c_1p35: Setting 1352000-1400000uV
+[    0.184762] vreg_l5c_1p8: Setting 1800000-2800000uV
+[    0.184764] vreg_l2a_3p1: Setting 3072000-3072000uV
+[    0.185061] vreg_l5a_0p88: Setting 880000-880000uV
+[    0.185348] vreg_l6a_1p2: Setting 1200000-1200000uV
+[    0.185619] vreg_l9a_1p2: Setting 1200000-1200000uV
+[    0.185848] vreg_l12a_1p8: Setting 1800000-1800000uV
+[    0.186100] vreg_l17a_3p0: Setting 2496000-3008000uV
+[    0.186342] vreg_s5a_1p9: Setting 1904000-2040000uV
+[    0.186595] vreg_s6a_0p95: Setting 952000-1128000uV
+[    0.189845] Serial: 8250/16550 driver, 4 ports, IRQ sharing enabled
+[    0.193559] msm_serial: driver initialized
+[    0.194226] SuperH (H)SCI(F) driver initialized
+[    0.194532] STM32 USART driver initialized
+[    0.198530] arm-smmu 3da0000.iommu: probing hardware configuration...
+[    0.198544] arm-smmu 3da0000.iommu: SMMUv2 with:
+[    0.198574] arm-smmu 3da0000.iommu: 	stage 1 translation
+[    0.198585] arm-smmu 3da0000.iommu: 	coherent table walk
+[    0.198597] arm-smmu 3da0000.iommu: 	stream matching with 6 register groups
+[    0.198617] arm-smmu 3da0000.iommu: 	5 context banks (0 stage-2 only)
+[    0.198639] arm-smmu 3da0000.iommu: 	Supported page sizes: 0x61311000
+[    0.198651] arm-smmu 3da0000.iommu: 	Stage-1: 48-bit VA -> 36-bit IPA
+[    0.198724] arm-smmu 3da0000.iommu: 	preserved 0 boot mappings
+[    0.199362] platform 3d00000.gpu: Adding to iommu group 0
+[    0.199457] platform 3d6a000.gmu: Adding to iommu group 1
+[    0.202594] arm-smmu 15000000.iommu: probing hardware configuration...
+[    0.202607] arm-smmu 15000000.iommu: SMMUv2 with:
+[    0.202624] arm-smmu 15000000.iommu: 	stage 1 translation
+[    0.202634] arm-smmu 15000000.iommu: 	coherent table walk
+[    0.202646] arm-smmu 15000000.iommu: 	stream matching with 87 register groups
+[    0.202662] arm-smmu 15000000.iommu: 	74 context banks (0 stage-2 only)
+[    0.203033] arm-smmu 15000000.iommu: 	Supported page sizes: 0x61311000
+[    0.203045] arm-smmu 15000000.iommu: 	Stage-1: 36-bit VA -> 36-bit IPA
+[    0.203097] arm-smmu 15000000.iommu: 	preserved 0 boot mappings
+[    0.204035] platform 800000.dma-controller: Adding to iommu group 2
+[    0.204126] platform 8c0000.geniqup: Adding to iommu group 3
+[    0.204207] platform 900000.dma-controller: Adding to iommu group 4
+[    0.204285] platform 9c0000.geniqup: Adding to iommu group 5
+[    0.204370] platform ac0000.geniqup: Adding to iommu group 6
+[    0.204484] platform 1d84000.ufshc: Adding to iommu group 7
+[    0.204624] platform 1dc4000.dma-controller: Adding to iommu group 8
+[    0.204741] platform 1dfa000.crypto: Adding to iommu group 8
+[    0.204861] platform ae00000.display-subsystem: Adding to iommu group 9
+[    0.213773] loop: module loaded
+[    0.213986] zram: Added device: zram0
+[    0.214873] megasas: 07.734.00.00-rc1
+[    0.218920] spmi_pmic_arb c440000.spmi: PMIC arbiter version v5 (0x50010000)
+[    0.228784] spmi spmi-0: pmic_arb_check_chnl_status_v1: 0xa 0x104: transaction failed (0x3) reg: 0x9708
+[    0.228824] ------------[ cut here ]------------
+[    0.228833] WARNING: drivers/spmi/spmi-pmic-arb.c:316 at pmic_arb_check_chnl_status_v1+0x64/0xc4, CPU#7: swapper/0/1
+[    0.228859] Modules linked in:
+[    0.228873] CPU: 7 UID: 0 PID: 1 Comm: swapper/0 Not tainted 7.2.0-dirty #95 PREEMPT 
+[    0.228886] Hardware name: Samsung Galaxy Tab S7 (DT)
+[    0.228895] pstate: 604000c5 (nZCv daIF +PAN -UAO -TCO -DIT -SSBS BTYPE=--)
+[    0.228906] pc : pmic_arb_check_chnl_status_v1+0x64/0xc4
+[    0.228920] lr : pmic_arb_check_chnl_status_v1+0x64/0xc4
+[    0.228932] sp : ffff800082c7b330
+[    0.228940] x29: ffff800082c7b330 x28: ffff00008cfd7280 x27: 0000000000009708
+[    0.228956] x26: 0000000000000003 x25: ffff00008db92f40 x24: 000000000000000a
+[    0.228970] x23: 0000000000000104 x22: ffff00008db92c00 x21: 00000000fffffc1a
+[    0.228984] x20: ffff800083e09708 x19: ffff00008cfd7280 x18: 0000000000000c00
+[    0.228997] x17: 3020617830203a31 x16: 765f737574617473 x15: 0000000000000003
+[    0.229010] x14: ffff80008266c950 x13: 0000000000000fff x12: 0000000000000003
+[    0.229024] x11: 0000000000000003 x10: 0000000000000002 x9 : 37e430674c19cd00
+[    0.229037] x8 : 37e430674c19cd00 x7 : 73205d3438373832 x6 : 322e30202020205b
+[    0.229050] x5 : ffff00001f230b87 x4 : 736e617274203a34 x3 : 0000000000000000
+[    0.229063] x2 : 0000000000000000 x1 : ffff800082c7b060 x0 : 000000000000005b
+[    0.229076] Call trace:
+[    0.229083]  pmic_arb_check_chnl_status_v1+0x64/0xc4 (P)
+[    0.229097]  pmic_arb_read_cmd_unlocked+0xc0/0x1c0
+[    0.229111]  pmic_arb_read_cmd+0xf8/0x154
+[    0.229124]  spmi_ext_register_readl+0x64/0x70
+[    0.229137]  regmap_spmi_ext_read+0xa4/0xd8
+[    0.229152]  _regmap_raw_read+0x18c/0x1e0
+[    0.229165]  _regmap_bus_read+0x44/0x7c
+[    0.229174]  _regmap_read+0x164/0x188
+[    0.229185]  regmap_read+0x5c/0x84
+[    0.229196]  pmic_spmi_probe+0x120/0x2e4
+[    0.229207]  spmi_drv_probe+0x48/0xec
+[    0.229219]  really_probe+0x144/0x2e8
+[    0.229233]  __driver_probe_device+0xcc/0x12c
+[    0.229247]  driver_probe_device+0x3c/0x1ec
+[    0.229260]  __device_attach_driver+0x12c/0x178
+[    0.229275]  bus_for_each_drv+0xf4/0x14c
+[    0.229286]  __device_attach+0xfc/0x18c
+[    0.229299]  device_initial_probe+0x38/0x54
+[    0.229312]  bus_probe_device+0x8c/0xf8
+[    0.229324]  device_add+0x228/0x3fc
+[    0.229335]  spmi_controller_add+0x180/0x208
+[    0.229346]  devm_spmi_controller_add+0x4c/0x94
+[    0.229357]  spmi_pmic_arb_bus_init+0x228/0x278
+[    0.229370]  spmi_pmic_arb_register_buses+0x48/0xcc
+[    0.229383]  spmi_pmic_arb_probe+0x1e8/0x23c
+[    0.229395]  platform_probe+0x5c/0x9c
+[    0.229404]  really_probe+0x144/0x2e8
+[    0.229418]  __driver_probe_device+0xcc/0x12c
+[    0.229431]  driver_probe_device+0x3c/0x1ec
+[    0.229443]  __driver_attach+0xe4/0x1d0
+[    0.229456]  bus_for_each_dev+0xec/0x144
+[    0.229468]  driver_attach+0x24/0x30
+[    0.229480]  bus_add_driver+0x148/0x268
+[    0.229492]  driver_register+0x68/0x100
+[    0.229505]  __platform_driver_register+0x24/0x30
+[    0.229516]  spmi_pmic_arb_driver_init+0x24/0x30
+[    0.229531]  do_one_initcall+0xe0/0x20c
+[    0.229543]  do_initcall_level+0xa0/0xd4
+[    0.229559]  do_initcalls+0x54/0x94
+[    0.229572]  do_basic_setup+0x20/0x2c
+[    0.229585]  kernel_init_freeable+0xcc/0x154
+[    0.229599]  kernel_init+0x20/0x128
+[    0.229612]  ret_from_fork+0x10/0x20
+[    0.229623] ---[ end trace 0000000000000000 ]---
+[    0.229645] pmic-spmi 0-0a: probe with driver pmic-spmi failed with error -5
+[    0.229751] spmi spmi-0: pmic_arb_check_chnl_status_v1: 0xb 0x104: transaction failed (0x3) reg: 0xa688
+[    0.229783] ------------[ cut here ]------------
+[    0.229791] WARNING: drivers/spmi/spmi-pmic-arb.c:316 at pmic_arb_check_chnl_status_v1+0x64/0xc4, CPU#7: swapper/0/1
+[    0.229808] Modules linked in:
+[    0.229818] CPU: 7 UID: 0 PID: 1 Comm: swapper/0 Tainted: G        W           7.2.0-dirty #95 PREEMPT 
+[    0.229832] Tainted: [W]=WARN
+[    0.229838] Hardware name: Samsung Galaxy Tab S7 (DT)
+[    0.229846] pstate: 604000c5 (nZCv daIF +PAN -UAO -TCO -DIT -SSBS BTYPE=--)
+[    0.229856] pc : pmic_arb_check_chnl_status_v1+0x64/0xc4
+[    0.229868] lr : pmic_arb_check_chnl_status_v1+0x64/0xc4
+[    0.229879] sp : ffff800082c7b330
+[    0.229886] x29: ffff800082c7b330 x28: ffff00008cfd7280 x27: 000000000000a688
+[    0.229900] x26: 0000000000000003 x25: ffff00008db92f40 x24: 000000000000000b
+[    0.229913] x23: 0000000000000104 x22: ffff00008db92c00 x21: 00000000fffffc1a
+[    0.229926] x20: ffff800083e0a688 x19: ffff00008cfd7280 x18: 0000000000000c00
+[    0.229939] x17: 3020627830203a31 x16: 765f737574617473 x15: 0000000000000003
+[    0.229952] x14: ffff80008266c950 x13: 0000000000000fff x12: 0000000000000003
+[    0.229964] x11: 0000000000000003 x10: 0000000000000002 x9 : 37e430674c19cd00
+[    0.229977] x8 : 37e430674c19cd00 x7 : 73205d3135373932 x6 : 322e30202020205b
+[    0.229990] x5 : ffff00001f2319aa x4 : 736e617274203a34 x3 : 0000000000000000
+[    0.230002] x2 : 0000000000000000 x1 : ffff800082c7b060 x0 : 000000000000005b
+[    0.230015] Call trace:
+[    0.230021]  pmic_arb_check_chnl_status_v1+0x64/0xc4 (P)
+[    0.230034]  pmic_arb_read_cmd_unlocked+0xc0/0x1c0
+[    0.230047]  pmic_arb_read_cmd+0xf8/0x154
+[    0.230060]  spmi_ext_register_readl+0x64/0x70
+[    0.230071]  regmap_spmi_ext_read+0xa4/0xd8
+[    0.230084]  _regmap_raw_read+0x18c/0x1e0
+[    0.230095]  _regmap_bus_read+0x44/0x7c
+[    0.230104]  _regmap_read+0x164/0x188
+[    0.230115]  regmap_read+0x5c/0x84
+[    0.230125]  pmic_spmi_probe+0x120/0x2e4
+[    0.230135]  spmi_drv_probe+0x48/0xec
+[    0.230146]  really_probe+0x144/0x2e8
+[    0.230159]  __driver_probe_device+0xcc/0x12c
+[    0.230171]  driver_probe_device+0x3c/0x1ec
+[    0.230185]  __device_attach_driver+0x12c/0x178
+[    0.230198]  bus_for_each_drv+0xf4/0x14c
+[    0.230210]  __device_attach+0xfc/0x18c
+[    0.230222]  device_initial_probe+0x38/0x54
+[    0.230236]  bus_probe_device+0x8c/0xf8
+[    0.230247]  device_add+0x228/0x3fc
+[    0.230257]  spmi_controller_add+0x180/0x208
+[    0.230268]  devm_spmi_controller_add+0x4c/0x94
+[    0.230280]  spmi_pmic_arb_bus_init+0x228/0x278
+[    0.230292]  spmi_pmic_arb_register_buses+0x48/0xcc
+[    0.230303]  spmi_pmic_arb_probe+0x1e8/0x23c
+[    0.230315]  platform_probe+0x5c/0x9c
+[    0.230324]  really_probe+0x144/0x2e8
+[    0.230337]  __driver_probe_device+0xcc/0x12c
+[    0.230350]  driver_probe_device+0x3c/0x1ec
+[    0.230363]  __driver_attach+0xe4/0x1d0
+[    0.230375]  bus_for_each_dev+0xec/0x144
+[    0.230386]  driver_attach+0x24/0x30
+[    0.230400]  bus_add_driver+0x148/0x268
+[    0.230411]  driver_register+0x68/0x100
+[    0.230425]  __platform_driver_register+0x24/0x30
+[    0.230435]  spmi_pmic_arb_driver_init+0x24/0x30
+[    0.230447]  do_one_initcall+0xe0/0x20c
+[    0.230456]  do_initcall_level+0xa0/0xd4
+[    0.230470]  do_initcalls+0x54/0x94
+[    0.230484]  do_basic_setup+0x20/0x2c
+[    0.230497]  kernel_init_freeable+0xcc/0x154
+[    0.230511]  kernel_init+0x20/0x128
+[    0.230522]  ret_from_fork+0x10/0x20
+[    0.230531] ---[ end trace 0000000000000000 ]---
+[    0.230541] pmic-spmi 0-0b: probe with driver pmic-spmi failed with error -5
+[    0.232201] tun: Universal TUN/TAP device driver, 1.6
+[    0.233247] VFIO - User Level meta-driver version: 0.3
+[    0.238422] usbcore: registered new interface driver usb-storage
+[    0.248802] i2c_dev: i2c /dev entries driver
+[    0.253848] input: pm8941_pwrkey as /devices/platform/soc@0/c440000.spmi/spmi-0/0-00/c440000.spmi:pmic@0:pon@800/c440000.spmi:pmic@0:pon@800:pwrkey/input/input0
+[    0.255170] input: pm8941_resin as /devices/platform/soc@0/c440000.spmi/spmi-0/0-00/c440000.spmi:pmic@0:pon@800/c440000.spmi:pmic@0:pon@800:resin/input/input1
+[    0.268572] Bluetooth: HCI UART driver ver 2.3
+[    0.268589] Bluetooth: HCI UART protocol H4 registered
+[    0.268610] Bluetooth: HCI UART protocol LL registered
+[    0.268730] Bluetooth: HCI UART protocol Broadcom registered
+[    0.268749] Bluetooth: HCI UART protocol QCA registered
+[    0.268767] Bluetooth: HCI UART protocol Marvell registered
+[    0.279881] clocksource: arch_mmio_counter: mask: 0xffffffffffffff max_cycles: 0x46d987e47, max_idle_ns: 440795202767 ns
+[    0.279902] arch-timer-mmio 17c20000.timer: mmio timer running at 19.20MHz (virt)
+[    0.280231] hid: raw HID events driver (C) Jiri Kosina
+[    0.280458] usbcore: registered new interface driver usbhid
+[    0.280470] usbhid: USB HID core driver
+[    0.286317] hw perfevents: enabled with armv8_pmuv3 PMU driver, 7 (0,8000003f) counters available
+[    0.298305] NET: Registered PF_INET6 protocol family
+[    0.299029] Segment Routing with IPv6
+[    0.299060] In-situ OAM (IOAM) with IPv6
+[    0.299109] NET: Registered PF_PACKET protocol family
+[    0.299163] Key type dns_resolver registered
+[    0.318469] registered taskstats version 1
+[    0.318581] Loading compiled-in X.509 certificates
+[    0.323758] Demotion targets for Node 0: null
+[    0.337163] cpu cpu0: EM: created perf domain
+[    0.350982] cpu cpu4: EM: created perf domain
+[    0.369676] cpu cpu7: EM: created perf domain
+[    0.388874] qcom-pcie 1c00000.pcie: supply vdda not found, using dummy regulator
+[    0.389224] qcom-pcie 1c00000.pcie: supply vddpe-3v3 not found, using dummy regulator
+[    0.389387] geni_i2c 88c000.i2c: Bus frequency not specified, default to 100kHz.
+[    0.389809] qcom-pcie 1c00000.pcie: host bridge /soc@0/pcie@1c00000 ranges:
+[    0.389937] qcom-pcie 1c00000.pcie:       IO 0x0060200000..0x00602fffff -> 0x0000000000
+[    0.390035] qcom-pcie 1c00000.pcie:      MEM 0x0060300000..0x0063ffffff -> 0x0060300000
+[    0.898338] wacom_w9000 17-0056: wacom_w9000_read: i2c transfer failed: -6 (-6)
+[    0.922724] wacom_w9000 17-0056: wacom_w9000_read: i2c transfer failed: -6 (-6)
+[    0.945565] wacom_w9000 17-0056: wacom_w9000_read: i2c transfer failed: -6 (-6)
+[    0.969800] wacom_w9000 17-0056: wacom_w9000_read: i2c transfer failed: -6 (-6)
+[    0.993784] wacom_w9000 17-0056: wacom_w9000_read: i2c transfer failed: -6 (-6)
+[    1.017634] wacom_w9000 17-0056: wacom_w9000_read: i2c transfer failed: -6 (-6)
+[    1.042092] wacom_w9000 17-0056: wacom_w9000_read: i2c transfer failed: -6 (-6)
+[    1.065906] wacom_w9000 17-0056: wacom_w9000_read: i2c transfer failed: -6 (-6)
+[    1.066036] wacom_w9000 17-0056: error -ENXIO: Failed to query
+[    1.071491] geni_i2c 980000.i2c: Bus frequency not specified, default to 100kHz.
+[    1.074826] max77705-rgb: Failed to locate of_node [id: -1]
+[    1.075179] max77705-charger: Failed to locate of_node [id: -1]
+[    1.075514] max77705-haptic: Failed to locate of_node [id: -1]
+[    1.086128] max77705-charger 0-0069: missing battery:voltage-max-design-microvolt
+[    1.102523] geni_i2c 994000.i2c: Bus frequency not specified, default to 100kHz.
+[    1.104871] nt36523-gts7l 5-0062: chip is in a CRC fail auto-reboot loop, stopping it
+[    1.106753] gpi 900000.dma-controller: Error in Transaction
+[    1.106774] geni_i2c 994000.i2c: DMA txn failed:3
+[    1.106798] geni_i2c 994000.i2c: GPI transfer failed: -5
+[    1.107489] gpi 900000.dma-controller: Error in Transaction
+[    1.107506] geni_i2c 994000.i2c: DMA txn failed:3
+[    1.107526] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   11.105172] random: crng init done
+[   38.858547] input: Novatek NT36523 Touchscreen as /devices/platform/soc@0/9c0000.geniqup/994000.i2c/i2c-5/5-0062/input/input2
+[   38.866189] 998000.serial: ttyHS0 at MMIO 0x998000 (irq = 169, base_baud = 0) is a MSM
+[   38.867610] serial serial0: tty port ttyHS0 registered
+[   38.871493] geni_i2c a80000.i2c: Bus frequency not specified, default to 100kHz.
+[   38.901347] qcom-rpmh-regulator 18200000.rsc:regulators-2: smps1: could not find RPMh address for resource smpf1
+[   38.926172] /soc@0/display-subsystem@ae00000/display-controller@ae01000: Fixed dependency cycle(s) with /soc@0/display-subsystem@ae00000/dsi@ae96000
+[   38.926272] /soc@0/display-subsystem@ae00000/display-controller@ae01000: Fixed dependency cycle(s) with /soc@0/display-subsystem@ae00000/dsi@ae94000
+[   38.929129] /soc@0/display-subsystem@ae00000/display-controller@ae01000: Fixed dependency cycle(s) with /soc@0/display-subsystem@ae00000/dsi@ae94000
+[   38.929367] /soc@0/display-subsystem@ae00000/dsi@ae94000: Fixed dependency cycle(s) with /soc@0/display-subsystem@ae00000/dsi@ae94000/panel@0
+[   38.929456] /soc@0/display-subsystem@ae00000/dsi@ae94000: Fixed dependency cycle(s) with /soc@0/display-subsystem@ae00000/display-controller@ae01000
+[   38.930054] /soc@0/display-subsystem@ae00000/dsi@ae94000/panel@0: Fixed dependency cycle(s) with /soc@0/display-subsystem@ae00000/dsi@ae96000
+[   38.930206] /soc@0/display-subsystem@ae00000/dsi@ae94000/panel@0: Fixed dependency cycle(s) with /soc@0/display-subsystem@ae00000/dsi@ae94000
+[   38.942318] DSI PLL(0) lock failed, status=0x00000000
+[   38.942355] PLL(0) lock failed
+[   38.942391] ------------[ cut here ]------------
+[   38.942419] dsi0_phy_pll_out_dsiclk already disabled
+[   38.942532] WARNING: drivers/clk/clk.c:1188 at clk_core_disable+0x80/0xa0, CPU#1: kworker/u32:0/12
+[   38.942593] Modules linked in:
+[   38.942635] CPU: 1 UID: 0 PID: 12 Comm: kworker/u32:0 Tainted: G        W           7.2.0-dirty #95 PREEMPT 
+[   38.942682] Tainted: [W]=WARN
+[   38.942706] Hardware name: Samsung Galaxy Tab S7 (DT)
+[   38.942734] Workqueue: events_unbound deferred_probe_work_func
+[   38.942785] pstate: 604000c5 (nZCv daIF +PAN -UAO -TCO -DIT -SSBS BTYPE=--)
+[   38.942820] pc : clk_core_disable+0x80/0xa0
+[   38.942854] lr : clk_core_disable+0x80/0xa0
+[   38.942887] sp : ffff800082ceb600
+[   38.942912] x29: ffff800082ceb600 x28: 000000007fffffff x27: ffff800082636000
+[   38.942957] x26: ffff00008b047e88 x25: 0000000000000000 x24: ffff00017f4b8ea0
+[   38.942977] x23: ffff00008b210000 x22: ffff800082bce000 x21: ffff800082bce000
+[   38.942997] x20: ffff00008e4fba00 x19: 0000000000000000 x18: ffff8000834d0d00
+[   38.943017] x17: 0000000000000000 x16: 69665f666f00746e x15: 0000000000000003
+[   38.943037] x14: ffff80008266c950 x13: 0000000000000fff x12: 0000000000000003
+[   38.943058] x11: 0000000000000003 x10: 0000000000000002 x9 : 93981d073a335d00
+[   38.943078] x8 : 93981d073a335d00 x7 : 64205d3931343234 x6 : 392e38332020205b
+[   38.943097] x5 : ffff00001f233e51 x4 : ffff800082ba05a9 x3 : 0000000000000000
+[   38.943117] x2 : 0000000000000000 x1 : ffff800082ceb3d0 x0 : 0000000000000028
+[   38.943139] Call trace:
+[   38.943151]  clk_core_disable+0x80/0xa0 (P)
+[   38.943169]  clk_core_disable_lock+0x88/0x10c
+[   38.943185]  __clk_set_parent_after+0x50/0x7c
+[   38.943203]  clk_core_reparent_orphans_nolock+0x84/0xc4
+[   38.943222]  clk_core_reparent_orphans+0x6c/0xe8
+[   38.943237]  of_clk_add_hw_provider+0x88/0x100
+[   38.943254]  devm_of_clk_add_hw_provider+0xb0/0xf4
+[   38.943270]  dsi_phy_driver_probe+0x2f0/0x31c
+[   38.943289]  platform_probe+0x5c/0x9c
+[   38.943305]  really_probe+0x144/0x2e8
+[   38.943320]  __driver_probe_device+0xcc/0x12c
+[   38.943336]  driver_probe_device+0x3c/0x1ec
+[   38.943352]  __device_attach_driver+0x12c/0x178
+[   38.943368]  bus_for_each_drv+0xf4/0x14c
+[   38.943383]  __device_attach+0xfc/0x18c
+[   38.943399]  device_initial_probe+0x38/0x54
+[   38.943414]  bus_probe_device+0x8c/0xf8
+[   38.943430]  device_add+0x228/0x3fc
+[   38.943447]  of_platform_device_create_pdata+0xc4/0x148
+[   38.943468]  of_platform_bus_create+0x1e0/0x36c
+[   38.943485]  of_platform_populate+0x64/0xec
+[   38.943501]  mdss_probe+0x138/0x3c0
+[   38.943518]  platform_probe+0x5c/0x9c
+[   38.943533]  really_probe+0x144/0x2e8
+[   38.943548]  __driver_probe_device+0xcc/0x12c
+[   38.943564]  driver_probe_device+0x3c/0x1ec
+[   38.943581]  __device_attach_driver+0x12c/0x178
+[   38.943598]  bus_for_each_drv+0xf4/0x14c
+[   38.943614]  __device_attach+0xfc/0x18c
+[   38.943630]  device_initial_probe+0x38/0x54
+[   38.943647]  bus_probe_device+0x8c/0xf8
+[   38.943662]  deferred_probe_work_func+0x88/0xc4
+[   38.943679]  process_scheduled_works+0x178/0x2c8
+[   38.943699]  worker_thread+0x2b0/0x3dc
+[   38.943717]  kthread+0x10c/0x12c
+[   38.943734]  ret_from_fork+0x10/0x20
+[   38.943754] ---[ end trace 0000000000000000 ]---
+[   38.943769] ------------[ cut here ]------------
+[   38.943781] dsi0_phy_pll_out_dsiclk already unprepared
+[   38.943825] WARNING: drivers/clk/clk.c:1048 at clk_core_unprepare+0xb0/0xe8, CPU#1: kworker/u32:0/12
+[   38.943847] Modules linked in:
+[   38.943860] CPU: 1 UID: 0 PID: 12 Comm: kworker/u32:0 Tainted: G        W           7.2.0-dirty #95 PREEMPT 
+[   38.943881] Tainted: [W]=WARN
+[   38.943892] Hardware name: Samsung Galaxy Tab S7 (DT)
+[   38.943904] Workqueue: events_unbound deferred_probe_work_func
+[   38.943923] pstate: 60400005 (nZCv daif +PAN -UAO -TCO -DIT -SSBS BTYPE=--)
+[   38.943939] pc : clk_core_unprepare+0xb0/0xe8
+[   38.943954] lr : clk_core_unprepare+0xb0/0xe8
+[   38.943968] sp : ffff800082ceb610
+[   38.943980] x29: ffff800082ceb610 x28: 000000007fffffff x27: ffff800082636000
+[   38.944004] x26: ffff00008b047e88 x25: 0000000000000000 x24: ffff00017f4b8ea0
+[   38.944026] x23: ffff00017f4bfed0 x22: ffff00008b210000 x21: ffff800082bce000
+[   38.944049] x20: ffff800082bce000 x19: ffff00008e4fba00 x18: ffff8000834d0d00
+[   38.944072] x17: 0000000000000000 x16: 69665f666f00746e x15: 0000000000000003
+[   38.944093] x14: ffff80008266c950 x13: 0000000000000fff x12: 0000000000000003
+[   38.944115] x11: 0000000000000003 x10: 0000000000000002 x9 : 93981d073a335d00
+[   38.944136] x8 : 93981d073a335d00 x7 : 64205d3138373334 x6 : 392e38332020205b
+[   38.944158] x5 : ffff00001f234b2b x4 : ffff800082ba05ab x3 : 0000000000000000
+[   38.944179] x2 : 0000000000000000 x1 : ffff800082ceb3e0 x0 : 000000000000002a
+[   38.944200] Call trace:
+[   38.944211]  clk_core_unprepare+0xb0/0xe8 (P)
+[   38.944227]  clk_core_unprepare_lock+0x74/0xf0
+[   38.944243]  __clk_set_parent_after+0x58/0x7c
+[   38.944258]  clk_core_reparent_orphans_nolock+0x84/0xc4
+[   38.944275]  clk_core_reparent_orphans+0x6c/0xe8
+[   38.944291]  of_clk_add_hw_provider+0x88/0x100
+[   38.944308]  devm_of_clk_add_hw_provider+0xb0/0xf4
+[   38.944324]  dsi_phy_driver_probe+0x2f0/0x31c
+[   38.944340]  platform_probe+0x5c/0x9c
+[   38.944354]  really_probe+0x144/0x2e8
+[   38.944370]  __driver_probe_device+0xcc/0x12c
+[   38.944386]  driver_probe_device+0x3c/0x1ec
+[   38.944403]  __device_attach_driver+0x12c/0x178
+[   38.944419]  bus_for_each_drv+0xf4/0x14c
+[   38.944436]  __device_attach+0xfc/0x18c
+[   38.944451]  device_initial_probe+0x38/0x54
+[   38.944467]  bus_probe_device+0x8c/0xf8
+[   38.944482]  device_add+0x228/0x3fc
+[   38.944497]  of_platform_device_create_pdata+0xc4/0x148
+[   38.944514]  of_platform_bus_create+0x1e0/0x36c
+[   38.944530]  of_platform_populate+0x64/0xec
+[   38.944546]  mdss_probe+0x138/0x3c0
+[   38.944562]  platform_probe+0x5c/0x9c
+[   38.944576]  really_probe+0x144/0x2e8
+[   38.944592]  __driver_probe_device+0xcc/0x12c
+[   38.944608]  driver_probe_device+0x3c/0x1ec
+[   38.944625]  __device_attach_driver+0x12c/0x178
+[   38.944642]  bus_for_each_drv+0xf4/0x14c
+[   38.944658]  __device_attach+0xfc/0x18c
+[   38.944674]  device_initial_probe+0x38/0x54
+[   38.944691]  bus_probe_device+0x8c/0xf8
+[   38.944707]  deferred_probe_work_func+0x88/0xc4
+[   38.944724]  process_scheduled_works+0x178/0x2c8
+[   38.944741]  worker_thread+0x2b0/0x3dc
+[   38.944757]  kthread+0x10c/0x12c
+[   38.944773]  ret_from_fork+0x10/0x20
+[   38.944788] ---[ end trace 0000000000000000 ]---
+[   38.949909] DSI PLL(0) lock failed, status=0x00000000
+[   38.949926] PLL(0) lock failed
+[   38.949941] ------------[ cut here ]------------
+[   38.949953] dsi0_phy_pll_out_dsiclk already disabled
+[   38.949996] WARNING: drivers/clk/clk.c:1188 at clk_core_disable+0x80/0xa0, CPU#1: kworker/u32:0/12
+[   38.950018] Modules linked in:
+[   38.950033] CPU: 1 UID: 0 PID: 12 Comm: kworker/u32:0 Tainted: G        W           7.2.0-dirty #95 PREEMPT 
+[   38.950052] Tainted: [W]=WARN
+[   38.950063] Hardware name: Samsung Galaxy Tab S7 (DT)
+[   38.950078] Workqueue: events_unbound deferred_probe_work_func
+[   38.950097] pstate: 604000c5 (nZCv daIF +PAN -UAO -TCO -DIT -SSBS BTYPE=--)
+[   38.950113] pc : clk_core_disable+0x80/0xa0
+[   38.950128] lr : clk_core_disable+0x80/0xa0
+[   38.950143] sp : ffff800082ceb600
+[   38.950155] x29: ffff800082ceb600 x28: 000000007fffffff x27: ffff800082636000
+[   38.950178] x26: ffff00008b047e88 x25: 0000000000000000 x24: ffff00017f4b8ea0
+[   38.950200] x23: ffff00008b210000 x22: ffff800082bce000 x21: ffff800082bce000
+[   38.950223] x20: ffff00008e4fba00 x19: 0000000000000000 x18: ffff8000834d0d00
+[   38.950245] x17: 0000000000000000 x16: 69665f666f00746e x15: 0000000000000003
+[   38.950266] x14: ffff80008266c950 x13: 0000000000000fff x12: 0000000000000003
+[   38.950287] x11: 0000000000000003 x10: 0000000000000002 x9 : 93981d073a335d00
+[   38.950309] x8 : 93981d073a335d00 x7 : 64205d3335393934 x6 : 392e38332020205b
+[   38.950330] x5 : ffff00001f235867 x4 : ffff800082ba05a9 x3 : 0000000000000000
+[   38.950351] x2 : 0000000000000000 x1 : ffff800082ceb3d0 x0 : 0000000000000028
+[   38.950372] Call trace:
+[   38.950384]  clk_core_disable+0x80/0xa0 (P)
+[   38.950400]  clk_core_disable_lock+0x88/0x10c
+[   38.950415]  __clk_set_parent_after+0x50/0x7c
+[   38.950431]  clk_core_reparent_orphans_nolock+0x84/0xc4
+[   38.950448]  clk_core_reparent_orphans+0x6c/0xe8
+[   38.950464]  of_clk_add_hw_provider+0x88/0x100
+[   38.950479]  devm_of_clk_add_hw_provider+0xb0/0xf4
+[   38.950495]  dsi_phy_driver_probe+0x2f0/0x31c
+[   38.950511]  platform_probe+0x5c/0x9c
+[   38.950526]  really_probe+0x144/0x2e8
+[   38.950542]  __driver_probe_device+0xcc/0x12c
+[   38.950558]  driver_probe_device+0x3c/0x1ec
+[   38.950574]  __device_attach_driver+0x12c/0x178
+[   38.950590]  bus_for_each_drv+0xf4/0x14c
+[   38.950606]  __device_attach+0xfc/0x18c
+[   38.950621]  device_initial_probe+0x38/0x54
+[   38.950637]  bus_probe_device+0x8c/0xf8
+[   38.950653]  device_add+0x228/0x3fc
+[   38.950666]  of_platform_device_create_pdata+0xc4/0x148
+[   38.950683]  of_platform_bus_create+0x1e0/0x36c
+[   38.950700]  of_platform_populate+0x64/0xec
+[   38.950717]  mdss_probe+0x138/0x3c0
+[   38.950732]  platform_probe+0x5c/0x9c
+[   38.950747]  really_probe+0x144/0x2e8
+[   38.950764]  __driver_probe_device+0xcc/0x12c
+[   38.950781]  driver_probe_device+0x3c/0x1ec
+[   38.950797]  __device_attach_driver+0x12c/0x178
+[   38.950814]  bus_for_each_drv+0xf4/0x14c
+[   38.950829]  __device_attach+0xfc/0x18c
+[   38.950845]  device_initial_probe+0x38/0x54
+[   38.950862]  bus_probe_device+0x8c/0xf8
+[   38.950878]  deferred_probe_work_func+0x88/0xc4
+[   38.950895]  process_scheduled_works+0x178/0x2c8
+[   38.950912]  worker_thread+0x2b0/0x3dc
+[   38.950928]  kthread+0x10c/0x12c
+[   38.950943]  ret_from_fork+0x10/0x20
+[   38.950958] ---[ end trace 0000000000000000 ]---
+[   38.950971] ------------[ cut here ]------------
+[   38.950983] dsi0_phy_pll_out_dsiclk already unprepared
+[   38.951028] WARNING: drivers/clk/clk.c:1048 at clk_core_unprepare+0xb0/0xe8, CPU#1: kworker/u32:0/12
+[   38.951051] Modules linked in:
+[   38.951066] CPU: 1 UID: 0 PID: 12 Comm: kworker/u32:0 Tainted: G        W           7.2.0-dirty #95 PREEMPT 
+[   38.951086] Tainted: [W]=WARN
+[   38.951098] Hardware name: Samsung Galaxy Tab S7 (DT)
+[   38.951111] Workqueue: events_unbound deferred_probe_work_func
+[   38.951130] pstate: 60400005 (nZCv daif +PAN -UAO -TCO -DIT -SSBS BTYPE=--)
+[   38.951146] pc : clk_core_unprepare+0xb0/0xe8
+[   38.951162] lr : clk_core_unprepare+0xb0/0xe8
+[   38.951179] sp : ffff800082ceb610
+[   38.951190] x29: ffff800082ceb610 x28: 000000007fffffff x27: ffff800082636000
+[   38.951213] x26: ffff00008b047e88 x25: 0000000000000000 x24: ffff00017f4b8ea0
+[   38.951234] x23: ffff00017f4bfed0 x22: ffff00008b210000 x21: ffff800082bce000
+[   38.951256] x20: ffff800082bce000 x19: ffff00008e4fba00 x18: ffff8000834d0d00
+[   38.951277] x17: 0000000000000000 x16: 69665f666f00746e x15: 0000000000000003
+[   38.951298] x14: ffff80008266c950 x13: 0000000000000fff x12: 0000000000000003
+[   38.951319] x11: 0000000000000003 x10: 0000000000000002 x9 : 93981d073a335d00
+[   38.951340] x8 : 93981d073a335d00 x7 : 64205d3338393035 x6 : 392e38332020205b
+[   38.951362] x5 : ffff00001f236541 x4 : ffff800082ba05ab x3 : 0000000000000000
+[   38.951384] x2 : 0000000000000000 x1 : ffff800082ceb3e0 x0 : 000000000000002a
+[   38.951405] Call trace:
+[   38.951416]  clk_core_unprepare+0xb0/0xe8 (P)
+[   38.951432]  clk_core_unprepare_lock+0x74/0xf0
+[   38.951446]  __clk_set_parent_after+0x58/0x7c
+[   38.951461]  clk_core_reparent_orphans_nolock+0x84/0xc4
+[   38.951478]  clk_core_reparent_orphans+0x6c/0xe8
+[   38.951493]  of_clk_add_hw_provider+0x88/0x100
+[   38.951508]  devm_of_clk_add_hw_provider+0xb0/0xf4
+[   38.951524]  dsi_phy_driver_probe+0x2f0/0x31c
+[   38.951540]  platform_probe+0x5c/0x9c
+[   38.951554]  really_probe+0x144/0x2e8
+[   38.951570]  __driver_probe_device+0xcc/0x12c
+[   38.951587]  driver_probe_device+0x3c/0x1ec
+[   38.951604]  __device_attach_driver+0x12c/0x178
+[   38.951621]  bus_for_each_drv+0xf4/0x14c
+[   38.951636]  __device_attach+0xfc/0x18c
+[   38.951652]  device_initial_probe+0x38/0x54
+[   38.951668]  bus_probe_device+0x8c/0xf8
+[   38.951684]  device_add+0x228/0x3fc
+[   38.951698]  of_platform_device_create_pdata+0xc4/0x148
+[   38.951716]  of_platform_bus_create+0x1e0/0x36c
+[   38.951733]  of_platform_populate+0x64/0xec
+[   38.951750]  mdss_probe+0x138/0x3c0
+[   38.951766]  platform_probe+0x5c/0x9c
+[   38.951780]  really_probe+0x144/0x2e8
+[   38.951796]  __driver_probe_device+0xcc/0x12c
+[   38.951813]  driver_probe_device+0x3c/0x1ec
+[   38.951830]  __device_attach_driver+0x12c/0x178
+[   38.951846]  bus_for_each_drv+0xf4/0x14c
+[   38.951862]  __device_attach+0xfc/0x18c
+[   38.951878]  device_initial_probe+0x38/0x54
+[   38.951894]  bus_probe_device+0x8c/0xf8
+[   38.951909]  deferred_probe_work_func+0x88/0xc4
+[   38.951926]  process_scheduled_works+0x178/0x2c8
+[   38.951943]  worker_thread+0x2b0/0x3dc
+[   38.951959]  kthread+0x10c/0x12c
+[   38.951974]  ret_from_fork+0x10/0x20
+[   38.951991] ---[ end trace 0000000000000000 ]---
+[   38.952555] /soc@0/display-subsystem@ae00000/dsi@ae94000/panel@0: Fixed dependency cycle(s) with /soc@0/display-subsystem@ae00000/dsi@ae96000
+[   38.952768] /soc@0/display-subsystem@ae00000/display-controller@ae01000: Fixed dependency cycle(s) with /soc@0/display-subsystem@ae00000/dsi@ae96000
+[   38.952976] /soc@0/display-subsystem@ae00000/dsi@ae96000: Fixed dependency cycle(s) with /soc@0/display-subsystem@ae00000/dsi@ae94000/panel@0
+[   38.953043] /soc@0/display-subsystem@ae00000/dsi@ae96000: Fixed dependency cycle(s) with /soc@0/display-subsystem@ae00000/display-controller@ae01000
+[   38.967370] platform a600000.usb: Adding to iommu group 10
+[   39.027783] ufshcd-qcom 1d84000.ufshc: freq-table-hz property not specified
+[   39.027804] ufshcd-qcom 1d84000.ufshc: ufshcd_populate_vreg: Unable to find vdd-hba-supply regulator, assuming enabled
+[   39.030697] ufshcd-qcom 1d84000.ufshc: Disabling inline encryption support
+[   39.038574] scsi host0: ufshcd
+[   39.131296] scsi 0:0:0:49488: Well-known LUN    SAMSUNG  KLUDG4UHDB-B2D1  0090 PQ: 0 ANSI: 6
+[   39.132098] qcom-pcie 1c00000.pcie: supply vdda not found, using dummy regulator
+[   39.132219] qcom-pcie 1c00000.pcie: supply vddpe-3v3 not found, using dummy regulator
+[   39.132599] qcom-pcie 1c00000.pcie: host bridge /soc@0/pcie@1c00000 ranges:
+[   39.132655] qcom-pcie 1c00000.pcie:       IO 0x0060200000..0x00602fffff -> 0x0000000000
+[   39.132726] qcom-pcie 1c00000.pcie:      MEM 0x0060300000..0x0063ffffff -> 0x0060300000
+[   39.132799] Bluetooth: hci0: setting up ROME/QCA6390
+[   39.135379] scsi 0:0:0:49476: Well-known LUN    SAMSUNG  KLUDG4UHDB-B2D1  0090 PQ: 0 ANSI: 6
+[   39.137558] scsi 0:0:0:49456: Well-known LUN    SAMSUNG  KLUDG4UHDB-B2D1  0090 PQ: 0 ANSI: 6
+[   39.139352] scsi 0:0:0:0: Direct-Access     SAMSUNG  KLUDG4UHDB-B2D1  0090 PQ: 0 ANSI: 6
+[   39.140865] msm_dpu ae01000.display-controller: bound ae94000.dsi (ops dsi_ops)
+[   39.140891] msm_dpu ae01000.display-controller: bound ae96000.dsi (ops dsi_ops)
+[   39.141036] scsi 0:0:0:1: Direct-Access     SAMSUNG  KLUDG4UHDB-B2D1  0090 PQ: 0 ANSI: 6
+[   39.141937] sd 0:0:0:0: [sda] 31218688 4096-byte logical blocks: (128 GB/119 GiB)
+[   39.142066] sd 0:0:0:0: [sda] Write Protect is off
+[   39.142090] sd 0:0:0:0: [sda] Mode Sense: 00 32 00 10
+[   39.142300] sd 0:0:0:0: [sda] Write cache: enabled, read cache: enabled, supports DPO and FUA
+[   39.142387] sd 0:0:0:0: [sda] Preferred minimum I/O size 524288 bytes
+[   39.142411] sd 0:0:0:0: [sda] Optimal transfer size 524288 bytes
+[   39.142526] adreno 3d00000.gpu: supply vdd not found, using dummy regulator
+[   39.142634] adreno 3d00000.gpu: supply vddcx not found, using dummy regulator
+[   39.143119] scsi 0:0:0:2: Direct-Access     SAMSUNG  KLUDG4UHDB-B2D1  0090 PQ: 0 ANSI: 6
+[   39.144428] sd 0:0:0:1: [sdb] 2048 4096-byte logical blocks: (8.39 MB/8.00 MiB)
+[   39.144611] sd 0:0:0:1: [sdb] Write Protect is on
+[   39.144635] sd 0:0:0:1: [sdb] Mode Sense: 00 32 00 90
+[   39.144987] gpi 900000.dma-controller: Error in Transaction
+[   39.144990] sd 0:0:0:1: [sdb] Write cache: disabled, read cache: enabled, supports DPO and FUA
+[   39.145009] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.145025] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.145169] sd 0:0:0:1: [sdb] Preferred minimum I/O size 524288 bytes
+[   39.145201] sd 0:0:0:1: [sdb] Optimal transfer size 524288 bytes
+[   39.147063] nt36523-gts7l 5-0062: failed to read touch report: -5
+[   39.147281] gpi 900000.dma-controller: Error in Transaction
+[   39.147337] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.147403] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.147531] scsi 0:0:0:3: Direct-Access     SAMSUNG  KLUDG4UHDB-B2D1  0090 PQ: 0 ANSI: 6
+[   39.147742] nt36523-gts7l 5-0062: failed to read touch report: -5
+[   39.147940] gpi 900000.dma-controller: Error in Transaction
+[   39.147969] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.148017] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.148205] nt36523-gts7l 5-0062: failed to read touch report: -5
+[   39.148455] gpi 900000.dma-controller: Error in Transaction
+[   39.148472] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.148523] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.148576] sd 0:0:0:2: [sdc] 2048 4096-byte logical blocks: (8.39 MB/8.00 MiB)
+[   39.148651] sd 0:0:0:2: [sdc] Write Protect is on
+[   39.148665] sd 0:0:0:2: [sdc] Mode Sense: 00 32 00 90
+[   39.148794] sd 0:0:0:2: [sdc] Write cache: disabled, read cache: enabled, supports DPO and FUA
+[   39.148860] sd 0:0:0:2: [sdc] Preferred minimum I/O size 524288 bytes
+[   39.148872] sd 0:0:0:2: [sdc] Optimal transfer size 524288 bytes
+[   39.148905] nt36523-gts7l 5-0062: failed to read touch report: -5
+[   39.149146] gpi 900000.dma-controller: Error in Transaction
+[   39.149170] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.149228] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.149436] nt36523-gts7l 5-0062: failed to read touch report: -5
+[   39.149640] gpi 900000.dma-controller: Error in Transaction
+[   39.149663] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.149693] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.149889] nt36523-gts7l 5-0062: failed to read touch report: -5
+[   39.150081] gpi 900000.dma-controller: Error in Transaction
+[   39.150103] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.150141] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.150349] nt36523-gts7l 5-0062: failed to read touch report: -5
+[   39.150525] gpi 900000.dma-controller: Error in Transaction
+[   39.150549] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.150573] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.150761] nt36523-gts7l 5-0062: failed to read touch report: -5
+[   39.151053] gpi 900000.dma-controller: Error in Transaction
+[   39.151082] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.151104] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.151500] nt36523-gts7l 5-0062: failed to read touch report: -5
+[   39.151751] gpi 900000.dma-controller: Error in Transaction
+[   39.151772] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.151802] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.151859] sd 0:0:0:3: [sdd] 15360 4096-byte logical blocks: (62.9 MB/60.0 MiB)
+[   39.151959] sd 0:0:0:3: [sdd] Write Protect is on
+[   39.151987] sd 0:0:0:3: [sdd] Mode Sense: 00 32 00 90
+[   39.152042] nt36523-gts7l 5-0062: failed to read touch report: -5
+[   39.152267] gpi 900000.dma-controller: Error in Transaction
+[   39.152288] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.152324] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.152620] sd 0:0:0:3: [sdd] Write cache: disabled, read cache: enabled, supports DPO and FUA
+[   39.152704] sd 0:0:0:3: [sdd] Preferred minimum I/O size 524288 bytes
+[   39.152722] sd 0:0:0:3: [sdd] Optimal transfer size 524288 bytes
+[   39.152805] gpi 900000.dma-controller: Error in Transaction
+[   39.152823] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.152849] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.153180] gpi 900000.dma-controller: Error in Transaction
+[   39.153198] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.153229] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.153620] gpi 900000.dma-controller: Error in Transaction
+[   39.153643] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.153671] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.154134] gpi 900000.dma-controller: Error in Transaction
+[   39.154157] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.154186] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.154640] gpi 900000.dma-controller: Error in Transaction
+[   39.154656] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.154678] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.155146] gpi 900000.dma-controller: Error in Transaction
+[   39.155164] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.155190] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.155623] gpi 900000.dma-controller: Error in Transaction
+[   39.155646] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.155676] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.156099] gpi 900000.dma-controller: Error in Transaction
+[   39.156123] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.156154] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.156564] gpi 900000.dma-controller: Error in Transaction
+[   39.156582] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.156607] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.157020] gpi 900000.dma-controller: Error in Transaction
+[   39.157038] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.157061] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.157410] gpi 900000.dma-controller: Error in Transaction
+[   39.157429] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.157453] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.157809] gpi 900000.dma-controller: Error in Transaction
+[   39.157831] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.157858] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.158310] gpi 900000.dma-controller: Error in Transaction
+[   39.158331] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.158358] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.158794] gpi 900000.dma-controller: Error in Transaction
+[   39.158812] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.158836] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.159329] gpi 900000.dma-controller: Error in Transaction
+[   39.159347] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.159370] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.159714] gpi 900000.dma-controller: Error in Transaction
+[   39.159736] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.159764] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.160221] gpi 900000.dma-controller: Error in Transaction
+[   39.160243] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.160270] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.160801] gpi 900000.dma-controller: Error in Transaction
+[   39.160819] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.160842] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.161169] gpi 900000.dma-controller: Error in Transaction
+[   39.161187] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.161210] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.161580] gpi 900000.dma-controller: Error in Transaction
+[   39.161615] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.161646] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.162024] gpi 900000.dma-controller: Error in Transaction
+[   39.162045] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.162070] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.162412] gpi 900000.dma-controller: Error in Transaction
+[   39.162431] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.162470] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.162834] gpi 900000.dma-controller: Error in Transaction
+[   39.162853] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.162876] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.163249] gpi 900000.dma-controller: Error in Transaction
+[   39.163267] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.163291] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.163703] gpi 900000.dma-controller: Error in Transaction
+[   39.163745] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.163781] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.164195] gpi 900000.dma-controller: Error in Transaction
+[   39.164220] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.164251] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.164655] gpi 900000.dma-controller: Error in Transaction
+[   39.164682] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.164706] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.165055] gpi 900000.dma-controller: Error in Transaction
+[   39.165082] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.165108] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.165243]  sdb: sdb1 sdb2
+[   39.165431]  sda: sda1 sda2 sda3 sda4 sda5 sda6 sda7 sda8 sda9 sda10 sda11 sda12 sda13 sda14 sda15 sda16 sda17 sda18 sda19 sda20 sda21 sda22 sda23 sda24 sda25 sda26 sda27 sda28 sda29 sda30 sda31 sda32 sda33 sda34 sda35 sda36 sda37
+[   39.165452] gpi 900000.dma-controller: Error in Transaction
+[   39.165477] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.165500] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.165856] gpi 900000.dma-controller: Error in Transaction
+[   39.165871] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.165891] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.166201] gpi 900000.dma-controller: Error in Transaction
+[   39.166215] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.166235] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.166543] gpi 900000.dma-controller: Error in Transaction
+[   39.166558] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.166578] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.166966] gpi 900000.dma-controller: Error in Transaction
+[   39.166989] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.167023] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.167046] sd 0:0:0:1: [sdb] Attached SCSI disk
+[   39.167385] gpi 900000.dma-controller: Error in Transaction
+[   39.167408] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.167437] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.167794] gpi 900000.dma-controller: Error in Transaction
+[   39.167810] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.167830] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.168140] gpi 900000.dma-controller: Error in Transaction
+[   39.168155] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.168175] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.168503] gpi 900000.dma-controller: Error in Transaction
+[   39.168518] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.168538] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.168900] gpi 900000.dma-controller: Error in Transaction
+[   39.168922] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.168951] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.169324] gpi 900000.dma-controller: Error in Transaction
+[   39.169347] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.169375] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.169746] gpi 900000.dma-controller: Error in Transaction
+[   39.169767] sd 0:0:0:0: [sda] Attached SCSI disk
+[   39.169768] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.169793] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.170124] gpi 900000.dma-controller: Error in Transaction
+[   39.170138] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.170158] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.170468] gpi 900000.dma-controller: Error in Transaction
+[   39.170483] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.170502] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.170812] gpi 900000.dma-controller: Error in Transaction
+[   39.170826] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.170847] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.171272] gpi 900000.dma-controller: Error in Transaction
+[   39.171295] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.171323] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.171671] gpi 900000.dma-controller: Error in Transaction
+[   39.171692] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.171720] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.172081] gpi 900000.dma-controller: Error in Transaction
+[   39.172096] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.172116] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.172425] gpi 900000.dma-controller: Error in Transaction
+[   39.172439] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.172459] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.172769] gpi 900000.dma-controller: Error in Transaction
+[   39.172783] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.172803] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.173151] gpi 900000.dma-controller: Error in Transaction
+[   39.173171] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.173197] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.173532] gpi 900000.dma-controller: Error in Transaction
+[   39.173551] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.173576] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.173908] gpi 900000.dma-controller: Error in Transaction
+[   39.173926] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.173959] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.174285] gpi 900000.dma-controller: Error in Transaction
+[   39.174300] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.174320] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.174629] gpi 900000.dma-controller: Error in Transaction
+[   39.174643] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.174663] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.174973] gpi 900000.dma-controller: Error in Transaction
+[   39.174988] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.175008] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.175378] gpi 900000.dma-controller: Error in Transaction
+[   39.175397] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.175423] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.175756] gpi 900000.dma-controller: Error in Transaction
+[   39.175775] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.175800] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.176132] gpi 900000.dma-controller: Error in Transaction
+[   39.176151] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.176183] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.176508] gpi 900000.dma-controller: Error in Transaction
+[   39.176523] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.176542] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.176853] gpi 900000.dma-controller: Error in Transaction
+[   39.176867] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.176887] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.177195] gpi 900000.dma-controller: Error in Transaction
+[   39.177211] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.177233] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.177605] gpi 900000.dma-controller: Error in Transaction
+[   39.177625] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.177652] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.178007] gpi 900000.dma-controller: Error in Transaction
+[   39.178026] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.178052] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.178438] gpi 900000.dma-controller: Error in Transaction
+[   39.178454] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.178488] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.178799] gpi 900000.dma-controller: Error in Transaction
+[   39.178814] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.178834] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.178916]  sdc: sdc1 sdc2
+[   39.179184] gpi 900000.dma-controller: Error in Transaction
+[   39.179203] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.179223] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.179522]  sdd: sdd1 sdd2 sdd3 sdd4 sdd5 sdd6 sdd7 sdd8 sdd9 sdd10 sdd11 sdd12 sdd13 sdd14 sdd15 sdd16 sdd17 sdd18 sdd19 sdd20 sdd21 sdd22 sdd23 sdd24 sdd25 sdd26 sdd27 sdd28 sdd29 sdd30 sdd31 sdd32 sdd33 sdd34 sdd35 sdd36 sdd37
+[   39.179557] sd 0:0:0:2: [sdc] Attached SCSI disk
+[   39.179623] gpi 900000.dma-controller: Error in Transaction
+[   39.179642] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.179667] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.180003] gpi 900000.dma-controller: Error in Transaction
+[   39.180020] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.180045] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.180385] gpi 900000.dma-controller: Error in Transaction
+[   39.180403] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.180435] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.180768] gpi 900000.dma-controller: Error in Transaction
+[   39.180783] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.180803] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.181126] gpi 900000.dma-controller: Error in Transaction
+[   39.181142] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.181165] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.181488] gpi 900000.dma-controller: Error in Transaction
+[   39.181504] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.181526] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.181874] gpi 900000.dma-controller: Error in Transaction
+[   39.181890] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.181911] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.182241] gpi 900000.dma-controller: Error in Transaction
+[   39.182256] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.182277] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.182337] sd 0:0:0:3: [sdd] Attached SCSI disk
+[   39.182604] gpi 900000.dma-controller: Error in Transaction
+[   39.182621] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.182648] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.182982] gpi 900000.dma-controller: Error in Transaction
+[   39.182997] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.183037] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.183183] msm_dpu ae01000.display-controller: bound 3d00000.gpu (ops a3xx_ops)
+[   39.183353] gpi 900000.dma-controller: Error in Transaction
+[   39.183368] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.183388] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.183696] gpi 900000.dma-controller: Error in Transaction
+[   39.183711] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.183732] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.184041] gpi 900000.dma-controller: Error in Transaction
+[   39.184057] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.184079] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.184398] gpi 900000.dma-controller: Error in Transaction
+[   39.184415] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.184437] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.184755] gpi 900000.dma-controller: Error in Transaction
+[   39.184771] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.184796] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.185124] gpi 900000.dma-controller: Error in Transaction
+[   39.185140] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.185170] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.185521] gpi 900000.dma-controller: Error in Transaction
+[   39.185537] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.185557] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.185626] [drm:dpu_kms_hw_init:1168] dpu hardware revision:0x60000000
+[   39.185872] gpi 900000.dma-controller: Error in Transaction
+[   39.185890] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.185911] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.186255] gpi 900000.dma-controller: Error in Transaction
+[   39.186275] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.186301] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.186661] gpi 900000.dma-controller: Error in Transaction
+[   39.186680] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.186705] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.187053] gpi 900000.dma-controller: Error in Transaction
+[   39.187069] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.187090] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.187431] gpi 900000.dma-controller: Error in Transaction
+[   39.187447] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.187468] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.187791] gpi 900000.dma-controller: Error in Transaction
+[   39.187808] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.187845] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.188172] gpi 900000.dma-controller: Error in Transaction
+[   39.188187] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.188207] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.188531] gpi 900000.dma-controller: Error in Transaction
+[   39.188546] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.188567] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.188879] gpi 900000.dma-controller: Error in Transaction
+[   39.188894] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.188914] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.189189] [drm] Initialized msm 1.13.0 for ae01000.display-controller on minor 0
+[   39.189295] gpi 900000.dma-controller: Error in Transaction
+[   39.189314] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.189338] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.189350] msm_dpu ae01000.display-controller: [drm:adreno_request_fw] loaded qcom/a650_sqe.fw from new location
+[   39.189449] msm_dpu ae01000.display-controller: [drm:adreno_request_fw] loaded qcom/a650_gmu.bin from new location
+[   39.189660] gpi 900000.dma-controller: Error in Transaction
+[   39.189677] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.189700] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.190178] gpi 900000.dma-controller: Error in Transaction
+[   39.190193] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.190222] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.190247] [drm] Loaded GMU firmware v2.1.6
+[   39.190539] gpi 900000.dma-controller: Error in Transaction
+[   39.190555] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.190575] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.190884] gpi 900000.dma-controller: Error in Transaction
+[   39.190899] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.190919] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.191261] gpi 900000.dma-controller: Error in Transaction
+[   39.191280] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.191304] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.191627] gpi 900000.dma-controller: Error in Transaction
+[   39.191646] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.191669] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.191992] gpi 900000.dma-controller: Error in Transaction
+[   39.192010] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.192040] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.192355] gpi 900000.dma-controller: Error in Transaction
+[   39.192372] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.192392] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.192703] gpi 900000.dma-controller: Error in Transaction
+[   39.192719] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.192740] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.193051] gpi 900000.dma-controller: Error in Transaction
+[   39.193075] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.193100] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.193446] gpi 900000.dma-controller: Error in Transaction
+[   39.193463] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.193486] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.193808] gpi 900000.dma-controller: Error in Transaction
+[   39.193826] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.193853] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.194201] gpi 900000.dma-controller: Error in Transaction
+[   39.194219] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.194250] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.194569] gpi 900000.dma-controller: Error in Transaction
+[   39.194584] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.194603] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.194915] gpi 900000.dma-controller: Error in Transaction
+[   39.194930] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.194950] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.195261] gpi 900000.dma-controller: Error in Transaction
+[   39.195277] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.195302] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.195661] gpi 900000.dma-controller: Error in Transaction
+[   39.195680] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.195706] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.196038] gpi 900000.dma-controller: Error in Transaction
+[   39.196056] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.196080] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.196407] gpi 900000.dma-controller: Error in Transaction
+[   39.196426] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.196459] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.196801] gpi 900000.dma-controller: Error in Transaction
+[   39.196818] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.196839] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.197156] gpi 900000.dma-controller: Error in Transaction
+[   39.197171] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.197192] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.197770] gpi 900000.dma-controller: Error in Transaction
+[   39.197793] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.197819] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.198148] gpi 900000.dma-controller: Error in Transaction
+[   39.198166] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.198189] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.198530] gpi 900000.dma-controller: Error in Transaction
+[   39.198549] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.198585] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.198918] gpi 900000.dma-controller: Error in Transaction
+[   39.198933] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.198952] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.199262] gpi 900000.dma-controller: Error in Transaction
+[   39.199277] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.199297] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.199628] gpi 900000.dma-controller: Error in Transaction
+[   39.199644] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.199667] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.200015] gpi 900000.dma-controller: Error in Transaction
+[   39.200034] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.200058] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.200420] gpi 900000.dma-controller: Error in Transaction
+[   39.200438] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.200468] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.200796] gpi 900000.dma-controller: Error in Transaction
+[   39.200814] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.200843] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.201200] gpi 900000.dma-controller: Error in Transaction
+[   39.201227] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.201269] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.201611] gpi 900000.dma-controller: Error in Transaction
+[   39.201627] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.201649] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.201966] gpi 900000.dma-controller: Error in Transaction
+[   39.201980] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.202011] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.202352] gpi 900000.dma-controller: Error in Transaction
+[   39.202373] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.202398] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.202735] gpi 900000.dma-controller: Error in Transaction
+[   39.202753] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.202777] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.203111] gpi 900000.dma-controller: Error in Transaction
+[   39.203130] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.203158] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.203516] gpi 900000.dma-controller: Error in Transaction
+[   39.203549] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.203569] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.203904] gpi 900000.dma-controller: Error in Transaction
+[   39.203931] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.203963] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.204298] gpi 900000.dma-controller: Error in Transaction
+[   39.204313] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.204337] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.204692] gpi 900000.dma-controller: Error in Transaction
+[   39.204711] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.204735] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.205064] gpi 900000.dma-controller: Error in Transaction
+[   39.205081] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.205105] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.205431] gpi 900000.dma-controller: Error in Transaction
+[   39.205448] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.205478] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.205816] gpi 900000.dma-controller: Error in Transaction
+[   39.205833] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.205856] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.206129] Bluetooth: hci0: Frame reassembly failed (-84)
+[   39.206171] gpi 900000.dma-controller: Error in Transaction
+[   39.206191] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.206212] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.206524] gpi 900000.dma-controller: Error in Transaction
+[   39.206540] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.206562] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.206911] gpi 900000.dma-controller: Error in Transaction
+[   39.206930] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.206955] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.207289] gpi 900000.dma-controller: Error in Transaction
+[   39.207306] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.207329] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.207656] gpi 900000.dma-controller: Error in Transaction
+[   39.207673] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.207701] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.208034] gpi 900000.dma-controller: Error in Transaction
+[   39.208051] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.208071] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.208388] gpi 900000.dma-controller: Error in Transaction
+[   39.208404] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.208425] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.208736] gpi 900000.dma-controller: Error in Transaction
+[   39.208752] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.208775] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.209105] gpi 900000.dma-controller: Error in Transaction
+[   39.209120] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.209149] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.209485] gpi 900000.dma-controller: Error in Transaction
+[   39.209501] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.209524] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.209859] gpi 900000.dma-controller: Error in Transaction
+[   39.209876] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.209899] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.210227] gpi 900000.dma-controller: Error in Transaction
+[   39.210243] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.210266] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.210598] gpi 900000.dma-controller: Error in Transaction
+[   39.210614] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.210638] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.210966] gpi 900000.dma-controller: Error in Transaction
+[   39.210983] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.211006] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.211332] gpi 900000.dma-controller: Error in Transaction
+[   39.211349] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.211372] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.211705] gpi 900000.dma-controller: Error in Transaction
+[   39.211721] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.211744] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.212078] gpi 900000.dma-controller: Error in Transaction
+[   39.212094] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.212115] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.212442] gpi 900000.dma-controller: Error in Transaction
+[   39.212457] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.212479] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.212807] gpi 900000.dma-controller: Error in Transaction
+[   39.212822] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.212843] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.213165] gpi 900000.dma-controller: Error in Transaction
+[   39.213181] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.213203] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.213525] gpi 900000.dma-controller: Error in Transaction
+[   39.213539] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.213561] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.213882] gpi 900000.dma-controller: Error in Transaction
+[   39.213897] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.213919] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.214240] gpi 900000.dma-controller: Error in Transaction
+[   39.214255] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.214276] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.214598] gpi 900000.dma-controller: Error in Transaction
+[   39.214613] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.214634] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.214957] gpi 900000.dma-controller: Error in Transaction
+[   39.214971] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.214993] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.215314] gpi 900000.dma-controller: Error in Transaction
+[   39.215329] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.215351] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.215673] gpi 900000.dma-controller: Error in Transaction
+[   39.215688] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.215709] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.216032] gpi 900000.dma-controller: Error in Transaction
+[   39.216046] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.216068] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.216389] gpi 900000.dma-controller: Error in Transaction
+[   39.216404] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.216425] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.216746] gpi 900000.dma-controller: Error in Transaction
+[   39.216761] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.216782] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.217104] gpi 900000.dma-controller: Error in Transaction
+[   39.217119] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.217142] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.217475] gpi 900000.dma-controller: Error in Transaction
+[   39.217490] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.217511] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.217847] gpi 900000.dma-controller: Error in Transaction
+[   39.217862] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.217883] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.218218] gpi 900000.dma-controller: Error in Transaction
+[   39.218233] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.218254] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.218588] gpi 900000.dma-controller: Error in Transaction
+[   39.218603] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.218623] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.218956] gpi 900000.dma-controller: Error in Transaction
+[   39.218971] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.218992] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.219327] gpi 900000.dma-controller: Error in Transaction
+[   39.219342] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.219363] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.219695] gpi 900000.dma-controller: Error in Transaction
+[   39.219710] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.219731] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.220060] gpi 900000.dma-controller: Error in Transaction
+[   39.220075] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.220096] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.220427] gpi 900000.dma-controller: Error in Transaction
+[   39.220442] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.220463] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.220801] gpi 900000.dma-controller: Error in Transaction
+[   39.220817] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.220837] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.221186] gpi 900000.dma-controller: Error in Transaction
+[   39.221232] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.221278] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.221665] gpi 900000.dma-controller: Error in Transaction
+[   39.221693] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.221730] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.222112] gpi 900000.dma-controller: Error in Transaction
+[   39.222140] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.222183] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.222503] gpi 900000.dma-controller: Error in Transaction
+[   39.222517] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.222537] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.222849] gpi 900000.dma-controller: Error in Transaction
+[   39.222863] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.222883] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.223194] gpi 900000.dma-controller: Error in Transaction
+[   39.223208] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.223229] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.223610] gpi 900000.dma-controller: Error in Transaction
+[   39.223638] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.223673] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.224057] gpi 900000.dma-controller: Error in Transaction
+[   39.224084] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.224120] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.224491] gpi 900000.dma-controller: Error in Transaction
+[   39.224506] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.224525] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.224847] gpi 900000.dma-controller: Error in Transaction
+[   39.224851] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.224867] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.225172] gpi 900000.dma-controller: Error in Transaction
+[   39.225185] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.225198] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.225550] gpi 900000.dma-controller: Error in Transaction
+[   39.225558] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.225580] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.225944] gpi 900000.dma-controller: Error in Transaction
+[   39.225953] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.225973] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.226341] gpi 900000.dma-controller: Error in Transaction
+[   39.226349] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.226379] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.226692] gpi 900000.dma-controller: Error in Transaction
+[   39.226698] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.226710] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.227010] gpi 900000.dma-controller: Error in Transaction
+[   39.227031] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.227078] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.227381] gpi 900000.dma-controller: Error in Transaction
+[   39.227386] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.227399] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.227773] gpi 900000.dma-controller: Error in Transaction
+[   39.227780] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.227801] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.228167] gpi 900000.dma-controller: Error in Transaction
+[   39.228174] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.228195] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.228562] gpi 900000.dma-controller: Error in Transaction
+[   39.228570] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.228599] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.228912] gpi 900000.dma-controller: Error in Transaction
+[   39.228917] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.228930] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.229238] gpi 900000.dma-controller: Error in Transaction
+[   39.229242] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.229253] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.229553] gpi 900000.dma-controller: Error in Transaction
+[   39.229558] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.229569] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.229943] gpi 900000.dma-controller: Error in Transaction
+[   39.229952] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.229971] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.230329] gpi 900000.dma-controller: Error in Transaction
+[   39.230336] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.230354] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.230718] gpi 900000.dma-controller: Error in Transaction
+[   39.230726] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.230753] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.231066] gpi 900000.dma-controller: Error in Transaction
+[   39.231070] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.231081] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.231383] gpi 900000.dma-controller: Error in Transaction
+[   39.231387] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.231398] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.231701] gpi 900000.dma-controller: Error in Transaction
+[   39.231706] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.231717] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.232086] gpi 900000.dma-controller: Error in Transaction
+[   39.232095] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.232114] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.232476] gpi 900000.dma-controller: Error in Transaction
+[   39.232485] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.232504] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.232866] gpi 900000.dma-controller: Error in Transaction
+[   39.232873] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.232899] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.233212] gpi 900000.dma-controller: Error in Transaction
+[   39.233217] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.233229] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.233533] gpi 900000.dma-controller: Error in Transaction
+[   39.233537] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.233549] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.233850] gpi 900000.dma-controller: Error in Transaction
+[   39.233855] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.233867] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.234242] gpi 900000.dma-controller: Error in Transaction
+[   39.234250] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.234272] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.234639] gpi 900000.dma-controller: Error in Transaction
+[   39.234648] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.234668] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.235035] gpi 900000.dma-controller: Error in Transaction
+[   39.235042] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.235069] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.235381] gpi 900000.dma-controller: Error in Transaction
+[   39.235387] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.235397] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.235699] gpi 900000.dma-controller: Error in Transaction
+[   39.235703] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.235714] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.236016] gpi 900000.dma-controller: Error in Transaction
+[   39.236021] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.236031] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.236404] gpi 900000.dma-controller: Error in Transaction
+[   39.236412] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.236431] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.236794] gpi 900000.dma-controller: Error in Transaction
+[   39.236802] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.236821] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.237184] gpi 900000.dma-controller: Error in Transaction
+[   39.237192] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.237222] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.237538] gpi 900000.dma-controller: Error in Transaction
+[   39.237544] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.237556] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.237859] gpi 900000.dma-controller: Error in Transaction
+[   39.237864] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.237876] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.238178] gpi 900000.dma-controller: Error in Transaction
+[   39.238184] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.238196] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.238572] gpi 900000.dma-controller: Error in Transaction
+[   39.238580] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.238600] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.238967] gpi 900000.dma-controller: Error in Transaction
+[   39.238976] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.238996] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.239363] gpi 900000.dma-controller: Error in Transaction
+[   39.239372] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.239400] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.239714] gpi 900000.dma-controller: Error in Transaction
+[   39.239719] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.239731] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.240032] gpi 900000.dma-controller: Error in Transaction
+[   39.240035] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.240047] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.240351] gpi 900000.dma-controller: Error in Transaction
+[   39.240356] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.240368] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.240739] gpi 900000.dma-controller: Error in Transaction
+[   39.240748] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.240768] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.241134] gpi 900000.dma-controller: Error in Transaction
+[   39.241143] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.241163] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.241529] gpi 900000.dma-controller: Error in Transaction
+[   39.241536] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.241564] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.241883] gpi 900000.dma-controller: Error in Transaction
+[   39.241888] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.241900] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.242205] gpi 900000.dma-controller: Error in Transaction
+[   39.242210] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.242221] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.242525] gpi 900000.dma-controller: Error in Transaction
+[   39.242529] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.242541] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.242916] gpi 900000.dma-controller: Error in Transaction
+[   39.242923] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.242945] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.243312] gpi 900000.dma-controller: Error in Transaction
+[   39.243321] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.243340] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.243706] gpi 900000.dma-controller: Error in Transaction
+[   39.243714] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.243741] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.244056] gpi 900000.dma-controller: Error in Transaction
+[   39.244062] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.244075] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.244379] gpi 900000.dma-controller: Error in Transaction
+[   39.244383] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.244395] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.244695] gpi 900000.dma-controller: Error in Transaction
+[   39.244700] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.244712] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.245100] gpi 900000.dma-controller: Error in Transaction
+[   39.245110] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.245131] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.245501] gpi 900000.dma-controller: Error in Transaction
+[   39.245510] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.245530] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.245899] gpi 900000.dma-controller: Error in Transaction
+[   39.245908] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.245938] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.246254] gpi 900000.dma-controller: Error in Transaction
+[   39.246260] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.246271] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.246572] gpi 900000.dma-controller: Error in Transaction
+[   39.246577] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.246588] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.246890] gpi 900000.dma-controller: Error in Transaction
+[   39.246896] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.246907] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.247290] gpi 900000.dma-controller: Error in Transaction
+[   39.247299] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.247320] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.247682] gpi 900000.dma-controller: Error in Transaction
+[   39.247691] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.247711] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.248085] gpi 900000.dma-controller: Error in Transaction
+[   39.248094] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.248122] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.248442] gpi 900000.dma-controller: Error in Transaction
+[   39.248447] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.248458] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.248760] gpi 900000.dma-controller: Error in Transaction
+[   39.248765] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.248777] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.249096] gpi 900000.dma-controller: Error in Transaction
+[   39.249100] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.249112] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.249490] gpi 900000.dma-controller: Error in Transaction
+[   39.249499] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.249523] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.249891] gpi 900000.dma-controller: Error in Transaction
+[   39.249901] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.249923] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.250291] gpi 900000.dma-controller: Error in Transaction
+[   39.250299] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.250330] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.250645] gpi 900000.dma-controller: Error in Transaction
+[   39.250649] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.250661] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.250962] gpi 900000.dma-controller: Error in Transaction
+[   39.250968] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.250980] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.251283] gpi 900000.dma-controller: Error in Transaction
+[   39.251287] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.251299] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.251676] gpi 900000.dma-controller: Error in Transaction
+[   39.251685] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.251709] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.252066] gpi 900000.dma-controller: Error in Transaction
+[   39.252075] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.252096] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.252470] gpi 900000.dma-controller: Error in Transaction
+[   39.252478] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.252509] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.252827] gpi 900000.dma-controller: Error in Transaction
+[   39.252834] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.252846] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.253151] gpi 900000.dma-controller: Error in Transaction
+[   39.253156] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.253169] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.253472] gpi 900000.dma-controller: Error in Transaction
+[   39.253477] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.253488] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.253886] gpi 900000.dma-controller: Error in Transaction
+[   39.253896] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.253919] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.254291] gpi 900000.dma-controller: Error in Transaction
+[   39.254300] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.254322] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.254697] gpi 900000.dma-controller: Error in Transaction
+[   39.254702] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.254716] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.255018] gpi 900000.dma-controller: Error in Transaction
+[   39.255023] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.255034] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.255338] gpi 900000.dma-controller: Error in Transaction
+[   39.255342] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.255353] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.255665] gpi 900000.dma-controller: Error in Transaction
+[   39.255675] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.255698] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.256064] gpi 900000.dma-controller: Error in Transaction
+[   39.256073] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.256095] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.256474] gpi 900000.dma-controller: Error in Transaction
+[   39.256483] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.256505] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.256841] gpi 900000.dma-controller: Error in Transaction
+[   39.256846] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.256858] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.257160] gpi 900000.dma-controller: Error in Transaction
+[   39.257165] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.257176] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.257478] gpi 900000.dma-controller: Error in Transaction
+[   39.257482] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.257496] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.257870] gpi 900000.dma-controller: Error in Transaction
+[   39.257880] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.257902] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.258271] gpi 900000.dma-controller: Error in Transaction
+[   39.258280] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.258302] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.258675] gpi 900000.dma-controller: Error in Transaction
+[   39.258686] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.258716] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.259032] gpi 900000.dma-controller: Error in Transaction
+[   39.259037] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.259049] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.259352] gpi 900000.dma-controller: Error in Transaction
+[   39.259356] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.259367] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.259672] gpi 900000.dma-controller: Error in Transaction
+[   39.259676] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.259688] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.260057] gpi 900000.dma-controller: Error in Transaction
+[   39.260066] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.260089] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.260457] gpi 900000.dma-controller: Error in Transaction
+[   39.260466] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.260489] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.260863] gpi 900000.dma-controller: Error in Transaction
+[   39.260872] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.260903] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.261229] gpi 900000.dma-controller: Error in Transaction
+[   39.261233] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.261245] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.261547] gpi 900000.dma-controller: Error in Transaction
+[   39.261552] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.261565] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.261868] gpi 900000.dma-controller: Error in Transaction
+[   39.261873] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.261884] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.262265] gpi 900000.dma-controller: Error in Transaction
+[   39.262274] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.262296] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.262672] gpi 900000.dma-controller: Error in Transaction
+[   39.262681] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.262702] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.263064] gpi 900000.dma-controller: Error in Transaction
+[   39.263073] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.263101] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.263411] gpi 900000.dma-controller: Error in Transaction
+[   39.263416] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.263428] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.263730] gpi 900000.dma-controller: Error in Transaction
+[   39.263735] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.263746] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.264047] gpi 900000.dma-controller: Error in Transaction
+[   39.264051] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.264061] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.264442] gpi 900000.dma-controller: Error in Transaction
+[   39.264452] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.264472] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.264834] gpi 900000.dma-controller: Error in Transaction
+[   39.264843] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.264863] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.265252] gpi 900000.dma-controller: Error in Transaction
+[   39.265261] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.265292] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.265608] gpi 900000.dma-controller: Error in Transaction
+[   39.265613] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.265625] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.265926] gpi 900000.dma-controller: Error in Transaction
+[   39.265931] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.265943] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.266244] gpi 900000.dma-controller: Error in Transaction
+[   39.266249] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.266263] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.266632] gpi 900000.dma-controller: Error in Transaction
+[   39.266641] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.266664] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.267038] gpi 900000.dma-controller: Error in Transaction
+[   39.267047] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.267069] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.267452] gpi 900000.dma-controller: Error in Transaction
+[   39.267461] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.267491] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.267806] gpi 900000.dma-controller: Error in Transaction
+[   39.267811] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.267822] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.268125] gpi 900000.dma-controller: Error in Transaction
+[   39.268130] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.268142] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.268444] gpi 900000.dma-controller: Error in Transaction
+[   39.268449] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.268461] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.268843] gpi 900000.dma-controller: Error in Transaction
+[   39.268853] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.268875] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.269263] gpi 900000.dma-controller: Error in Transaction
+[   39.269272] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.269293] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.269662] gpi 900000.dma-controller: Error in Transaction
+[   39.269671] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.269700] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.270021] gpi 900000.dma-controller: Error in Transaction
+[   39.270025] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.270036] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.270338] gpi 900000.dma-controller: Error in Transaction
+[   39.270343] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.270355] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.270657] gpi 900000.dma-controller: Error in Transaction
+[   39.270661] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.270672] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.271055] gpi 900000.dma-controller: Error in Transaction
+[   39.271065] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.271086] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.271444] gpi 900000.dma-controller: Error in Transaction
+[   39.271453] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.271473] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.271830] gpi 900000.dma-controller: Error in Transaction
+[   39.271839] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.271867] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.272187] gpi 900000.dma-controller: Error in Transaction
+[   39.272192] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.272204] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.272506] gpi 900000.dma-controller: Error in Transaction
+[   39.272511] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.272522] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.272823] gpi 900000.dma-controller: Error in Transaction
+[   39.272828] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.272839] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.273206] gpi 900000.dma-controller: Error in Transaction
+[   39.273217] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.273241] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.273612] gpi 900000.dma-controller: Error in Transaction
+[   39.273621] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.273643] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.274007] gpi 900000.dma-controller: Error in Transaction
+[   39.274016] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.274047] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.274365] gpi 900000.dma-controller: Error in Transaction
+[   39.274370] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.274382] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.274686] gpi 900000.dma-controller: Error in Transaction
+[   39.274691] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.274702] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.275005] gpi 900000.dma-controller: Error in Transaction
+[   39.275010] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.275023] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.275406] gpi 900000.dma-controller: Error in Transaction
+[   39.275415] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.275437] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.275811] gpi 900000.dma-controller: Error in Transaction
+[   39.275820] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.275843] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.276215] gpi 900000.dma-controller: Error in Transaction
+[   39.276221] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.276234] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.276536] gpi 900000.dma-controller: Error in Transaction
+[   39.276541] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.276553] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.276856] gpi 900000.dma-controller: Error in Transaction
+[   39.276861] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.276873] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.277176] gpi 900000.dma-controller: Error in Transaction
+[   39.277181] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.277194] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.277576] gpi 900000.dma-controller: Error in Transaction
+[   39.277585] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.277607] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.277977] gpi 900000.dma-controller: Error in Transaction
+[   39.277986] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.278009] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.278373] gpi 900000.dma-controller: Error in Transaction
+[   39.278383] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.278413] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.278733] gpi 900000.dma-controller: Error in Transaction
+[   39.278738] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.278750] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.279051] gpi 900000.dma-controller: Error in Transaction
+[   39.279057] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.279068] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.279369] gpi 900000.dma-controller: Error in Transaction
+[   39.279372] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.279384] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.279761] gpi 900000.dma-controller: Error in Transaction
+[   39.279770] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.279792] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.280167] gpi 900000.dma-controller: Error in Transaction
+[   39.280176] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.280198] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.280578] gpi 900000.dma-controller: Error in Transaction
+[   39.280587] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.280618] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.280937] gpi 900000.dma-controller: Error in Transaction
+[   39.280941] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.280954] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.281264] gpi 900000.dma-controller: Error in Transaction
+[   39.281270] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.281282] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.281583] gpi 900000.dma-controller: Error in Transaction
+[   39.281587] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.281599] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.281980] gpi 900000.dma-controller: Error in Transaction
+[   39.281990] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.282012] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.282387] gpi 900000.dma-controller: Error in Transaction
+[   39.282396] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.282418] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.282790] gpi 900000.dma-controller: Error in Transaction
+[   39.282795] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.282808] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.283111] gpi 900000.dma-controller: Error in Transaction
+[   39.283116] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.283128] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.283429] gpi 900000.dma-controller: Error in Transaction
+[   39.283433] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.283444] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.283745] gpi 900000.dma-controller: Error in Transaction
+[   39.283749] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.283762] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.284146] gpi 900000.dma-controller: Error in Transaction
+[   39.284156] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.284179] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.284553] gpi 900000.dma-controller: Error in Transaction
+[   39.284562] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.284584] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.284963] gpi 900000.dma-controller: Error in Transaction
+[   39.284969] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.284982] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.285292] gpi 900000.dma-controller: Error in Transaction
+[   39.285297] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.285308] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.285610] gpi 900000.dma-controller: Error in Transaction
+[   39.285614] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.285626] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.285928] gpi 900000.dma-controller: Error in Transaction
+[   39.285934] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.285947] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.286336] gpi 900000.dma-controller: Error in Transaction
+[   39.286345] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.286367] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.307666] gpi 900000.dma-controller: Error in Transaction
+[   39.307676] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.307704] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.308094] gpi 900000.dma-controller: Error in Transaction
+[   39.308105] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.308130] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.308515] gpi 900000.dma-controller: Error in Transaction
+[   39.308526] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.308561] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.308880] gpi 900000.dma-controller: Error in Transaction
+[   39.308886] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.308898] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.309203] gpi 900000.dma-controller: Error in Transaction
+[   39.309208] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.309221] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.309522] gpi 900000.dma-controller: Error in Transaction
+[   39.309526] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.309538] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.309927] gpi 900000.dma-controller: Error in Transaction
+[   39.309938] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.309963] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.310347] gpi 900000.dma-controller: Error in Transaction
+[   39.310358] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.310383] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.310770] gpi 900000.dma-controller: Error in Transaction
+[   39.310775] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.310789] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.311091] gpi 900000.dma-controller: Error in Transaction
+[   39.311096] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.311106] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.311409] gpi 900000.dma-controller: Error in Transaction
+[   39.311415] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.311427] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.311738] gpi 900000.dma-controller: Error in Transaction
+[   39.311749] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.311772] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.312151] gpi 900000.dma-controller: Error in Transaction
+[   39.312161] geni_i2c 994000.i2c: DMA txn failed:3
+[   39.312184] geni_i2c 994000.i2c: GPI transfer failed: -5
+[   39.403302] qcom-pcie 1c00000.pcie: iATU: unroll T, 8 ob, 8 ib, align 4K, limit 1024G
+[   39.521933] Bluetooth: hci0: QCA Product ID   :0x00000010
+[   39.521952] Bluetooth: hci0: QCA SOC Version  :0x400a0200
+[   39.521966] Bluetooth: hci0: QCA ROM Version  :0x00000200
+[   39.521979] Bluetooth: hci0: QCA Patch Version:0x00000d2b
+[   39.521994] Bluetooth: hci0: QCA controller version 0x02000200
+[   39.522012] Bluetooth: hci0: QCA Downloading qca/htbtfw20.tlv
+[   39.522165] bluetooth hci0: Direct firmware load for qca/htbtfw20.tlv failed with error -2
+[   39.522192] Bluetooth: hci0: QCA Failed to request file: qca/htbtfw20.tlv (-2)
+[   39.522209] Bluetooth: hci0: QCA Failed to request file: qca/htbtfw20.tlv (-2)
+[   39.543101] Bluetooth: hci0: Opcode 0x203b failed: -16
+[   39.601148] qcom-pcie 1c00000.pcie: PCIe Gen.2 x1 link up
+[   39.601926] qcom-pcie 1c00000.pcie: PCI host bridge to bus 0000:00
+[   39.601953] pci_bus 0000:00: root bus resource [bus 00-ff]
+[   39.601978] pci_bus 0000:00: root bus resource [io  0x0000-0xfffff]
+[   39.601997] pci_bus 0000:00: root bus resource [mem 0x60300000-0x63ffffff]
+[   39.602260] pci 0000:00:00.0: [17cb:010b] type 01 class 0x060400 PCIe Root Port
+[   39.602312] pci 0000:00:00.0: BAR 0 [mem 0x00000000-0x00000fff]
+[   39.602337] pci 0000:00:00.0: PCI bridge to [bus 01-ff]
+[   39.602363] pci 0000:00:00.0:   bridge window [io  0x0000-0x0fff]
+[   39.602384] pci 0000:00:00.0:   bridge window [mem 0x00000000-0x000fffff]
+[   39.602410] pci 0000:00:00.0:   bridge window [mem 0x00000000-0x000fffff 64bit pref]
+[   39.602513] pci 0000:00:00.0: PME# supported from D0 D3hot D3cold
+[   39.603160] OF: /soc@0/pcie@1c00000: iommu-map has 1-cell entries targeting 2-cell #iommu-cells, treating as 1-cell output
+[   39.603554] pci 0000:00:00.0: Adding to iommu group 11
+[   39.609854] pci 0000:01:00.0: [17cb:1101] type 00 class 0xff0000 PCIe Endpoint
+[   39.610088] pci 0000:01:00.0: BAR 0 [mem 0x00000000-0x000fffff 64bit]
+[   39.610576] pci 0000:01:00.0: PME# supported from D0 D3hot D3cold
+[   39.610896] pci 0000:01:00.0: 4.000 Gb/s available PCIe bandwidth, limited by 5.0 GT/s PCIe x1 link at 0000:00:00.0 (capable of 7.876 Gb/s with 8.0 GT/s PCIe x1 link)
+[   39.611186] pci 0000:01:00.0: Adding to iommu group 11
+[   39.617305] pci 0000:01:00.0: ASPM: default states L0s L1
+[   39.617555] pci 0000:00:00.0: bridge window [io  0x1000-0x0fff] to [bus 01-ff] add_size 1000
+[   39.617592] pci 0000:00:00.0: bridge window [mem 0x00100000-0x000fffff 64bit pref] to [bus 01-ff] add_size 200000 add_align 100000
+[   39.617628] pci 0000:00:00.0: bridge window [mem 0x00100000-0x001fffff] to [bus 01-ff] add_size 100000 add_align 100000
+[   39.617675] pci 0000:00:00.0: bridge window [mem 0x60300000-0x604fffff]: assigned
+[   39.617705] pci 0000:00:00.0: bridge window [mem 0x60500000-0x606fffff 64bit pref]: assigned
+[   39.617728] pci 0000:00:00.0: BAR 0 [mem 0x60700000-0x60700fff]: assigned
+[   39.617755] pci 0000:00:00.0: bridge window [io  0x1000-0x1fff]: assigned
+[   39.617788] pci 0000:01:00.0: BAR 0 [mem 0x60300000-0x603fffff 64bit]: assigned
+[   39.617882] pci 0000:00:00.0: PCI bridge to [bus 01-ff]
+[   39.617903] pci 0000:00:00.0:   bridge window [io  0x1000-0x1fff]
+[   39.617926] pci 0000:00:00.0:   bridge window [mem 0x60300000-0x604fffff]
+[   39.617948] pci 0000:00:00.0:   bridge window [mem 0x60500000-0x606fffff 64bit pref]
+[   39.617974] pci_bus 0000:00: resource 4 [io  0x0000-0xfffff]
+[   39.617993] pci_bus 0000:00: resource 5 [mem 0x60300000-0x63ffffff]
+[   39.618011] pci_bus 0000:01: resource 0 [io  0x1000-0x1fff]
+[   39.618028] pci_bus 0000:01: resource 1 [mem 0x60300000-0x604fffff]
+[   39.618046] pci_bus 0000:01: resource 2 [mem 0x60500000-0x606fffff 64bit pref]
+[   39.618623] pcieport 0000:00:00.0: PME: Signaling with IRQ 193
+[   39.619252] pcieport 0000:00:00.0: AER: enabled with IRQ 193
+[   39.620086] ath11k_pci 0000:01:00.0: BAR 0 [mem 0x60300000-0x603fffff 64bit]: assigned
+[   39.620172] ath11k_pci 0000:01:00.0: enabling device (0000 -> 0002)
+[   39.621455] ath11k_pci 0000:01:00.0: MSI vectors: 32
+[   39.621492] ath11k_pci 0000:01:00.0: qca6390 hw2.0
+[   39.634500] fb0: sys_imageblit: framebuffer is not in virtual address space.
+[   39.661352] Console: switching to colour frame buffer device 200x160
+[   39.712559] fb0: sys_fillrect: framebuffer is not in virtual address space.
+[   39.779061] mhi mhi0: Requested to power ON
+[   39.779255] msm_dpu ae01000.display-controller: [drm] fb0: msmdrmfb frame buffer device
+[   39.779628] mhi mhi0: Power on setup success
+[   39.779773] mhi mhi0: Direct firmware load for ath11k/QCA6390/hw2.0/amss.bin failed with error -2
+[   39.779800] mhi mhi0: Error loading firmware: -2
+[   39.781091] input: gpio-keys as /devices/platform/gpio-keys/input/input3
+[   39.781291] ath11k_pci 0000:01:00.0: failed to power up mhi: -110
+[   39.782341] cfg80211: Loading compiled-in X.509 certificates for regulatory database
+[   39.782530] ath11k_pci 0000:01:00.0: failed to start mhi: -110
+[   39.783735] Loaded X.509 cert 'sforshee: 00b28ddf47aef9cea7'
+[   39.783842] ath11k_pci 0000:01:00.0: failed to power up :-110
+[   39.784731] Loaded X.509 cert 'wens: 61c038651aabdcf94bd0ac7ff06c7248db18c600'
+[   39.957604] ath11k_pci 0000:01:00.0: failed to create soc core: -110
+[   39.957642] faux_driver regulatory: Direct firmware load for regulatory.db failed with error -2
+[   39.957771] clk: Not disabling unused clocks
+[   39.957776] PM: genpd: Disabling unused power domains
+[   39.958098] ath11k_pci 0000:01:00.0: failed to init core: -110
+[   39.958528] cfg80211: failed to load regulatory.db
+[   39.961246] ath11k_pci 0000:01:00.0: probe with driver ath11k_pci failed with error -110
+[   39.962386] Freeing unused kernel memory: 2944K
+[   39.962940] Run /init as init process
+[   39.963417]   with arguments:
+[   39.963888]     /init
+[   39.964357]   with environment:
+[   39.964826]     HOME=/
+[   39.965315]     TERM=linux
+[   40.053521] EXT4-fs (sda37): mounted filesystem c260b4ed-c0ad-4c0a-ad6c-366e126ef23c r/w with ordered data mode. Quota mode: none.
+[   40.971855] systemd-journald[235]: Collecting audit messages is disabled.
+[   41.401173] EXT4-fs (sda37): re-mounted c260b4ed-c0ad-4c0a-ad6c-366e126ef23c.
+[   41.447762] systemd-journald[235]: Received client request to flush runtime journal.
+[   41.478041] systemd-journald[235]: /var/log/journal/040ede56409e44a8bc1ed95add4620ba/system.journal: Realtime clock jumped backwards relative to last journal entry, rotating.
+[   41.481457] systemd-journald[235]: Rotating system journal.
+[   42.038115] configfs-gadget.g_ecm gadget.0: HOST MAC 02:00:00:00:00:01
+[   42.038832] configfs-gadget.g_ecm gadget.0: MAC 02:00:00:00:00:02
+[   43.047154] ath11k_pci 0000:01:00.0: BAR 0 [mem 0x60300000-0x603fffff 64bit]: assigned
+[   43.050959] ath11k_pci 0000:01:00.0: MSI vectors: 32
+[   43.052759] ath11k_pci 0000:01:00.0: qca6390 hw2.0
+[   43.064047] Bluetooth: hci0: setting up ROME/QCA6390
+[   43.143362] Bluetooth: Received HCI_IBS_WAKE_ACK in tx state 0
+[   43.221045] mhi mhi0: Requested to power ON
+[   43.221546] mhi mhi0: Power on setup success
+[   43.305171] mhi mhi0: Wait for device to enter SBL or Mission mode
+[   43.412382] ath11k_pci 0000:01:00.0: chip_id 0x0 chip_family 0xb board_id 0xff soc_id 0xffffffff
+[   43.412468] ath11k_pci 0000:01:00.0: fw_version 0x10121492 fw_build_timestamp 2021-11-04 11:23 fw_build_id 
+[   43.457852] Bluetooth: hci0: QCA Product ID   :0x00000010
+[   43.457917] Bluetooth: hci0: QCA SOC Version  :0x400a0200
+[   43.457952] Bluetooth: hci0: QCA ROM Version  :0x00000200
+[   43.457988] Bluetooth: hci0: QCA Patch Version:0x00000d2b
+[   43.458024] Bluetooth: hci0: QCA controller version 0x02000200
+[   43.458064] Bluetooth: hci0: QCA Downloading qca/htbtfw20.tlv
+[   43.654909] ath11k_pci 0000:01:00.0 wlp1s0: renamed from wlan0
+[   44.286184] systemd-journald[235]: /var/log/journal/040ede56409e44a8bc1ed95add4620ba/user-1000.journal: Realtime clock jumped backwards relative to last journal entry, rotating.
+[   44.373108] Bluetooth: hci0: QCA Downloading qca/htnv20.bin
+[   44.607465] Bluetooth: hci0: QCA setup on UART is completed
+[   44.638527] Bluetooth: MGMT ver 1.23
+[   47.404468] wlp1s0: authenticate with xx:xx:xx:xx:xx:01 (local address=xx:xx:xx:xx:xx:04)
+[   47.404506] wlp1s0: send auth to xx:xx:xx:xx:xx:01 (try 1/3)
+[   47.409972] wlp1s0: authenticated
+[   47.413083] wlp1s0: associate with xx:xx:xx:xx:xx:01 (try 1/3)
+[   47.415961] wlp1s0: RX AssocResp from xx:xx:xx:xx:xx:01 (capab=0x11 status=0 aid=8)
+[   47.426750] wlp1s0: associated
+[   52.193183] gcc-sm8250 100000.clock-controller: sync_state() pending due to 793000.rng
+[   52.193200] qnoc-sm8250 163d000.interconnect: sync_state() pending due to 1dfa000.crypto
+[   52.193204] qnoc-sm8250 1700000.interconnect: sync_state() pending due to 1dfa000.crypto
+[   52.193208] gcc-sm8250 100000.clock-controller: sync_state() pending due to 3d6a000.gmu
+[   52.193211] sm8250-gpucc 3d90000.clock-controller: sync_state() pending due to 3d6a000.gmu
+[   52.193224] gcc-sm8250 100000.clock-controller: sync_state() pending due to ad00000.clock-controller
+[   52.193235] qcom-rpmhpd 18200000.rsc:power-controller: sync_state() pending due to 17300000.remoteproc
+[   52.193239] qcom-rpmhpd 18200000.rsc:power-controller: sync_state() pending due to ad00000.clock-controller
+[   52.193242] qcom-rpmhpd 18200000.rsc:power-controller: sync_state() pending due to 8300000.remoteproc
+[   52.193245] qcom-rpmhpd 18200000.rsc:power-controller: sync_state() pending due to 5c00000.remoteproc

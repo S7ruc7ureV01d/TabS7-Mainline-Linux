@@ -6937,3 +6937,69 @@ the qcom_scm tracing, and the panic-on-stall knobs.
 `/proc/iomem` System RAM vs stock's), not just the `/reserved-memory`
 node. Holes in the firmware's own memory node never show up as
 reserved-memory entries.
+
+### CPU hard-hang: confirmed fixed, investigation overhead removed (2026-09-22, night)
+
+The owner played Minecraft on the memory-map-fix build across two game
+versions, with chunk loading and TNT explosions. It was stable. Before
+the fix, the game couldn't even get as far as gameplay. Call the hang
+**fixed**.
+
+**Correction found during cleanup.** Patch 0009 (disable all per-CPU
+idle states) had never actually been reverted, despite
+`docs/load-test-modules.md` saying so. So every build up to and
+including the memory-map fix ran with no CPU idle states at all.
+`load-test-modules.md` now carries a correction note.
+
+**Removed (build #95):**
+
+- Boot options: `irqchip.gicv3_pseudo_nmi=1` and `rootflags=nodelalloc`,
+  from both `CONFIG_CMDLINE` and the DTS `bootargs`.
+- Kconfig: `ARM64_PSEUDO_NMI` and `HARDLOCKUP_DETECTOR_PERF` (back to the
+  buddy detector), `FTRACE`/`FUNCTION_TRACER`/`IRQSOFF_TRACER`,
+  `STRICT_DEVMEM=n` (now `=y` again), `USB_QCOM_EUD`, the no-op
+  `DETECT_HUNG_TASK` line, and `TRANSPARENT_HUGEPAGE=n` (back to `always`).
+- DTS: the `eud@88e0000` node, and the `cdsp_secure_heap_tail` no-map
+  node (it never reserved and logged an error every boot).
+- Patches 0007 (genpd OSI backport), 0008 (cluster idle disable) and
+  0009 (per-CPU idle disable). `sm8250.dtsi`, `cpuidle-psci*.c`,
+  `pmdomain/core.c` and `pm_domain.h` are restored to plain v7.2.
+- The `qcom_scm` call/WAITQ/mutex tracing, which was a `work/linux`-only
+  edit that was never saved as a patch. It is saved in
+  `work/debug-overhead-removed-2026-09-22.diff`, alongside the 0007-0009
+  tree diffs.
+
+**Kept:**
+
+- The memory-map fix.
+- Real fixes for separate bugs: `INTERCONNECT_QCOM_OSM_L3`,
+  `QCOM_ICC_BWMON`, and 0006 (bounded a6xx coredump wait).
+- Near-zero-cost items: pstore/ramoops (with `PSTORE_COMPRESS` off and
+  0010's layout), the `ZRAM` driver, and Round 24's lockup-panic Kconfig.
+- The DPU frame-event pool bump, now captured as
+  `kernel/patches/0015-dpu-crtc-double-frame-event-pool.patch`.
+
+`.config` was built from the previous known-good `.config` plus
+`scripts/config` edits, not a fresh defconfig merge, to avoid the
+three-symbol drift noted in the quickref.
+
+**Verification on build #95.** Logs are in
+`docs/logs/nodebug-stress-2026-09-22/`.
+
+- The cmdline is clean, `/sys/kernel/tracing` is gone, and THP reads
+  `[always]` with `khugepaged` running.
+- Per-CPU idle states are in use on every core checked, and the cluster
+  state `S0` (`cluster_sleep_0`, the one 0008 disabled) had 775 entries
+  within the first minute of uptime.
+- `vmstress` passed at 1500M and 3000M. At 4600M it ran three times,
+  each ending in a global OOM kill (low zone down to 28 MB free), with
+  7280 THP faults and 36 `khugepaged` collapses along the way. That's
+  exactly the `khugepaged -> lru_add_drain_all()` path that used to
+  block.
+- An owner Minecraft soak was stable.
+- Across all of it: zero RCU stalls, hung tasks, lockups or unanswered
+  NMIs, no GPU faults, no DPU frame-event overflows, and 401/401 host
+  pings.
+
+The idle states, THP and memory pressure that were each suspected along
+the way all coexist fine once the RAM map is right.

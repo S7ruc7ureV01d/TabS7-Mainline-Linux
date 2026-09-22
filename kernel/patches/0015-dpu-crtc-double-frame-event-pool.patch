@@ -1,0 +1,53 @@
+From: gts7l project
+Subject: [PATCH] drm/msm/dpu: double the per-CRTC frame-event pool (4 -> 8)
+
+Under sustained heavy 3D load (Minecraft), this device logged
+"[drm:dpu_crtc_frame_event_cb] *ERROR* crtcN event 1 overflow" storms
+with hundreds of suppressed callbacks, right before the (since fixed)
+memory-pressure hard lockups. Most likely those storms were a symptom:
+the SCHED_FIFO event thread stalled behind a wedged CPU. The real hang
+was the DTS memory-node hole (docs/kernel-boot-debugging.md, "CPU
+hard-hang, root cause found").
+
+Kept as cheap headroom, since every post-fix Minecraft soak (2026-09-22)
+ran with it and showed no overflows. Previously lived only in the
+work/linux tree; captured here so a fresh tree reproduces the tested
+kernel.
+
+--- a/drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.h
++++ b/drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.h
+@@ -16,8 +16,32 @@
+ 
+ #define DPU_CRTC_NAME_SIZE	12
+ 
+-/* define the maximum number of in-flight frame events */
+-#define DPU_CRTC_FRAME_EVENT_SIZE	4
++/*
++ * gts7l (docs/kernel-boot-debugging.md, real crash investigation
++ * 2026-09-20/21): confirmed on real hardware, twice, under sustained
++ * heavy 3D rendering load (Minecraft) - this fixed 4-slot pool runs
++ * dry ([drm:dpu_crtc_frame_event_cb] *ERROR* crtcN event 1 overflow,
++ * hundreds of suppressed callbacks), followed by a genuine
++ * watchdog-detected hard CPU lockup. The event-thread kthread worker
++ * that drains this pool is correctly configured as a real SCHED_FIFO
++ * thread (dpu_kms.c's sched_set_fifo() call) and CPU frequency scaling
++ * was independently confirmed working (ruling out plain CPU
++ * starvation as the sole cause) - the crash recurred identically even
++ * after fixing a real, separate cpufreq bug
++ * (CONFIG_INTERCONNECT_QCOM_OSM_L3), so this pool's small fixed size
++ * is a real, confirmed bottleneck under real-world load this specific
++ * mainline driver version was apparently never stress-tested against.
++ * Doubled rather than picked arbitrarily larger - a low-risk bit of
++ * headroom to absorb bursts.
++ *
++ * Update 2026-09-22: the hard lockups turned out to be a separate,
++ * now-fixed bug (the board DTS declared a firmware memory hole as RAM,
++ * see docs/kernel-boot-debugging.md "CPU hard-hang, root cause found"),
++ * so the overflow storms were most likely a symptom of a CPU wedging
++ * behind this pool's drain thread, not the cause. Kept anyway: it costs a
++ * few bytes, and every post-fix Minecraft soak ran with it.
++ */
++#define DPU_CRTC_FRAME_EVENT_SIZE	8
+ 
+ /**
+  * enum dpu_crtc_client_type: crtc client type

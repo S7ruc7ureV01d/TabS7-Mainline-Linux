@@ -1890,6 +1890,22 @@ decisions, scope changes) goes here instead of being forced into a phase log.
   Full writeup in `../docs/kernel-boot-debugging.md`'s "CPU hard-hang,
   root cause found" section; logs in
   `../docs/logs/memmap-fix-stress-2026-09-22/`.
+- 2026-09-22 (night): **CPU hard-hang closed.** The owner's Minecraft
+  soak on the fix build (two versions, chunk loading, TNT) was stable,
+  where before the fix it couldn't reach gameplay. All investigation
+  overhead was then removed (build #95):
+  - boot options: pseudo-NMI, nodelalloc
+  - Kconfig: ftrace/irqsoff, STRICT_DEVMEM=n, EUD, THP=n
+  - DTS: the EUD node and the no-op secure-heap node
+  - patches 0007-0009, which brings every CPU idle state back (0009 had
+    never really been reverted)
+  - the untracked qcom_scm tracing
+
+  The DPU pool bump is now patch 0015. It was re-verified clean with the
+  full vmstress ladder (including three OOM kills, with THP and cluster
+  idle genuinely exercised) plus a second Minecraft soak. See
+  `../docs/kernel-boot-debugging.md`, "CPU hard-hang: confirmed fixed,
+  investigation overhead removed".
 - 2026-09-22: Long session covering an accidental full `data`/`archroot`
   wipe and recovery, then a real chain of Phase 5/Phase 3/Phase 4 fixes.
   **S Pen**: tested the last well-reasoned GPIO hypothesis left from

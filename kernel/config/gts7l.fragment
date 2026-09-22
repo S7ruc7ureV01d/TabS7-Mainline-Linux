@@ -69,50 +69,12 @@ CONFIG_FB_SIMPLE=y
 # parameter for this exact class of problem - tells the clock framework
 # to leave whatever the bootloader left running alone.
 #
-# Crash forensics trial (docs/crash-investigation-nmi-research.md,
-# 2026-09-20/21): irqchip.gicv3_pseudo_nmi=1 is the actual runtime switch
-# for CONFIG_ARM64_PSEUDO_NMI below - the Kconfig symbol alone changes
-# nothing at boot without it (drivers/irqchip/irq-gic-v3.c only calls
-# static_branch_enable(&supports_pseudo_nmis) when this param is set).
-# Added here, not just in the DTS's own &{/chosen}/bootargs, because this
-# is the string that actually reaches the kernel (CONFIG_CMDLINE_FORCE=y
-# below wins over whatever devicetree bootargs say - the DTS copy is
-# belt-and-suspenders only, per this file's own Round 22 note). Meant to
-# be dropped again once the pseudo-NMI trial is done (~5% runtime cost
-# while active, per the research doc) - not a permanent addition.
-# rootflags=nodelalloc (2026-09-21, docs/load-test-modules.md/
-# kernel-boot-debugging.md "Root cause found"): testing whether
-# disabling ext4 delayed allocation avoids the real spinlock stuck in
-# ext4_da_reserve_space() under heavy write load (storage_load.sh
-# reproduces in seconds). Confirmed the hard way that this can NOT be
-# applied via `mount -o remount` or /etc/fstab - ext4 explicitly refuses
-# ("can't disable delalloc during remount") since root is already
-# mounted with delalloc by the time fstab is processed, both manually
-# and via systemd-remount-fs at boot. rootflags on the kernel cmdline
-# is applied at the kernel's own initial mount of root, before that
-# restriction can apply.
-# 2026-09-22: `mem=2G` diagnostic for the CPU hard-hang investigation
-# (docs/kernel-boot-debugging.md, "CPU hard-hang, reserved-memory/
-# carveout boundary test") - tried and reverted. Result: the exact
-# same RCU-stall/"CPUs haven't responded" freeze fired within ~10s of
-# ordinary boot (systemd/Bluetooth/WiFi coming up, no deliberate
-# memory stress at all, before the USB-gadget network service even
-# started) - the opposite of what the reserved-memory/carveout-overlap
-# theory would predict (a smaller cap should make hitting a mismatched
-# high-address carveout boundary LESS likely, not more). Real result:
-# 2G is simply tight enough that routine boot-time memory pressure
-# alone trips the same underlying bug - evidence against a specific
-# physical-address mismatch, and for general memory-pressure
-# sensitivity regardless of where the pressure originates. Reverted
-# because it made the device unreliable even for ordinary boots.
-# CORRECTION (2026-09-22, later): that reading was backwards. This
-# device's carveouts are in the LOW 2 GiB, not at high addresses, and
-# the real bug was a 52 MiB non-RAM hole at 0xbcc00000 that our DTS
-# memory node declared as RAM (fixed in kernel/dts/sm8250-samsung-
-# gts7l.dts). mem=2G makes that hole a far larger share of usable RAM,
-# so it freezing at boot was evidence FOR the address theory. See
-# docs/kernel-boot-debugging.md, "CPU hard-hang, root cause found".
-CONFIG_CMDLINE="console=tty0 loglevel=15 clk_ignore_unused irqchip.gicv3_pseudo_nmi=1 rootflags=nodelalloc"
+# 2026-09-22: irqchip.gicv3_pseudo_nmi=1 (pseudo-NMI trial) and
+# rootflags=nodelalloc (ext4 delalloc theory) removed with the rest of
+# the CPU hard-hang investigation's overhead - the real cause was the
+# DTS memory node's firmware hole (docs/kernel-boot-debugging.md, "CPU
+# hard-hang, root cause found"; mem=2G history there too).
+CONFIG_CMDLINE="console=tty0 loglevel=15 clk_ignore_unused"
 CONFIG_CMDLINE_FORCE=y
 
 # Round 24 (2026-09-19, docs/kernel-boot-debugging.md): the memory-node fix
@@ -466,61 +428,14 @@ CONFIG_PSTORE=y
 CONFIG_PSTORE_RAM=y
 CONFIG_PSTORE_CONSOLE=y
 
-# Real hardware test found pstore/ramoops alone isn't enough for a
-# real hard-lockup crash specifically: the abrupt reset can leave the
-# persistent-RAM header torn (confirmed live: "ramoops: found existing
-# invalid buffer, size 155976, start 155977" - `start` one byte past
-# `size`, a classic non-atomic-header-update-vs-abrupt-reset race, not
-# a checksum/ECC-fixable bit-flip), causing the pstore driver to
-# reject a real ~152KB of otherwise-probably-intact captured console
-# data on the very next boot. Disabling STRICT_DEVMEM (was =y, plain
-# defconfig default) allows a raw /dev/mem read of the ramoops
-# physical region as a manual fallback when that happens - bypassing
-# the driver's own conservative all-or-nothing validation to recover
-# whatever's actually still there. A real, deliberate, single-owner
-# debug-device tradeoff (this project's whole kernel is already
-# custom/unsigned/debug-oriented by design), not a default worth
-# recommending generally.
-# CONFIG_STRICT_DEVMEM is not set
-
-# Crash forensics, continued (docs/crash-investigation-nmi-research.md) -
-# the recovered pstore backtrace from a real hard-lockup showed CPU 5
-# never responded even to an NMI sent from CPU 4, then never responded to
-# the SMP stop-CPU shutdown request either - genuinely frozen, three
-# independent ways, but we still don't know what CPU 5 was actually
-# executing, because the current detector (CONFIG_HARDLOCKUP_DETECTOR_BUDDY,
-# the only one available without this) is a *different*, unaffected CPU
-# noticing CPU 5 stopped reporting in - it can never capture CPU 5's own
-# registers/stack. ARM64_PSEUDO_NMI is the one real, already-upstream,
-# no-patch-carrying path to a true per-CPU NMI-capable detector
-# (HARDLOCKUP_DETECTOR_PERF) on GICv3 hardware (which SM8250 has) - but
-# whether it actually works depends on TrustZone/`xbl`/`tz` firmware
-# having set SCR_EL3.FIQ=1, which this project has no visibility into and
-# will never touch - answerable only empirically, by enabling it and
-# checking dmesg for "Pseudo-NMIs enabled" vs. a silent no-op.
-# Deliberately build+bootarg-gated, not left on by default: the actual
-# runtime behavior only changes once `irqchip.gicv3_pseudo_nmi=1` is also
-# passed on the kernel cmdline (see &{/chosen}'s bootargs in
-# kernel/dts/sm8250-samsung-gts7l.dts) - enabling just this Kconfig
-# symbol alone costs nothing at runtime. Real, measured cost *if* the
-# bootarg is also set and firmware actually supports it: ~5% on general
-# workloads, so only meant to be flipped on for a deliberate crash
-# reproduction session, not left on permanently.
-CONFIG_ARM64_PSEUDO_NMI=y
-CONFIG_HARDLOCKUP_DETECTOR_PERF=y
-
-# Freeze investigation, continued (docs/kernel-boot-debugging.md) -
-# Qualcomm EUD (Embedded USB Debugger), a separate hardware debug block
-# reachable over the same USB-C port, independent of the MUIC/CCIC
-# switch a raw I2C attempt already failed to move. Real downstream
-# source for this exact device (references/gts7l) ships its own EUD
-# node `status = "ok"` - Samsung shipped this hardware enabled, not
-# fused off. Forced built-in rather than left as a module (`=m` at
-# plain defconfig) since it's needed from boot for this debug purpose,
-# not a late-attaching peripheral we'd otherwise leave modular.
-# CONFIG_QCOM_SCM and CONFIG_USB_ROLE_SWITCH (both dependencies) were
-# already =y at plain defconfig - nothing else to force.
-CONFIG_USB_QCOM_EUD=y
+# 2026-09-22: CPU hard-hang investigation's debug-only options removed
+# now that the root cause is fixed (DTS memory-node hole, see
+# docs/kernel-boot-debugging.md "CPU hard-hang, root cause found"):
+# STRICT_DEVMEM=n (raw /dev/mem ramoops reads), ARM64_PSEUDO_NMI +
+# HARDLOCKUP_DETECTOR_PERF, USB_QCOM_EUD, DETECT_HUNG_TASK (a no-op -
+# already implied by SOFTLOCKUP_DETECTOR), FTRACE/IRQSOFF_TRACER, and
+# TRANSPARENT_HUGEPAGE=n. The comment blocks explaining why each was
+# added live in git history (commit 843a102 and earlier).
 
 # Freeze investigation, continued (docs/kernel-boot-debugging.md, "Crash
 # #4"/"Crash #5") - the pseudo-NMI detector above never fires for this
@@ -546,46 +461,10 @@ CONFIG_USB_QCOM_EUD=y
 # trace, not a panic. Forced built-in for the same reason as OSM_L3
 # above: foundational, needed from early boot to track real traffic
 # patterns, not a late-attaching optional peripheral.
+# 2026-09-22: kept - the NoC-stall theory above turned out wrong (the
+# hang was the memory-node hole), but BWMON was a genuinely inert =m
+# driver and real DDR scaling is worth having on its own.
 CONFIG_QCOM_ICC_BWMON=y
-
-# Freeze investigation, continued - found a real candidate root cause by
-# checking the local reference projects (per the owner's direction):
-# references/ubuntu-galaxy-tab-s9-ultra/docs/gpu-recovery.md documents a
-# genuine deadlock in mainline's own Freedreno GPU-fault-recovery path
-# (a6xx_gmu.c/a6xx_hfi.c's unbounded `wait_for_completion(&fault_coredump_
-# done)`, held while `recover_worker()`/`msm_gpu_fault_crashstate_capture()`
-# both need the same `gpu->lock`) - confirmed present in this project's
-# own tree line-for-line, not just theirs. This is a genuine software
-# deadlock (blocked on a mutex/completion), not a hardware hang - a
-# structurally different failure class from anything the pseudo-NMI
-# hardlockup detector above watches for (that only catches a CPU stuck
-# NOT taking interrupts, not a schedulable-but-blocked task). Enabling
-# purely as a diagnostic first, before committing to the S9 Ultra
-# project's own bounded-wait patch as an actual fix - if this deadlock is
-# really happening, this should finally produce a real blocked-task
-# stack trace via a scheduler-side timer check that doesn't depend on any
-# of the bus/NoC/pstore machinery that's failed to capture anything
-# across every real repro attempt so far.
-CONFIG_DETECT_HUNG_TASK=y
-
-# Freeze investigation, continued (2026-09-21): ruled out cpuidle/PSCI at
-# every level (cluster AND per-CPU idle-state collapse both disabled via
-# DTS, froze anyway) and a specific unmerged genpd/OSI fix (didn't help).
-# A pstore capture caught a real, corroborated (matches a known upstream
-# code path) soft-lockup signature: sshd-auth's seccomp BPF filter JIT
-# doing self-modifying code via __text_poke -> kick_all_cpus_sync, an
-# ordinary IPI broadcast - but a plain IPI cannot reach a CPU with
-# PSTATE.DAIF interrupts masked, only NMI-class delivery can. So the
-# real question is why some CPU gets stuck in an IRQ-disabled region
-# under memory pressure in the first place; any cross-call (BPF JIT
-# sync, TLB flush, anything) would hang identically once that happens.
-# CONFIG_IRQSOFF_TRACER exists exactly to answer this without needing
-# to catch a live freeze in a narrow sampling window - it continuously
-# records the single longest IRQs-disabled stretch and its exact code
-# path. CONFIG_FUNCTION_TRACER is its prerequisite.
-CONFIG_FTRACE=y
-CONFIG_FUNCTION_TRACER=y
-CONFIG_IRQSOFF_TRACER=y
 
 # Panic-on-hang sysctls (softlockup_panic/hung_task_panic/panic_on_rcu_
 # stall, set at runtime) got the freeze to actually panic and write a
@@ -621,6 +500,8 @@ CONFIG_IRQSOFF_TRACER=y
 # project's minimal initramfs doesn't reliably load modules, and swap
 # needs to be available before it matters, not after. See
 # docs/load-test-modules.md for the reasoning and the test this backs.
+# 2026-09-22: kept (costs nothing unused; no zram device is configured
+# on the rootfs). It did not fix the hang - that was the memory-node hole.
 CONFIG_ZRAM=y
 
 # Power/volume-down buttons never worked at all under Linux - traced
@@ -640,36 +521,6 @@ CONFIG_ZRAM=y
 # refgen, GPI DMA, OSM_L3, ICC_BWMON before it) - simply never added
 # for this one. Force built-in.
 CONFIG_POWER_RESET_QCOM_PON=y
-
-# Freeze investigation, continued (2026-09-22): a real, external
-# comparison test finally isolated this from a hardware/firmware
-# erratum. Wrote a minimal libc-free ARM64 reproducer replicating the
-# project's own stress-ng --vm memory-pressure repro
-# (docs/load-test-modules.md) and ran it on *stock Android*, on this
-# exact physical device - stock survived every level tested, up to and
-# including genuine severe memory pressure (`MemFree` down to ~156MB,
-# real reclaim/LMK activity), with zero responsiveness lag throughout.
-# The one confirmed, real structural difference: stock has no
-# `/sys/kernel/mm/transparent_hugepage/` at all and no `khugepaged`
-# process - THP is disabled in Samsung's own production kernel config,
-# while plain defconfig defaults to `CONFIG_TRANSPARENT_HUGEPAGE_ALWAYS`
-# (khugepaged scanning constantly in the background). This matches this
-# project's own earlier-found root cause exactly:
-# `khugepaged -> lru_add_drain_all()` blocking on an unresponsive CPU's
-# workqueue. Online research (per the owner's direction) found this is
-# a real, currently-open, unmerged upstream Linux regression - not
-# Qualcomm/Samsung-specific at all, reproducible on plain AWS Graviton3
-# ARM64 servers too (a 2026-04 LKML bug report, "lru_add_drain_per_cpu
-# barrier work item... pending... yet the work is never dispatched" -
-# idle per-CPU workqueue workers failing to pick up pending drain work).
-# A later (2026-08) mm/fbatch rework patch series aimed at removing the
-# need for lru_add_drain_all() in this path altogether cites the exact
-# same symptom ("blocked on an unresponsive CPU to run its workqueue")
-# but is still in review, not merged - no upstream fix available yet.
-# Given stock's own real-world-proven-stable config already avoids this
-# specific trigger entirely, disabling THP here matches that proven
-# configuration rather than waiting on an unmerged upstream fix.
-CONFIG_TRANSPARENT_HUGEPAGE=n
 
 # Phase 4, S Pen (docs/phase4-spen-scoping.md): mainline already has
 # the right driver family (wacom_w9000.c) for this device's Wacom EMR

@@ -231,9 +231,12 @@ Round-trip, used identically every time a kernel/DTS change needs testing:
 - `kernel/patches/000N-*.patch` - tracked patches against upstream driver
   sources in `work/linux` for changes too invasive for a Kconfig/DTS
   fragment (e.g. touch firmware flash timing, MAX77705 PASS2 fix). A
-  pending one as of 2026-09-21: the DPU frame-event queue size bump in
-  `work/linux/drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.h` has **not yet**
-  been captured as a tracked patch file.
+  The DPU frame-event pool bump that used to live only in
+  `work/linux` is captured as `0015-dpu-crtc-double-frame-event-pool.patch`
+  (2026-09-22). The CPU hard-hang investigation's patches 0007-0009
+  (genpd OSI backport, cluster/per-CPU idle-state disables) were removed
+  from this directory and reverted in `work/linux` the same day; they're
+  still in git history.
 - `work/` - gitignored scratch (build trees, TWRP/magisk tooling,
   per-round build artifacts under `work/roundNN-build/`). Nothing here is
   durable; don't rely on any specific round's directory surviving.
@@ -244,18 +247,21 @@ Round-trip, used identically every time a kernel/DTS change needs testing:
 
 ## Known-good baseline vs. current experimental state
 
-As of 2026-09-21, `boot` has a kernel with `CONFIG_ARM64_PSEUDO_NMI=y` and
-the `irqchip.gicv3_pseudo_nmi=1` bootarg **active** (not just built-in) -
-this carries a real ~5% runtime cost while flashed. See
-`docs/kernel-boot-debugging.md`'s "Crash investigation" entries and
-`docs/crash-investigation-nmi-research.md` for why. **Revert
-`CONFIG_CMDLINE`'s `irqchip.gicv3_pseudo_nmi=1`** (and optionally
-`CONFIG_ARM64_PSEUDO_NMI` itself) once the crash investigation concludes,
-so normal use doesn't permanently pay this cost.
+As of 2026-09-22 (evening), `boot` carries a **clean, non-debug kernel**
+(build #95). The CPU hard-hang is fixed: the DTS memory node now matches
+ABL's two real ranges, so the 52 MiB non-RAM hole at `0xbcc00000` is no
+longer handed out as RAM (`kernel-boot-debugging.md`, "CPU hard-hang,
+root cause found"). All of the investigation's overhead has been removed:
+- the pseudo-NMI bootarg and Kconfig, and `rootflags=nodelalloc`
+- ftrace/irqsoff, `STRICT_DEVMEM=n`, EUD, and the `qcom_scm` tracing
+- THP=n (THP is back to defconfig's `always`)
+- patches 0007-0009 (all CPU idle states are active again)
 
-**2026-09-22 (evening):** the hard-hang's root cause appears found and
-fixed. The DTS memory node now matches ABL's real two ranges, and a 52 MiB
-non-RAM hole at `0xbcc00000` is no longer treated as RAM
-(`kernel-boot-debugging.md`, "CPU hard-hang, root cause found"). Once a
-real-workload soak confirms it, revert the investigation-only settings
-above.
+This build was verified with the 1500M/3000M/4600M-OOM `vmstress` runs and
+a Minecraft soak. Pstore/ramoops, zram (driver only), BWMON, OSM L3 and
+Round 24's lockup-panic Kconfig are intentionally kept.
+
+Regenerating `.config` from defconfig + fragment still changes three
+symbols from the known-good build (see step 3 above). This round was built
+from the previous `.config` plus `scripts/config` edits for exactly that
+reason.
