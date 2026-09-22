@@ -7100,3 +7100,26 @@ boot on an I2C transfer timeout".
 - Build libssc, and iio-sensor-proxy with SSC.
 - Find the sensor supply rails from the downstream DT.
 - Set a mount matrix; this panel is portrait-native.
+
+**Stage 2 inputs, extracted (2026-09-22).** Kept under gitignored `work/`
+(stock vendor content, not committed):
+
+- `work/stock-super/vendor.img` (1.1 GB): `lpunpack` of `super.img` from
+  the stock `AP_T875XXU1ATK4` firmware (tar -> lz4 -> simg2img -> raw
+  -> lpunpack; the Python lpunpack needs a raw image, not a sparse one).
+  From it, `work/stock-super/vendor-extract/`:
+  - `etc/sensors/`: 55 SSC configs + `sns_reg_config` + `hals.conf`
+  - `lib/rfsa/adsp/`: 18 DSP skel libs, including
+    `libsns_device_mode_skel.so` and `libsns_low_lat_stream_skel.so`
+- `work/stock-persist/persist.img`: a raw, read-only `dd` of `persist`
+  (sda8, md5 `4a9d7c44...` verified against the device; never mounted).
+  `work/stock-persist/sensors/` is its `/sensors` tree: per-device
+  registry (~175 files) plus `sensors_list.txt`, which lists accel,
+  gyro, mag (AKM ak0991x), ambient_light, rotv/game_rv and gravity,
+  among others.
+
+From `kona_lsm6dso_0_0.json`: the LSM6DSO IMU is on the SLPI's own
+**I3C** bus (bus_type 3, instance 1, addr 0x0a, 400 kHz-12.5 MHz). It has
+one rail, `vddio_rail = /pmic/client/sensor_vddio` (voted by the SLPI's
+own PMIC client). Its orientation is `x=-y, y=+x, z=+z`, applied inside
+SSC.
