@@ -38,15 +38,19 @@ codec/amp pair, it's a real SoundWire-based multi-component graph:
   (`asoc-codec-names` at line 7048 literally lists `"bolero_codec"`).
 - **4x Qualcomm WSA881x** smart speaker amps - `wsa881x@20170211`/
   `@20170212`/`@21170213`/`@21170214` (lines 6968-6993), *also*
-  SoundWire, under a `wsa-macro@3240000`. **Real open question,
-  genuinely unresolved by this pass**: why both CS35L41 *and* WSA881x
-  appear to be present for what should be 4 physical speakers - either
-  one set is a disabled/unused reference-design leftover, or they
-  serve genuinely different channels (e.g. WSA881x for the two larger
-  woofers, CS35L41 for tweeters, a real design some Samsung tablets
-  use) - not determined from the DTS alone; would need a live
-  `status`/regulator-supply check or a stock Android `dmesg`/`amixer`
-  capture to resolve.
+  SoundWire, under a `wsa-macro@3240000`.
+
+  **Resolved, 2026-09-22**: booted real stock Android (Magisk root)
+  specifically to check this. `cs35l41` probes for real - four full
+  instances (`cs35l41-pwr`/`-cal`/`-bd`/MFD core, `_fl`/`_fr`/plain/`_r`
+  suffixes), each with `dsp_part_name: cs35l40-spk`, at
+  `t≈1.08-1.09s` in the boot log
+  (`docs/logs/stock-boot-2026-09-22/08-audio-amp-cs35l41-vs-wsa881x-trace.txt`).
+  **`wsa881x` never appears anywhere in the boot log at all** - not a
+  single probe attempt, success or failure. CS35L41 is the real,
+  actively-used amp for this exact unit; WSA881x is dead/unused
+  devicetree - a disabled reference-design leftover, not a
+  different-channel split as speculated above. Port CS35L41 only.
 - **LPASS clock IDs and `qcom,codec-lpass-ext-clk-freq` properties**
   (lines 7154-7218, 8 separate entries) confirm this board genuinely
   drives multiple codec clock domains from the SoC's own LPASS

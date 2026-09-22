@@ -6303,3 +6303,550 @@ hypothesis: a genuine interconnect/NoC bus-fabric stall under heavy DDR
 bandwidth pressure (matches `kernel/config/gts7l.fragment`'s own
 pre-existing `CONFIG_QCOM_ICC_BWMON` rationale). Full trail in
 `docs/load-test-modules.md`.
+
+## Session 2026-09-22: accidental data wipe recovery, KDE Plasma root-caused end-to-end, power/volume buttons, backlight
+
+### The wipe
+
+Mid-session, TWRP glitched during a reboot and the owner's own attempt
+to exit it wiped the `archroot` partition (`/dev/block/sda37`) - the
+owner's own words: "that was a mistake on my end." Recovered via
+`work/archroot-build/archroot-rootfs.tar`, the project's existing
+backup - but that backup's timestamp (2026-09-20 11:02) predated
+several fixes applied live to the running system afterward and never
+re-captured: `usb-gadget-ecm.service`, `bt-uart-rebind.service`,
+`wlan-pci-rebind.service`, and a UFS WriteBooster runtime-PM udev fix.
+Confirmed by inspecting the tar directly (`tar -tf ... | grep
+usb-gadget-ecm`) - none of those files were in it. Restoring it alone
+would have reproduced a network-less, SSH-less system.
+
+### Rebuilt a complete rootfs from scratch (v2)
+
+Rather than patch the restored system live again, imported the
+existing tar as a Docker base image (`docker import --platform
+linux/arm64`) and built a proper `v2` tarball on top of it with the
+same Docker/QEMU cross-build method the original was made with:
+`pacman-key --init/--populate`, `pacman -Syu --disable-sandbox`
+(Landlock sandboxing isn't supported under QEMU emulation), then
+`plasma-desktop sddm konsole dolphin plasma-systemmonitor kscreen
+firefox plasma-nm bluedevil evtest`, plus all four missing overlay
+files above, SSH host password + authorized_keys, and a `sddm.conf.d`
+autologin config. Deployed via the same `mke2fs -t ext4 -L archroot` +
+`adb push` + `tar -xpf` process TWRP always uses for this partition.
+
+### KDE Plasma: real chain of independent bugs, not one bug
+
+First boot of `v2`: SSH worked, but the physical screen showed nothing
+- `kwin_wayland` never became DRM master, D-Bus showed only
+`org.kde.KWinWrapper`/`org.kde.baloo` registered, nothing else. Traced
+through several distinct, real, independently-fixed bugs:
+
+1. **`kwin_wayland` picked the wrong backend.** Its own log said `No
+   backend specified, automatically choosing Wayland because
+   WAYLAND_DISPLAY is set` - it was trying to connect *as a client* to
+   a compositor socket that didn't exist yet, instead of using the
+   real DRM/KMS backend. Cause: a global
+   `~/.config/environment.d/10-wayland-qt.conf` (added earlier, for
+   `kactivitymanagerd`'s own real requirement to see `WAYLAND_DISPLAY`)
+   was inherited by *every* process in the session, including `kwin`
+   itself before it had created that socket. Removed the global file;
+   `kactivitymanagerd`'s actual need is satisfied by its own D-Bus
+   activation environment, not a blanket systemd-user environment.d
+   entry.
+
+2. **SDDM's own X11 greeter fought `kwin` for DRM master.** Even with
+   autologin enabled, SDDM still spins up a full Xorg greeter on VT2
+   (normal SDDM behavior, kept ready for fast user-switching) - and
+   confirmed live via `fuser -v /dev/dri/card0` that this Xorg process
+   held DRM master indefinitely, regardless of which VT was actually
+   foreground (`cat /sys/class/tty/tty0/active` showed `tty3` - kwin's
+   own VT - active the whole time, yet Xorg still held master). Tried
+   `DisplayServer=wayland` in `sddm.conf.d` to avoid the X11 greeter
+   entirely - crashed immediately (`sddm-greeter-qt6 ... --display-server
+   weston`: this build has no `weston`). Real fix: replaced SDDM
+   entirely with a plain systemd autologin unit
+   (`/etc/systemd/system/plasma-autologin.service`, `PAMName=login`,
+   `TTYPath=/dev/tty1`, `ExecStart=/usr/bin/startplasma-wayland`) - a
+   standard kiosk-mode pattern, no X11 greeter in the picture at all.
+
+3. **`alarm` was never in `video`/`render`/`input`.** The custom
+   autologin unit bypasses SDDM's normal PAM/`pam_systemd` seat
+   integration, so logind never granted the dynamic ACL/`uaccess` tag
+   a real graphical session gets for `/dev/dri/card0`. Confirmed via
+   `kwin_wayland[...]: Failed to open drm node /dev/dri/card0:
+   Permission denied` even running completely alone (SDDM/Xorg fully
+   stopped) - proving bug #2's fix alone wasn't sufficient. Fixed with
+   `usermod -aG video,render,input alarm`, the same static-group-based
+   workaround this project already uses elsewhere in place of relying
+   on logind ACL tagging.
+
+4. **A stale `kwinoutputconfig.json` failed to apply.** Even with DRM
+   master finally held, `kwin`'s own `supportInformation` showed
+   `Screen 0: Enabled: 0` and logged `Applying output configuration
+   failed!` twice at startup. The persisted config
+   (`~/.config/kwinoutputconfig.json`, mode 1600x2560@96Hz,
+   `enabled: true`) looked correct on paper but `kwin` couldn't apply
+   it live. Deleted it and did a full `loginctl terminate-user alarm` +
+   session restart (a simple service restart wasn't enough - the
+   *user manager* itself had already cached the stale environment.d
+   variable from bug #1, requiring a full teardown, not a partial one)
+   to force a completely fresh output negotiation. Confirmed via
+   `supportInformation` afterward: `Enabled: 1`, real geometry
+   `865x1384` at scale 1.85, 96Hz.
+
+5. **`plasmashell` SEGV in `Corona::loadLayout()`.** Even with the
+   compositor fully working, `plasmashell` crash-looped
+   (`coredumpctl`: `SIGSEGV`, `#0 KConfigGroup::config()` called from
+   `KConfigGroup::writeEntry()`, from a QML property set inside
+   `Plasma::Corona::loadLayout()`, triggered by
+   `KActivities::Consumer::serviceStatusChanged()`). First worked
+   around by hand-writing a minimal `plasma-org.kde.plasma.desktop-
+   appletsrc` to skip the auto-generation code path entirely (this
+   got a *desktop* on screen, but with an empty panel - the
+   hand-written layout only defined an empty panel container, no real
+   widgets). Once bugs #1-4 above were actually fixed, deleted that
+   placeholder file and let Plasma regenerate its real default layout
+   from scratch - it worked cleanly, no crash. Conclusion: this SEGV
+   was a downstream *symptom* of the broken environment (most likely
+   bug #3's permission denial cascading into `kactivitymanagerd`
+   itself never fully initializing), not an independent Plasma bug.
+
+Rebuilt the rootfs a second time (`v3`) with all five fixes applied as
+real build-time changes (removed the environment.d file, disabled
+`sddm.service`, added the `plasma-autologin.service` unit + group
+memberships, deleted the stale output config and hand-written
+appletsrc so they regenerate fresh) rather than leaving them as live
+patches on one already-fixed instance - confirmed on a clean cold
+reboot from a freshly `mke2fs`'d partition. Also added `discover` +
+`packagekit-qt6` (app store) and `plasma-pa` + `pipewire-audio` (the
+volume applet, `qrc:/qt/qml/plasma/applet/.../PulseAudio.qml: module
+"org.kde.plasma.private.volume" is not installed` was in the boot
+log), and enabled `systemd-timesyncd` (the device's clock was stuck at
+1970-01-01, no RTC, which was independently breaking `pacman`'s PGP
+signature checks every boot).
+
+### Power/volume-down buttons never worked at all
+
+`/proc/bus/input/devices` showed only `gpio-keys` with a single key
+capability (`KEY_VOLUMEUP`, bit 115) - power and volume-down were
+completely absent, not just unresponsive. Traced directly:
+
+- The devicetree is correct - decompiled the actual compiled
+  `sm8250-samsung-gts7l.dtb` and confirmed `pwrkey`/`resin` under
+  `pon@800` (PM8150, SPMI USID 0) both `status = "okay"`, correct
+  `qcom,pm8941-pwrkey`/`-resin` compatible strings, correct
+  `linux,code` (`KEY_POWER`/`KEY_VOLUMEDOWN`).
+- `CONFIG_INPUT_PM8941_PWRKEY=y` (builtin, confirmed in `.config`).
+- Yet no `pwrkey`/`resin` platform device existed anywhere under
+  `/sys/devices` at all - not deferred-probe (`/sys/kernel/debug/
+  devices_deferred` was empty), just never created.
+- Root cause: `pwrkey`/`resin` are DT *children* of `pon@800`
+  (compatible `qcom,pm8998-pon`), and it's *that* driver
+  (`drivers/power/reset/qcom-pon.c`) whose `probe()` walks DT children
+  into real platform devices via `devm_of_platform_populate()`. Its
+  Kconfig symbol, `CONFIG_POWER_RESET_QCOM_PON`, was still at
+  defconfig's `=m` - the exact same no-module-loading bug class this
+  fragment has hit repeatedly (`DRM_MSM`, the USB HS PHY, `refgen`,
+  GPI DMA, `OSM_L3`, `ICC_BWMON` before it), just never added for this
+  one symbol specifically.
+- Fixed: `CONFIG_POWER_RESET_QCOM_PON=y` in
+  `kernel/config/gts7l.fragment`. Confirmed on real hardware: both
+  `pm8941_pwrkey` and `pm8941_resin` now exist as real input devices,
+  and the owner confirmed both buttons physically work.
+
+(SPMI aside, found but *ruled out* as related to this bug: two other
+PMIC SPMI slaves, USIDs `0xa`/`0xb`, fail to probe with a real bus
+transaction error - `pmic_arb_check_chnl_status_v1: ... transaction
+failed`. Unrelated to the button fix - `pon@800` lives under USID 0,
+which was never one of the failing ones - but a real, separate,
+not-yet-investigated issue worth revisiting.)
+
+### Backlight brightness control: three real bugs, all needed together
+
+`org.kde.Solid.PowerManagement`'s `setBrightness` was a genuine
+no-op - the getter worked, the setter silently did nothing, even
+called directly over D-Bus (bypassing KDE Settings' UI entirely).
+Direct sysfs writes (`echo N > .../brightness`) updated the stored
+value but produced *zero visible change on the physical screen*,
+narrowing this to a real hardware/driver bug, not a KDE integration
+bug. Three real, independently-confirmed causes, all fixed together in
+`panel-novatek-nt36523.c`
+(`kernel/patches/0013-nt36523-fix-backlight-control.patch`):
+
+1. `actual_brightness` returned `-EIO` ("No data available") -
+   `nt36523_bl_get_brightness()` issued a real MIPI DSI DCS "get
+   display brightness" *read* command, which this panel's firmware
+   never answers (a real, common limitation of write-only-brightness
+   command-mode panels, not a driver bug). Anything that reads
+   `actual_brightness` before writing a new value - confirmed live:
+   KDE's powerdevil brightness helper does exactly this - silently
+   aborted the whole request on that read failure, with no error
+   surfaced anywhere in userspace. Fixed by dropping `.get_brightness`
+   from `nt36523_bl_ops` entirely; the backlight core's own standard
+   fallback (report `bl->props.brightness`, the last successfully
+   *written* value) avoids the failing read altogether.
+
+2. `max_brightness=4095`/default `512` were arbitrary placeholder
+   values from whoever first wrote this driver, not this panel's real
+   range - `docs/phase2-panel-scoping.md`'s own hardware table already
+   correctly said "range 4-462" (from downstream's
+   `qcom,mdss-dsi-bl-max-level = <462>`), it just never actually got
+   matched in the driver. Values above 462 got silently
+   clamped/ignored by the panel's own firmware. Fixed:
+   `max_brightness = 462`, default `231`.
+
+3. **The real reason nothing visibly changed even after fixing both of
+   the above**: this panel is dual-DSI (`gts7l_desc.is_dual_dsi =
+   true`, like every other command in `gts7l_init_sequence()` - every
+   single init write uses `mipi_dsi_dual_dcs_write_seq_multi`, sending
+   to both `dsi0` and `dsi1`). But `nt36523_create_backlight()` only
+   ever took a single `struct mipi_dsi_device *` (the primary link,
+   `pinfo->dsi[0]`) as the backlight device's private data, so
+   `update_status()` only ever sent the brightness command to one
+   physical half of the panel - never the other. Changed
+   `nt36523_create_backlight()` to take the whole `struct panel_info
+   *` instead, and `nt36523_bl_update_status()` now sends the DCS
+   brightness command to both `pinfo->dsi[0]` and `pinfo->dsi[1]` when
+   `is_dual_dsi`, matching every other command in this driver.
+   Confirmed fixed on real hardware by the owner directly: the
+   brightness slider now visibly dims/brightens the screen.
+
+### Bluetooth: rootfs-level gap, not a kernel regression
+
+`bluedevil`'s tray icon was missing in the freshly-rebuilt `v2`/`v3`
+rootfs. `hci0` existed and was unblocked (`rfkill list`), and dmesg
+showed the real QCA6390 firmware download completing successfully
+(`QCA setup on UART is completed`) - the kernel-level Bluetooth
+bring-up from the earlier Phase 3 pass was never broken. The gap:
+`bluetooth.service` (the actual `bluetoothd` daemon) was simply never
+enabled in the rebuilt rootfs, so there was no BlueZ D-Bus service for
+`bluedevil` to talk to - it correctly hid itself with nothing to
+manage. Enabled `bluetooth.service` and installed `bluez-utils` (for
+`bluetoothctl`, a separate package from the daemon), baked into
+`work/archroot-build/archroot-rootfs-v4.tar`.
+
+### Motion sensors / auto-rotation: scoped, genuinely bigger than a quick fix
+
+No IIO devices, no accelerometer input device, nothing in dmesg
+mentioning `accel`/`iio`/`gyro`/`sensor` at all - not a driver-binding
+gap like the button fix, a total absence. Traced to the real chip
+(`references/kernel_samsung_sm8250/drivers/adsp_factory/
+lsm6dso_accel.c` - an ST LSM6DSO) and found it has *zero* I2C client
+registration in its own downstream driver - it only calls
+`adsp_factory_register()`, talking exclusively to Qualcomm's SLPI
+(Sensor DSP) coprocessor over their own sensor IPC/QMI protocol, never
+touching a bus the AP's own kernel can see directly. No plain I2C node
+for this chip exists anywhere in the devicetree. Real support would
+need booting the SLPI remoteproc firmware and implementing that IPC
+protocol from scratch - a substantial subsystem port on the scale of
+the Type-C/MUIC block already deferred in Phase 3, not a devicetree or
+config fix. Left unimplemented, tracked in `plans/roadmap.md`.
+
+### 120Hz: a proposed fix caught and correctly rejected before being applied
+
+While investigating the backlight bug, briefly proposed changing
+`gts7l_modes[]`'s `h-front-porch` from 168 to 84 to match downstream's
+own DFPS-list "120Hz primary" timing entry. The owner caught this
+before it was applied, pointing back at this file's own Round 49-52
+history above: 96Hz was already a deliberate, real-hardware-tested
+choice - mainline's MDP core clock table (`dispcc-sm8250.c`) is
+hard-capped below the ~523MHz 120Hz genuinely requires, and the
+porches were specifically tuned (`v-front-porch` padded 26→28) to fit
+within the achievable clock budget. Changing the porch numbers alone
+would not have enabled 120Hz (the SoC clock driver is the real
+constraint, not the panel's DFPS timing) and could easily have broken
+the currently-working 96Hz mode for zero benefit. Not touched.
+
+### CPU hard-hang, continued (2026-09-22): a real stock-Android comparison test, and the actual upstream bug found
+
+Went back into stock Android specifically to run a controlled
+comparison test against the freeze bug (`CONFIG_QCOM_ICC_BWMON`
+section above, and the full trail in `docs/load-test-modules.md`).
+
+**The test**: wrote a minimal, libc-free ARM64 reproducer (raw Linux
+syscalls only - `mmap`/`munmap`/`nanosleep`/`write`, no bionic/libc
+dependency at all, so the exact same static binary runs identically on
+this project's own mainline kernel and on stock Android) replicating
+this project's own `stress-ng --vm --vm-keep` repro: allocate N bytes
+of anonymous memory, touch every page to force real backing, hold for
+30s. Ran it on real stock Android (Magisk root) at three sizes -
+1500M (the exact size that reliably freezes mainline), 2800M (scaled
+to this device's larger reported available memory), and 5000M
+(deliberately exceeding available RAM to force genuine reclaim/possible
+LMK activity, confirmed live: `MemFree` dropped to ~156MB during the
+run) - while continuously polling `adb shell` round-trip latency from
+the host. **Stock Android never hung at any level tested** - latency
+stayed flat (44-68ms) throughout every run, including the 5000M one
+under genuine severe memory pressure.
+
+**The one real, confirmed structural difference**: stock has no
+`/sys/kernel/mm/transparent_hugepage/` directory at all, and no
+`khugepaged` process (`ps -ef | grep khugepaged` - nothing but the grep
+itself). Samsung's own production kernel doesn't build Transparent
+Huge Page support the way plain arm64 defconfig does
+(`CONFIG_TRANSPARENT_HUGEPAGE_ALWAYS=y`, khugepaged scanning constantly
+in the background) - and `khugepaged -> lru_add_drain_all()` is
+*exactly* the mechanism this project's own earlier investigation caught
+in the act (the "Freeze investigation, continued" section a few rounds
+above this one).
+
+**Online research (per the owner's direction) confirmed this is a
+real, currently-open, unmerged upstream Linux bug** - not a
+Qualcomm/Samsung hardware erratum, not specific to this port at all. A
+2026-04 LKML bug report ("[BUG] mm: lru_add_drain_all() hangs")
+reproduces the identical symptom on plain AWS Graviton3 ARM64 cloud
+servers: "The lru_add_drain_per_cpu barrier work item (queued by
+khugepaged) is pending on mm_percpu_wq for CPU 28, with two workers on
+that CPU... Both show idle-path stacks... yet the work is never
+dispatched" - idle per-CPU workqueue workers repeatedly waking, failing
+to dispatch pending drain work, and sleeping again (10-100x normal
+context-switch counts). A later (2026-08) `mm/fbatch` rework patch
+series aimed at removing the need for `lru_add_drain_all()` in this
+path entirely states the exact same motivating symptom in its own
+words - "`lru_add_drain_all()` appearing in watchdog backtraces: not to
+blame, but blocked on an unresponsive CPU to run its workqueue" - but
+is still in review as of that date, not merged. No upstream fix
+available yet; the regression window is reported as between kernel 6.8
+and 6.17.
+
+Also directly relevant, found in the same research pass: an in-flight
+`linux-arm-msm` patch series ("watchdog: qcom: Support NMI") that adds
+real GICv3 pseudo-NMI support to the Qualcomm watchdog driver
+specifically so it can capture diagnostic state *before* the hardware
+reset bites during exactly this class of total lockup - independent
+confirmation that "a hard-locked CPU with interrupts disabled defeating
+the normal watchdog bark path" is a real, known, actively-worked-on
+problem class on this SoC family, matching this project's own
+`CONFIG_ARM64_PSEUDO_NMI`/`irqchip.gicv3_pseudo_nmi=1` trial from
+earlier in this investigation.
+
+**Fix applied**: `CONFIG_TRANSPARENT_HUGEPAGE=n`
+(`kernel/config/gts7l.fragment`) - matches Samsung's own
+real-world-proven-stable production configuration rather than waiting
+on an unmerged upstream fix. This is a mitigation for the specific,
+now-identified *trigger* (khugepaged's background scanning), not a fix
+for the underlying upstream workqueue-dispatch bug itself, which
+remains open. **Not yet validated against a real, sustained freeze
+repro on this project's own kernel** - the comparison test only proves
+stock avoids the trigger, not that disabling THP on our own kernel
+prevents the freeze; that's the next real test, once back on this
+project's own Linux build.
+
+### CPU hard-hang, continued (2026-09-22, later same day): THP-disable did NOT fix it - a partial, single-CPU-scoped lockup, not a full freeze
+
+Flashed `boot` only (explicitly left `dtbo`/`data`/`vbmeta` stock, per
+the owner's instruction, to avoid disturbing the Android userdata
+partition) with a build carrying the `CONFIG_TRANSPARENT_HUGEPAGE=n`
+mitigation above, plus the backlight/buttons/S-Pen-HPM fixes from the
+same session. Booted the initramfs debug environment (did not
+`switch_root`, since `/data` had just been altered by the intervening
+stock-Android boot) and re-ran the same `vmstress` reproducer over the
+`/dev/ttyACM0` USB-ACM serial console.
+
+**Result: the freeze still happened.** THP-disable did not prevent it.
+Sequence observed:
+
+1. `vmstress` launched in the background; `echo alive-1` still echoed
+   and returned normally.
+2. Starting around `alive-2`, commands still echoed (input was still
+   being accepted onto the tty) but produced **no command output** -
+   looked like a hang.
+3. The physical screen was actively flooding with a repeating
+   `drm_crtc_wait_one_vblank()` timeout `WARN_ON`, traced through
+   `drm_fb_helper_damage_work` -> `process_scheduled_works` ->
+   `worker_thread` -> `kthread`, with **timestamps that kept advancing**
+   (379.6s -> 380.7s and climbing) for as long as it was watched.
+4. Two separate clean passive captures of `/dev/ttyACM0` (no commands
+   sent, just listening: 25s, then ~8s after one benign test `echo`)
+   both came back **completely empty - zero bytes**, even though the
+   owner confirmed the physical screen was still actively spamming the
+   same warning at that exact moment.
+
+**What "spamming the screen but silent on the serial console"
+actually means**: this is a partial lockup, not a total kernel panic
+or full scheduler stall. The vblank-timeout warning is produced by a
+kernel worker thread (`drm_fb_helper_damage_work`, run via the normal
+`worker_thread`/`kthread` machinery) - for it to keep appearing with
+advancing timestamps, *some* CPU has to still be alive, still
+scheduling that worker, and successfully driving the framebuffer
+console. That path is provably not dead. But the getty/shell on the
+USB-gadget serial console never produced another byte, on any CPU,
+across two independent capture windows. The straightforward reading:
+whatever CPU is servicing the USB gadget's serial interrupts/data path
+(or whatever lock the shell/vmstress needed next) is wedged solid,
+while at least one *other* CPU keeps running unrelated kernel worker
+threads normally. This is a **single-CPU (or single-subsystem)
+lockup**, matching this project's *original*, pre-THP-investigation
+hypothesis more closely than the khugepaged/`lru_add_drain_all()`
+global-workqueue-starvation theory documented just above - that theory
+would predict *no* forward progress anywhere once triggered, but here
+one workqueue kept advancing fine while another (or the USB gadget's
+interrupt/data path) was completely dead.
+
+**Conclusion**: `CONFIG_TRANSPARENT_HUGEPAGE=n` may still be a valid
+fix for the separate, real, independently-confirmed upstream
+`lru_add_drain_all()` workqueue-dispatch bug described above - it just
+isn't the fix for *this* freeze. This freeze bug needs its own root
+cause, scoped to why a specific CPU (or the interrupt/IRQ affinity
+tied to the USB gadget UDC, or whatever lock path the shell/vmstress
+combination hits) goes unresponsive while the rest of the system
+keeps running. Recovered via hard reset (Volume Down + Power); `/data`
+was never touched by this test. Next step: research this specific
+signature (worker threads on other CPUs still running, one CPU/IRQ
+path permanently wedged, DRM/vblank-worker spam as a side effect
+rather than the cause) against known Qualcomm SM8250 / mainline arm64
+errata and lockup classes.
+
+### CPU hard-hang, online research (2026-09-22): a strong lead - the `qcom_scm` (TrustZone SMC) driver's WAITQ + global-mutex stall
+
+Searched for this project's specific failure signature - one kernel
+worker thread on some CPU still advancing normally, while a completely
+unrelated code path (the USB-gadget serial console) is permanently and
+totally unresponsive, triggered under memory pressure, requiring a
+hard reset to recover - against known SM8250/mainline-arm64 lockup
+classes. Ruled out as a lead: ARM GICv3 IRQ-affinity bugs (real, but
+about routing SPIs to a chosen core, not about a core going
+unresponsive) and PSCI/cpuidle "core never wakes from deep idle"
+errata (real bug class on this SoC family per `arm64: dts: qcom:
+sm8250: drop idlestate for the CPU cluster`, but that's a boot-time
+instability issue, not something triggered specifically by memory
+pressure mid-run).
+
+**The strong lead**: the `qcom_scm` driver - the sole gateway for
+every SMC (Secure Monitor Call) from the kernel into TrustZone
+firmware on this SoC, used pervasively (cache/memory-protection
+operations, secure-world crypto, restart, etc., not just an
+occasional cold-path call) - has an actively-being-fixed class of bugs
+in exactly this shape, per a string of 2026-05 through 2026-09
+`linux-arm-msm`/LKML patch series ("firmware: qcom: scm: Misc. SCM
+driver fixes", "firmware: qcom: scm locking improvements", "firmware:
+qcom_scm: Support multiple waitq contexts"):
+
+- The driver holds a single **global mutex** across the entire
+  SMC-call lifecycle, including any `QCOM_SCM_WAITQ_SLEEP` /
+  `WAITQ_RESUME` cycle. If one call gets parked on a firmware waitq
+  *while holding that mutex*, every *other*, completely unrelated SMC
+  call made by any other CPU/thread from that point on also stalls on
+  the same mutex - even though the firmware's own waitq mechanism is
+  designed to allow multiple SMCs in flight concurrently. One stuck
+  caller silently wedges every future SCM consumer system-wide.
+- `qcom_scm_wait_for_wq_completion()` waits in `TASK_IDLE` - genuinely
+  **uninterruptible**. A thread parked there cannot be frozen, killed,
+  or recovered by anything short of a hard reset, which matches this
+  project's own recovery experience exactly.
+- The SCM call path is otherwise a total black box at runtime - the
+  patch series's own stated motivation is that "stalls caused by
+  firmware congestion, `WAITQ_SLEEP`/`RESUME` cycles, and `EBUSY` retry
+  loops are invisible without recompiling the kernel with temporary
+  printk statements or attaching a hardware debugger," which lines up
+  with why this project's own passive serial captures showed nothing
+  useful - a wedged SCM mutex wait wouldn't necessarily print anything
+  at all.
+
+This fits the observed signature well: a memory-pressure-triggered
+reclaim/compaction path (or something else, elsewhere in the system)
+makes an SCM call that gets parked in a TrustZone waitq while holding
+the global `qcom_scm` mutex; the thread servicing the USB-gadget serial
+console/shell separately needs an SCM call for something unrelated
+(a great many mundane kernel paths - clock, pinctrl, cache-maintenance,
+regulator operations - end up calling through `qcom_scm` on this
+SoC family) and blocks on that same mutex forever; meanwhile CPUs and
+kernel worker threads that never need an SCM call (like the DRM/fbcon
+damage-work kthread producing the vblank-timeout spam) keep running
+completely normally. This kernel is pinned to v7.2.0
+(`work/linux/Makefile`); all of the located `qcom_scm` locking fixes
+are dated after that and are still at the patch-review stage upstream
+(mirrored via patchwork/Ratatoskr, not yet merged), so this kernel
+almost certainly still has the bug if this diagnosis is right.
+
+**Not yet confirmed** - this is a strong, well-matched lead from
+research, not a proven root cause on this hardware. Next real step
+would be adding `trace_scm_smc_request`/`trace_scm_smc_done`
+tracepoints (added in the same patch series) or a temporary printk in
+`qcom_scm_call()`/`qcom_scm_wait_for_wq_completion()` and reproducing
+the freeze again, to see directly whether some CPU is actually parked
+in that wait at the moment of the hang.
+
+### CPU hard-hang, `qcom_scm` tracing added and tested (2026-09-22, later): disconfirmed - the real common thread is `smp_call_function_many_cond()`/IPI delivery, not SCM
+
+Added the tracing proposed above: `qcom_scm_call()` in `qcom_scm.c`
+now times every call and warns (`gts7l-scm-trace: SLOW ...`) on any
+call taking >=50ms, and `__scm_smc_do_quirk_handle_waitq()`/
+`__scm_smc_do()` in `qcom_scm-smc.c` warn on any `WAITQ_SLEEP` wait
+>=20ms or any `qcom_scm_lock` mutex-acquire wait >=50ms. First attempt
+logged *every* call unconditionally and, because `qcom_scm_call()` is
+invoked frequently enough on real hardware, the synchronous console
+writes alone were enough overhead to starve/corrupt the time-sensitive
+USB-gadget serial console (observed as a stream of garbled `ed:
+unimplemented command`/`sh: /: Permission denied` noise on
+`/dev/ttyACM0` at ~40,000+ lines/sec, even at idle) - fixed by only
+logging the slow/contended cases before re-testing.
+
+**Testing moved off the serial console entirely** for this round -
+the `/dev/ttyACM0` link kept corrupting/disconnecting unreliably
+enough (see the SD-card side-investigation below) that the real test
+was done over SSH via the USB-Ethernet (ECM) gadget instead
+(`docs/dev-environment-quickref.md`'s "Booted into Arch Linux" path),
+with a persistent `dmesg -w` session watching live while `vmstress`
+ran in a second SSH session. This is a much more reliable channel and
+should be the default for any future freeze repro.
+
+**Result: reproduced the freeze cleanly, with two independent
+triggers caught in one run, and the `qcom_scm` theory is disconfirmed**
+- full log saved at
+`docs/logs/freeze-2026-09-22-ssh-capture/dmesg-live-watch-full-freeze.txt`.
+
+1. First, the exact same signature as the original 2026-09-21
+   "Crash #4/#5" finding: `rcu: rcu_preempt detected stalls`, `Sending
+   NMI from CPU 6 to CPUs 4`, then `After 10 seconds, these CPUS still
+   haven't responded to the NMI: 4` - CPU 4 stopped responding even to
+   a hardware NMI backtrace request under `vmstress`'s memory pressure.
+   **Zero `gts7l-scm-trace` lines fired anywhere in the whole
+   capture** - no slow SCM call, no slow WAITQ wait, no mutex
+   contention, at any point before or during this. If a `qcom_scm`
+   WAITQ/mutex stall were the mechanism, this is exactly the kind of
+   event that should have shown *something* (a call that eventually
+   returns slow, or contention on the lock from another CPU) - it
+   didn't.
+2. ~47 seconds later, a **second, independent trigger**: `watchdog:
+   BUG: soft lockup - CPU#0 stuck for 23s! [systemd:1]`, with `systemd`
+   (PID 1) itself stuck in `smp_call_function_many_cond+0x45c/0x5d8`
+   <- `kick_all_cpus_sync` <- `__text_poke` <- `aarch64_insn_copy` <-
+   `bpf_arch_text_copy` <- `bpf_jit_binary_pack_finalize` <-
+   `bpf_int_jit_compile` <- ... <- `bpf_prog_load` <- `__sys_bpf` -
+   i.e. systemd's own routine BPF JIT-compilation (cgroup/seccomp
+   filters, not anything unusual) needed to patch executable memory
+   and called `kick_all_cpus_sync()` to synchronize icache/TLB state
+   across CPUs - and that cross-CPU IPI never completed either.
+3. After that second message, the log went **completely silent** -
+   not even the softlockup watchdog's own periodic re-print continued,
+   meaning CPU 0's own local timers stopped too. A fresh, independent
+   SSH connection attempt afterward got as far as the password prompt
+   (TCP-level networking still minimally alive) but the remote shell
+   never ran and produced no output; `ping` produced nothing either.
+   Confirmed by the owner: device was genuinely frozen on the physical
+   screen too, recovered via hard reset.
+
+**Real conclusion**: the common thread across every trigger this
+project has now caught red-handed - `lru_add_drain_all()`
+(khugepaged/THP), a hardware NMI backtrace request, and now
+`kick_all_cpus_sync()` (BPF JIT text-patching, completely unrelated to
+either of the other two) - is not any one of those callers. It's
+**`smp_call_function_many_cond()` / IPI delivery to a specific CPU**:
+under memory pressure, some CPU core stops acknowledging
+cross-CPU-synchronization IPIs (and even hardware NMIs) entirely,
+regardless of who's asking or why. `qcom_scm` is very likely not
+involved at all - dropped as a lead. This points back toward something
+at the GIC/interrupt-controller or CPU-power-state level specific to
+this SoC under memory pressure (e.g. a stuck/mis-woken CPU in a low-
+power idle state, or a genuine GICR/redistributor wake-up race),
+closer to the *original* 2026-09-21 "hardware/firmware-level lockup"
+framing than the THP-specific or `qcom_scm`-specific theories explored
+since. `CONFIG_TRANSPARENT_HUGEPAGE=n` and the `qcom_scm` tracing are
+both being left in (harmless, and the tracing costs nothing when
+nothing is slow), but neither is the fix. Next real step: capture a
+per-CPU register/PC dump of whichever CPU is the one *not* responding
+(not the one complaining) at the moment of a stall - the existing NMI
+backtrace only shows the requester's own trace reliably; getting the
+stuck CPU's own PC would show what it's actually doing (or not doing)
+when it stops answering.

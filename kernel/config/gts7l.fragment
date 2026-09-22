@@ -91,6 +91,20 @@ CONFIG_FB_SIMPLE=y
 # and via systemd-remount-fs at boot. rootflags on the kernel cmdline
 # is applied at the kernel's own initial mount of root, before that
 # restriction can apply.
+# 2026-09-22: `mem=2G` diagnostic for the CPU hard-hang investigation
+# (docs/kernel-boot-debugging.md, "CPU hard-hang, reserved-memory/
+# carveout boundary test") - tried and reverted. Result: the exact
+# same RCU-stall/"CPUs haven't responded" freeze fired within ~10s of
+# ordinary boot (systemd/Bluetooth/WiFi coming up, no deliberate
+# memory stress at all, before the USB-gadget network service even
+# started) - the opposite of what the reserved-memory/carveout-overlap
+# theory would predict (a smaller cap should make hitting a mismatched
+# high-address carveout boundary LESS likely, not more). Real result:
+# 2G is simply tight enough that routine boot-time memory pressure
+# alone trips the same underlying bug - evidence against a specific
+# physical-address mismatch, and for general memory-pressure
+# sensitivity regardless of where the pressure originates. Reverted
+# because it made the device unreliable even for ordinary boots.
 CONFIG_CMDLINE="console=tty0 loglevel=15 clk_ignore_unused irqchip.gicv3_pseudo_nmi=1 rootflags=nodelalloc"
 CONFIG_CMDLINE_FORCE=y
 
@@ -601,6 +615,54 @@ CONFIG_IRQSOFF_TRACER=y
 # needs to be available before it matters, not after. See
 # docs/load-test-modules.md for the reasoning and the test this backs.
 CONFIG_ZRAM=y
+
+# Power/volume-down buttons never worked at all under Linux - traced
+# directly, not guessed: pm8150.dtsi's real `pon@800` node (compatible
+# "qcom,pm8998-pon") is enabled correctly and its children (`pwrkey`/
+# `resin`, compatible "qcom,pm8941-pwrkey"/"qcom,pm8941-resin",
+# CONFIG_INPUT_PM8941_PWRKEY already =y) show up fine in the compiled
+# DTB and under /sys/firmware/devicetree - but no platform_device for
+# either ever gets created at all (confirmed live:
+# /sys/bus/platform/drivers/pm8941-pwrkey/ has zero bound devices, and
+# no pwrkey/resin node exists anywhere under /sys/devices). The actual
+# `qcom,pm8998-pon` driver itself (drivers/power/reset/qcom-pon.c) is
+# what walks those DT children into real devices via its own probe()
+# calling devm_of_platform_populate() - and CONFIG_POWER_RESET_QCOM_PON
+# was still at defconfig's `=m`, the exact same no-module-loading bug
+# class as every other =m entry in this fragment (DRM_MSM, USB PHY,
+# refgen, GPI DMA, OSM_L3, ICC_BWMON before it) - simply never added
+# for this one. Force built-in.
+CONFIG_POWER_RESET_QCOM_PON=y
+
+# Freeze investigation, continued (2026-09-22): a real, external
+# comparison test finally isolated this from a hardware/firmware
+# erratum. Wrote a minimal libc-free ARM64 reproducer replicating the
+# project's own stress-ng --vm memory-pressure repro
+# (docs/load-test-modules.md) and ran it on *stock Android*, on this
+# exact physical device - stock survived every level tested, up to and
+# including genuine severe memory pressure (`MemFree` down to ~156MB,
+# real reclaim/LMK activity), with zero responsiveness lag throughout.
+# The one confirmed, real structural difference: stock has no
+# `/sys/kernel/mm/transparent_hugepage/` at all and no `khugepaged`
+# process - THP is disabled in Samsung's own production kernel config,
+# while plain defconfig defaults to `CONFIG_TRANSPARENT_HUGEPAGE_ALWAYS`
+# (khugepaged scanning constantly in the background). This matches this
+# project's own earlier-found root cause exactly:
+# `khugepaged -> lru_add_drain_all()` blocking on an unresponsive CPU's
+# workqueue. Online research (per the owner's direction) found this is
+# a real, currently-open, unmerged upstream Linux regression - not
+# Qualcomm/Samsung-specific at all, reproducible on plain AWS Graviton3
+# ARM64 servers too (a 2026-04 LKML bug report, "lru_add_drain_per_cpu
+# barrier work item... pending... yet the work is never dispatched" -
+# idle per-CPU workqueue workers failing to pick up pending drain work).
+# A later (2026-08) mm/fbatch rework patch series aimed at removing the
+# need for lru_add_drain_all() in this path altogether cites the exact
+# same symptom ("blocked on an unresponsive CPU to run its workqueue")
+# but is still in review, not merged - no upstream fix available yet.
+# Given stock's own real-world-proven-stable config already avoids this
+# specific trigger entirely, disabling THP here matches that proven
+# configuration rather than waiting on an unmerged upstream fix.
+CONFIG_TRANSPARENT_HUGEPAGE=n
 
 # Phase 4, S Pen (docs/phase4-spen-scoping.md): mainline already has
 # the right driver family (wacom_w9000.c) for this device's Wacom EMR

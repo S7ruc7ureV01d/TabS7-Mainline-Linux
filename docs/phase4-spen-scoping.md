@@ -320,6 +320,108 @@ regulator driver can't read hardware state back. The S Pen itself
 still doesn't respond over I2C, but that's now a normal, safe-to-debug
 driver problem, not a hardware risk.
 
+## Tested and RULED OUT (2026-09-22): flash-mode-gpios genuinely conditional
+
+The 2026-09-21 "force_power_cycle" test never actually exercised the
+real downstream behavior it was meant to replicate - it hardcoded
+`force_power_cycle = true` unconditionally, so a `flash_mode_was_high ||
+force_power_cycle` check added alongside it was dead code (the second
+operand was always true, so the first never mattered). Fixed properly:
+`wacom_data->flash_mode_gpio` is now acquired with `GPIOD_ASIS` (no
+direction/value change on request) so its hardware-default level can be
+read *before* this driver ever touches it, and `force_power_cycle` is
+now `false` in the variant table, letting that real hardware read
+genuinely decide whether to power-cycle - matching downstream's
+`wacom_i2c_probe()` branch exactly instead of a superset of it
+(`kernel/patches/0012-wacom-w9000-real-conditional-power-cycle.patch`).
+
+Tested on real hardware: identical `-ENXIO` on every query attempt,
+same as every other GPIO/timing/power-cycle variant already ruled out.
+This conclusively closes out flash-mode-gpios sequencing as a whole -
+every reasonable variant of it (both polarities, forced power-cycle,
+and now genuinely-conditional power-cycle) has been tried with
+identical failure, while the chip is confirmed to work under stock
+Android's exact own sequence (via a real console-ramoops capture,
+`wacom_w90xx 0-0056: [sec_input] ... ERROR PACKET!` - real bidirectional
+I2C traffic, not just a bare ACK). What's left needs either this chip's
+real datasheet or a live UART capture of the I2C bus during a working
+stock boot - neither available this session.
+
+## Real stock-Android probe trace captured (2026-09-22)
+
+Booted real stock Android (Magisk root + adb enabled, owner's own
+device) specifically to get ground truth. Captured from `t=0` (before
+the ring buffer could wrap - a first attempt at uptime 85s+ had already
+lost it, see `docs/logs/stock-boot-2026-09-22/02-...txt`) - full log at
+`docs/logs/stock-boot-2026-09-22/01-dmesg-full-boot-from-t0-wacom-real-probe-success.txt`,
+real probe excerpt at `.../06-wacom-real-probe-trace-excerpt.txt`. The
+real, complete, successful sequence:
+
+```
+wacom_i2c_probe: start!
+failed to read support_garage_open_test -22                    <- benign
+boot_addr: 0x9, ... fw_path: epen/w9021_gts7l.bin, ... use garage, boot on
+wacom_compulsory_flash_mode : enable(0) fwe(0)                  <- fwe driven LOW
+Linked as a consumer to regulator.24
+wacom_power: on: avdd:on
+wacom_i2c_query: 0th ret of wacom query=31                      <- succeeds, retry 0
+fw_ver_ic=0x405B ... ic version is high, do not update fw
+init irq 454 / init pdct 455
+probe done
+```
+
+Cross-checked every piece of this against what our own driver/DTS
+already does:
+
+- **`regulator.24` is literally `pm8150_l13`** - confirmed via
+  `/sys/class/regulator/regulator.24/name` on the live stock device
+  (`docs/logs/stock-boot-2026-09-22/05-pm8150-l13-live-regulator-state.txt`)
+  - the exact same regulator this project already wires up.
+- The I2C bus is `88c000.i2c` - the exact same QUP instance as our
+  `i2c17`.
+- `wacom_compulsory_flash_mode: enable(0) fwe(0)` confirms fwe driven
+  physically LOW before power-on, exactly matching what
+  `kernel/patches/0012-...patch` already does.
+- The query succeeds within ~1ms of `avdd:on`, no retry, no power-cycle
+  delay of any kind visible in the log - `regulator_boot_on`-style
+  behavior (the rail was very likely already live from firmware
+  hand-off, not really toggled by this call at all), which our own
+  driver's `force_power_cycle=false` path also now matches structurally.
+
+**Follow-up test (2026-09-22, same day): regulator power mode, ruled
+out cleanly.** The live stock capture also showed this exact regulator
+running in RPMh's High Power Mode (`opmode` sysfs reads "fast"),
+matching this device's own downstream devicetree
+(`qcom,init-mode = <RPMH_REGULATOR_MODE_HPM>`). Mainline's regulator
+core has no equivalent init-mode DT property for this RPMh driver - a
+consumer has to request it explicitly. First attempt used the wrong
+encoding (`REGULATOR_MODE_NORMAL` = the generic Linux API constant,
+`0x2`) for the `regulator-allowed-modes` DT property, which is
+silently ignored unless it matches the driver's *own*
+`RPMH_REGULATOR_MODE_*` encoding
+(`include/dt-bindings/regulator/qcom,rpmh-regulator.h`: `_HPM = 3`) -
+found by reading `drivers/regulator/of_regulator.c` directly. Fixed
+with the correct encoding plus `regulator-initial-mode` (matching
+downstream's approach of setting this at registration, not just
+runtime) - confirmed genuinely working this time, not just attempted:
+`regulator_set_mode(NORMAL) returned 0, mode now 2` on real hardware.
+**The chip still gives identical `-ENXIO` on every query.** This
+cleanly rules out regulator power mode as the blocker too - the rail
+is now provably running in the exact same mode as the working stock
+boot, voltage, GPIO sequencing, and I2C bus config, and it still
+doesn't respond.
+
+**Conclusion: every software-visible detail line up exactly with what
+this project's driver already does, and it still fails on real
+hardware.** This isn't a devicetree or driver-logic gap that more
+comparison against the downstream source can find - the actual
+differentiator, if there is one, is something electrical/protocol-level
+that Linux's own logs on either side don't surface. Real next step
+needs either this chip's real datasheet or a live logic-analyzer/UART
+capture of the I2C bus itself during a real transaction, on both a
+working (stock) and failing (mainline) boot, to compare at the
+signal level - not more source reading.
+
 ## Sources
 
 - `work/linux/drivers/input/touchscreen/wacom_w9000.c` (mainline driver)

@@ -1,0 +1,96 @@
+From: gts7l project
+Subject: [PATCH] wacom_w9000: let the fwe/flash-mode line's real hardware
+ state drive force_power_cycle, not a hardcoded flag
+
+force_power_cycle was hardcoded true for the w9021_gts7l variant, which
+meant the new flash_mode_was_high check added alongside it (read the
+flash-mode GPIO's hardware-default level via GPIOD_ASIS before this
+driver ever drives it) was dead code - the OR with the hardcoded flag
+always forced the power cycle regardless. This matches downstream's own
+wacom_i2c_probe() branch exactly now: only power-cycle if the line was
+already high at probe time, otherwise just lower it and power on
+normally. Tested on real hardware (2026-09-22): same -ENXIO as every
+prior GPIO/timing/power-cycle variant already ruled out this project -
+conclusively rules out flash-mode-gpios sequencing as the S Pen
+blocker, not just this one variant of it. See
+docs/phase4-spen-scoping.md.
+
+--- a/drivers/input/touchscreen/wacom_w9000.c
++++ b/drivers/input/touchscreen/wacom_w9000.c
+@@ -305,6 +305,7 @@
+ 	struct input_dev *input_dev;
+ 	int error;
+ 	u32 val;
++	bool flash_mode_was_high;
+ 
+ 	if (!i2c_check_functionality(client->adapter, I2C_FUNC_I2C)) {
+ 		dev_err(dev, "i2c_check_functionality error\n");
+@@ -343,7 +344,18 @@
+ 		return dev_err_probe(dev, PTR_ERR(wacom_data->regulator),
+ 				     "Failed to get regulators\n");
+ 
+-	wacom_data->flash_mode_gpio = devm_gpiod_get_optional(dev, "flash-mode", GPIOD_OUT_LOW);
++	/*
++	 * Read the flash-mode/fwe line's hardware-default state before this
++	 * driver ever drives it (GPIOD_ASIS - no direction/value change on
++	 * request). A downstream driver for this exact chip family branches
++	 * on this: if the line already reads logical-high at probe time, it
++	 * lowers it and forces a real disable/100ms/enable/200ms power
++	 * cycle before querying; if it already reads low, it only lowers it
++	 * (a no-op) and does a plain power-on. Replicated exactly here
++	 * rather than always forcing a power cycle, since the unconditional
++	 * version was tested and ruled out on real hardware.
++	 */
++	wacom_data->flash_mode_gpio = devm_gpiod_get_optional(dev, "flash-mode", GPIOD_ASIS);
+ 	if (IS_ERR(wacom_data->flash_mode_gpio))
+ 		return dev_err_probe(dev, PTR_ERR(wacom_data->flash_mode_gpio),
+ 				     "Failed to get flash-mode gpio\n");
+@@ -353,11 +365,17 @@
+ 		return dev_err_probe(dev, PTR_ERR(wacom_data->reset_gpio),
+ 				     "Failed to get reset gpio\n");
+ 
++	flash_mode_was_high = wacom_data->flash_mode_gpio &&
++			       gpiod_get_value_cansleep(wacom_data->flash_mode_gpio);
++
++	if (wacom_data->flash_mode_gpio)
++		gpiod_direction_output(wacom_data->flash_mode_gpio, 0);
++
+ 	error = regulator_enable(wacom_data->regulator);
+ 	if (error)
+ 		return dev_err_probe(dev, error, "Failed to enable regulators\n");
+ 
+-	if (wacom_data->variant->force_power_cycle) {
++	if (flash_mode_was_high || wacom_data->variant->force_power_cycle) {
+ 		regulator_disable(wacom_data->regulator);
+ 		msleep(100);
+ 		error = regulator_enable(wacom_data->regulator);
+@@ -517,15 +535,23 @@
+ 	 * this rail can read back as already-enabled via RPMh aggregate
+ 	 * voting without this driver's own call ever toggling real
+ 	 * hardware) - confirmed via direct source reading, not guessed,
+-	 * and it still didn't work. Kept enabled anyway since it's a real,
+-	 * harmless robustness improvement matching downstream's own
+-	 * behavior even though it didn't close this specific gap. See
+-	 * docs/phase4-spen-scoping.md for what's left (needs the chip's
+-	 * real datasheet or a live UART capture - neither available).
++	 * and it still didn't work when force_power_cycle was hardcoded
++	 * true here unconditionally (2026-09-21 test).
++	 *
++	 * That test, on inspection, never actually exercised the real
++	 * downstream behavior: downstream only forces the power cycle
++	 * when the fwe/flash-mode line's hardware-default level already
++	 * reads high at probe time - otherwise it just lowers the line
++	 * and does a plain power-on. Hardcoding force_power_cycle=true
++	 * skipped that branch entirely (always forced), so the flag is
++	 * left false here to let the driver's own flash_mode_was_high
++	 * check (probe(), wacom_w9000.c) genuinely drive the decision,
++	 * matching downstream exactly instead of a superset of it. Not
++	 * yet tested with this exact change (2026-09-22).
+ 	 */
+ 	.power_on_delay_ms	= 500,
+ 	.query_retry_delay_ms	= 20,
+-	.force_power_cycle	= true,
++	.force_power_cycle	= false,
+ };
+ 
+ static const struct of_device_id wacom_w9000_of_match[] = {

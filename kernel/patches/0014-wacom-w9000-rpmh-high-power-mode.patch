@@ -1,0 +1,75 @@
+From: gts7l project
+Subject: [PATCH] wacom_w9000: request RPMh High Power Mode on the AVDD
+ rail, matching the real working stock-Android sequence
+
+A real stock Android boot capture (docs/phase4-spen-scoping.md) showed
+this exact regulator (pm8150_l13) running in RPMh's High Power Mode
+(sysfs opmode reads 'fast') under a working boot, forced there by this
+device's own downstream devicetree (qcom,init-mode =
+RPMH_REGULATOR_MODE_HPM). Mainline's regulator core has no equivalent
+devicetree property for this - a consumer has to request it explicitly
+via the standard regulator_set_mode() API. Added that call, plus the
+matching devicetree regulator-initial-mode/regulator-allowed-modes
+properties on pm8150_l13 (kernel/dts/sm8250-samsung-gts7l.dts) using the
+correct RPMH_REGULATOR_MODE_* encoding (a different numbering than the
+generic Linux REGULATOR_MODE_* constants - a first attempt using the
+wrong encoding was silently ignored, found by reading
+drivers/regulator/of_regulator.c directly).
+
+Tested on real hardware (2026-09-22): the mode change genuinely
+succeeds this time (regulator_set_mode() returns 0,
+regulator_get_mode() confirms the new mode afterward, not just
+attempted) and makes no difference at all - identical -ENXIO on every
+query. Kept anyway: matches downstream exactly, a real correctness
+improvement, confirmed harmless on real hardware. This is now the
+sixth independent hypothesis (timing, both GPIO polarities, forced
+power-cycle, genuinely-conditional power-cycle, and now regulator
+power mode) tested and ruled out with real hardware confirmation while
+every software-visible detail matches the working stock trace exactly.
+See docs/phase4-spen-scoping.md.
+
+--- a/drivers/input/touchscreen/wacom_w9000.c
++++ b/drivers/input/touchscreen/wacom_w9000.c
+@@ -383,6 +383,42 @@
+ 			return dev_err_probe(dev, error, "Failed to re-enable regulators\n");
+ 	}
+ 
++	/*
++	 * Confirmed via a real stock Android boot capture (2026-09-22,
++	 * docs/phase4-spen-scoping.md): this exact regulator
++	 * (`pm8150_l13`) runs in RPMh's High Power Mode
++	 * (`/sys/class/regulator/.../opmode` reads "fast") under a working
++	 * boot, forced there by this device's own downstream devicetree
++	 * (`qcom,init-mode = <RPMH_REGULATOR_MODE_HPM>` on
++	 * `rpmh-regulator-ldoa13`, alongside `qcom,supported-modes` also
++	 * set to HPM-only). Mainline's regulator core has no equivalent
++	 * "init-mode" devicetree property for this RPMh driver - a
++	 * consumer has to request it explicitly at runtime via the
++	 * standard `regulator_set_mode()` API, which this driver never
++	 * did. Left in its RPMh hardware-default mode (almost certainly
++	 * LPM - Low Power Mode, the usual power-saving default), the rail
++	 * may read back at the correct voltage (a pure software vote
++	 * value, not a real measurement - see the regulator-core
++	 * apply_uV/RPMh-readback finding earlier in this doc) while
++	 * genuinely delivering less current than this chip needs to
++	 * actually respond on I2C. Tested on real hardware (2026-09-22,
++	 * after also fixing the devicetree side - see
++	 * kernel/dts/sm8250-samsung-gts7l.dts's pm8150_l13 node): this call
++	 * genuinely succeeds (regulator_set_mode() returns 0,
++	 * regulator_get_mode() confirms the new mode afterward) and makes
++	 * no difference at all - identical -ENXIO. Kept anyway (matches
++	 * downstream, real correctness improvement, confirmed harmless),
++	 * same as force_power_cycle before it. See
++	 * docs/phase4-spen-scoping.md.
++	 * Failure is deliberately non-fatal here (dev_dbg, not
++	 * dev_err_probe) since older/other variants using this same
++	 * driver were never confirmed to need this and some regulator
++	 * implementations may not support `.set_mode` at all.
++	 */
++	error = regulator_set_mode(wacom_data->regulator, REGULATOR_MODE_NORMAL);
++	if (error)
++		dev_dbg(dev, "regulator does not support forcing high-power mode (%d)\n", error);
++
+ 	msleep(wacom_data->variant->power_on_delay_ms ?: 200);
+ 
+ 	gpiod_set_value_cansleep(wacom_data->reset_gpio, 0);

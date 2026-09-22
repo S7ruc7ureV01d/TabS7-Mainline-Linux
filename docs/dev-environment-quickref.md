@@ -49,13 +49,33 @@ alone without asking, and getting this wrong wastes a round-trip):
     ssh -i ~/.ssh/id_ed25519_gts7l -o BatchMode=yes root@172.16.42.1
     ```
   - Password root login is also enabled (`/etc/ssh/sshd_config.d/`) as a
-    fallback, but the key is the normal path.
+    fallback, but the key is the normal path. Both `root` and `alarm`'s
+    password is `make.believe` (2026-09-22, baked into
+    `work/archroot-build/archroot-rootfs-v3.tar` onward).
   - Internet access on-device works via NAT: the host does
     `iptables -t nat -A POSTROUTING -s 172.16.42.0/24 -o wlan0 -j MASQUERADE`
     plus `ip_forward=1`, and the device gets a default route via
     `172.16.42.2` and a plain `1.1.1.1` resolver - both brought up
     automatically by the same systemd service, guarded by a ping check so
-    it's a no-op if the debug cable isn't attached.
+    it's a no-op if the debug cable isn't attached. **The host-side NAT
+    rule is not persistent** - it has to be re-run (as root, on the
+    host) after every host reboot:
+    ```
+    sudo sysctl -w net.ipv4.ip_forward=1
+    sudo iptables -t nat -A POSTROUTING -s 172.16.42.0/24 -o wlan0 -j MASQUERADE
+    sudo iptables -A FORWARD -i enp0s20f0u3 -o wlan0 -j ACCEPT
+    sudo iptables -A FORWARD -i wlan0 -o enp0s20f0u3 -j ACCEPT
+    ```
+    (the USB gadget interface name varies by host - check `ip addr`
+    for the `172.16.42.2/24` interface if not `enp0s20f0u3`).
+  - **No RTC** - the device's clock is always stuck at 1970-01-01 on a
+    fresh boot, which breaks `pacman`'s PGP signature checks (looks
+    like "corrupted package (PGP signature)" but is really a clock
+    problem). `systemd-timesyncd` is enabled and self-corrects once the
+    device has a real route/DNS, but if you need `pacman` to work
+    *before* that (or the fix hasn't landed on the running instance
+    yet), set the clock manually first: `date -u -s 'YYYY-MM-DD
+    HH:MM:SS'`.
   - **Known flaky bit**: the default route on the device side sometimes
     races against interface bring-up and doesn't get set, causing DNS/
     internet failures right after boot even though the point-to-point link

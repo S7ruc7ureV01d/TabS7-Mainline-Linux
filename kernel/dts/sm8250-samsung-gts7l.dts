@@ -28,6 +28,7 @@
 #include <dt-bindings/input/input.h>
 #include <dt-bindings/interrupt-controller/irq.h>
 #include <dt-bindings/phy/phy.h>
+#include <dt-bindings/regulator/qcom,rpmh-regulator.h>
 #include "sm8250-samsung-common.dtsi"
 
 /*
@@ -406,7 +407,8 @@
 	/* Round 22's belt-and-suspenders copy - CONFIG_CMDLINE_FORCE=y in
 	 * kernel/config/gts7l.fragment is the string that actually wins,
 	 * kept in sync manually. See that file for the pseudo-NMI trial's
-	 * irqchip.gicv3_pseudo_nmi=1 note.
+	 * irqchip.gicv3_pseudo_nmi=1 note and the 2026-09-22 mem=2G
+	 * CPU-hang diagnostic (tried, reverted - see fragment comment).
 	 */
 	bootargs = "console=tty0 loglevel=15 clk_ignore_unused irqchip.gicv3_pseudo_nmi=1 rootflags=nodelalloc";
 };
@@ -1337,7 +1339,50 @@
 			 * the whole code path instead of just steering around
 			 * it. Confirmed via a second, independent research pass
 			 * that traced the exact same call chain.
+			 *
+			 * regulator-allowed-modes/regulator-initial-mode
+			 * (2026-09-22): a real stock Android boot capture
+			 * (docs/phase4-spen-scoping.md) showed this exact
+			 * regulator running in RPMh's High Power Mode (`opmode`
+			 * sysfs reads "fast") under a working boot - forced
+			 * there by this device's own downstream devicetree
+			 * (`qcom,init-mode = <RPMH_REGULATOR_MODE_HPM>`).
+			 *
+			 * First attempt used the generic Linux
+			 * `REGULATOR_MODE_NORMAL` (0x2,
+			 * `include/linux/regulator/consumer.h`) for this
+			 * property and it had zero effect - confirmed on real
+			 * hardware, still "mode operation not allowed" and
+			 * `regulator_get_mode()` still reporting 0 (invalid)
+			 * afterward. Root cause, found by reading
+			 * `drivers/regulator/of_regulator.c` directly: this
+			 * property's value is passed through the *driver's own*
+			 * `of_map_mode()` callback
+			 * (`drivers/regulator/qcom-rpmh-regulator.c`), which
+			 * expects the `RPMH_REGULATOR_MODE_*` encoding from
+			 * `include/dt-bindings/regulator/qcom,rpmh-regulator.h`
+			 * (`_LPM = 1`, `_HPM = 3`) - a completely different
+			 * numbering than the generic Linux API constant used
+			 * for the runtime `regulator_set_mode()` call itself.
+			 * Passing the wrong encoding here means
+			 * `of_map_mode()` returns `REGULATOR_MODE_INVALID`, so
+			 * `valid_modes_mask`/`REGULATOR_CHANGE_MODE` never get
+			 * set at all - silently, no error, matching exactly
+			 * what was observed.
+			 *
+			 * Fixed to use the correct `RPMH_REGULATOR_MODE_HPM`
+			 * (3) encoding, and added `regulator-initial-mode` too
+			 * so RPMh starts in HPM at registration time - matching
+			 * downstream's `qcom,init-mode` exactly, rather than
+			 * relying solely on a runtime `regulator_set_mode()`
+			 * call from this one consumer's own probe(). Same
+			 * safety profile as omitting voltage constraints above
+			 * - a mode-only property doesn't trigger a live vote at
+			 * registration by itself the way `apply_uV` does. Not
+			 * yet tested with this exact fix.
 			 */
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+			regulator-allowed-modes = <RPMH_REGULATOR_MODE_HPM>;
 		};
 	};
 
@@ -1788,18 +1833,22 @@
 		vdd-supply = <&pm8150_l13>;
 		/*
 		 * Polarity test, RULED OUT (2026-09-21): flipping this from
-		 * GPIO_ACTIVE_HIGH to GPIO_ACTIVE_LOW (physically inverting
-		 * the driver's requested logical-LOW state) made no
-		 * difference - identical -ENXIO on real hardware. Combined
-		 * with timing already ruled out
-		 * (kernel/patches/0011-...patch), the two most plausible
-		 * software-side explanations are both eliminated. Left at
-		 * GPIO_ACTIVE_LOW rather than reverting - equally unconfirmed
-		 * either way, no reason to prefer one over the other absent
-		 * real evidence. See docs/phase4-spen-scoping.md for what's
-		 * left to try (needs real chip documentation or a live UART
-		 * capture, neither available this session).
+		 * GPIO_ACTIVE_HIGH to GPIO_ACTIVE_LOW made no difference by
+		 * itself - identical -ENXIO on real hardware, because the
+		 * driver at the time always forced a static GPIOD_OUT_LOW
+		 * and an unconditional power-cycle regardless of the line's
+		 * real hardware state. Set back to GPIO_ACTIVE_HIGH here
+		 * because that's what the downstream device tree for this
+		 * exact chip uses for this same pin (wacom,fwe-gpio flag
+		 * cell = 0x0, i.e. no active-low annotation) - confirmed by
+		 * reading references/gts7l's kona-sec-gts7l-eur-overlay-r07
+		 * (dtbo_idx=7, matching this device's own
+		 * androidboot.dtbo_idx=7). The driver now reads this line's
+		 * hardware-default value with GPIOD_ASIS before touching it
+		 * and only forces a power-cycle if it was already high,
+		 * matching that downstream driver's wacom_i2c_probe() branch
+		 * exactly instead of guessing. See docs/phase4-spen-scoping.md.
 		 */
-		flash-mode-gpios = <&tlmm 6 GPIO_ACTIVE_LOW>;
+		flash-mode-gpios = <&tlmm 6 GPIO_ACTIVE_HIGH>;
 	};
 };

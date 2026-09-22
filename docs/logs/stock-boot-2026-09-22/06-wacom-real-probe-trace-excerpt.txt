@@ -1,0 +1,18 @@
+[    1.089783] I2C PMIC: i2c_pmic_probe: I2C PMIC probe successful
+[    1.090120] i2c_geni 88c000.i2c: Bus frequency not specified, default to 400KHz.
+[    1.090679] [sec_input]: wacom_i2c_probe: start!
+[    1.090724] wacom_w90xx 10-0056: [sec_input]failed to read support_garage_open_test -22
+[    1.090747] wacom_w90xx 10-0056: [sec_input]boot_addr: 0x9, origin: (0,0), max_coords: (0,0), max_pressure: 4095, max_height: 255, max_tilt: (63,63) invert: (1,0,1), fw_path: epen/w9021_gts7l.bin, module_ver:2, table_swap:2, use garage, boot on, cover_noti:, support cover noti
+[    1.090891] wacom_w90xx 10-0056: [sec_input]wacom_compulsory_flash_mode : enable(0) fwe(0)
+[    1.090977] wacom_w90xx 10-0056: Linked as a consumer to regulator.24
+[    1.090995] wacom_w90xx 10-0056: [sec_input]wacom_power: on: avdd:on
+[    1.092047] wacom_w90xx 10-0056: [sec_input]wacom_i2c_query: 0th ret of wacom query=31
+[    1.092066] wacom_w90xx 10-0056: [sec_input](retry:0) F, 5C, 21, 39, 95, F, FF, 40, 5B, 45, 3, 3F, 3F, FF, 3
+[    1.092085] wacom_w90xx 10-0056: [sec_input]F, 5C, 21, 39, 95, F, FF, 40, 5B, 45, 3, 3F, 3F, FF, 3
+[    1.092103] wacom_w90xx 10-0056: [sec_input]use_dt_coord: 0, max_x: 23585 max_y: 14741, max_pressure: 4095
+[    1.092117] wacom_w90xx 10-0056: [sec_input]fw_ver_ic=0x405B
+[    1.092131] wacom_w90xx 10-0056: [sec_input]mpu: 0x45, bl: 0x3, tiltX: 63, tiltY: 63, maxH: 255
+[    1.092150] wacom_w90xx 10-0056: [sec_input]wacom_fw_update_on_probe
+[    1.092165] wacom_w90xx 10-0056: [sec_input]load_fw_built_in: load_fw_built_in (1)
+[    1.092183] wacom_w90xx 10-0056: [sec_input]wacom ic fw ver : 0x405b, new fw ver : 0x4056
+[    1.092198] wacom_w90xx 10-0056: [sec_input]ic version is high, do not update fw

@@ -1,0 +1,74 @@
+[    1.073920] cs35l41 7-0043: Prince MFD core probe
+[    1.074014] cs35l41 7-0043: Linked as a consumer to regulator.63
+[    1.077969] cs35l41-cal cs35l41-cal.1.auto: Prince Calibration Driver probe, Dev ID = 35a40
+[    1.078088] cs35l41-bd cs35l41-bd.2.auto: Prince Big Data Driver probe, Dev ID = 35a40
+[    1.078191] cs35l41-pwr cs35l41-pwr.3.auto: Prince Power Driver probe, Dev ID = 35a40
+[    1.078225] cirrus cirrus_pwr: cirrus_pwr_set_params: global enable = 0, cs35l41_b, target temp = 3900, exit temp = 3800
+[    1.078475] cs35l41 7-0042: Prince MFD core probe
+[    1.078524] cs35l41 7-0042: Linked as a consumer to regulator.63
+[    1.081117] cs35l41-cal cs35l41-cal.5.auto: Prince Calibration Driver probe, Dev ID = 35a40
+[    1.081218] cs35l41-bd cs35l41-bd.6.auto: Prince Big Data Driver probe, Dev ID = 35a40
+[    1.081318] cs35l41-pwr cs35l41-pwr.7.auto: Prince Power Driver probe, Dev ID = 35a40
+[    1.081347] cirrus cirrus_pwr: cirrus_pwr_set_params: global enable = 0, cs35l41_br, target temp = 3700, exit temp = 3600
+[    1.081575] cs35l41 7-0041: Prince MFD core probe
+[    1.081623] cs35l41 7-0041: Linked as a consumer to regulator.63
+[    1.084197] cs35l41-cal cs35l41-cal.9.auto: Prince Calibration Driver probe, Dev ID = 35a40
+[    1.084293] cs35l41-bd cs35l41-bd.10.auto: Prince Big Data Driver probe, Dev ID = 35a40
+[    1.084396] cs35l41-pwr cs35l41-pwr.11.auto: Prince Power Driver probe, Dev ID = 35a40
+[    1.084424] cirrus cirrus_pwr: cirrus_pwr_set_params: global enable = 0, cs35l41, target temp = 3900, exit temp = 3800
+[    1.084653] cs35l41 7-0040: Prince MFD core probe
+[    1.084701] cs35l41 7-0040: Linked as a consumer to regulator.63
+[    1.087281] cs35l41-cal cs35l41-cal.13.auto: Prince Calibration Driver probe, Dev ID = 35a40
+[    1.087386] cs35l41-bd cs35l41-bd.14.auto: Prince Big Data Driver probe, Dev ID = 35a40
+[    1.087477] cs35l41-pwr cs35l41-pwr.15.auto: Prince Power Driver probe, Dev ID = 35a40
+[    1.087505] cirrus cirrus_pwr: cirrus_pwr_set_params: global enable = 0, cs35l41_r, target temp = 3700, exit temp = 3600
+[    2.944159] cs35l41 7-0043: Cirrus Logic CS35L41 (35a40), Revision: A0
+[    2.991278] cs35l41 7-0042: Cirrus Logic CS35L41 (35a40), Revision: A0
+[    3.037883] cs35l41 7-0041: Cirrus Logic CS35L41 (35a40), Revision: A0
+[    3.084036] cs35l41 7-0040: Cirrus Logic CS35L41 (35a40), Revision: A0
+[    3.084199] initcall cs35l41_platform_driver_init+0x0/0x2c returned 0 after 177668 usecs
+[    7.873051] cs35l41-codec cs35l41-codec.0.auto: register_cirrus_bigdata_cb
+[    7.886571] cs35l41 7-0043: cs35l41_main_amp_event PMD
+[    7.888369] cs35l41 7-0042: cs35l41_main_amp_event PMD
+[    7.889523] cs35l41 7-0041: cs35l41_main_amp_event PMD
+[    7.890723] cs35l41 7-0040: cs35l41_main_amp_event PMD
+[    9.922150] cs35l41 7-0043: cs35l41_pcm_vol_put: 0x0
+[    9.926216] cs35l41 7-0043: Falling back to syfs fallback for: cs35l40-spk-dsp1-spk-prot.wmfw
+[    9.929255] cs35l41 7-0043: DSP1: Firmware version: 3
+[    9.929260] cs35l41 7-0043: DSP1: cs35l40-spk-dsp1-spk-prot.wmfw: Fri 17 Jan 2020 16:05:21 W. Europe Standard Time
+[   10.224528] cs35l41 7-0043: DSP1: Firmware: 400a4 vendor: 0x2 v0.0.1, 1 algorithms
+[   10.225163] cs35l41 7-0043: DSP1: 0: ID cd v18.0.0 XM@83 YM@9
+[   10.225335] cs35l41 7-0043: Falling back to syfs fallback for: cs35l40-spk-dsp1-spk-prot.bin
+[   10.284192] cs35l41 7-0043: DSP1: Execution started
+[   10.284198] cs35l41 7-0043: cs35l41_dsp_power_ev: loaded
+[   10.285583] cirrus cirrus_cal: Writing calibration to cs35l41_b
+[   10.287019] cs35l41 7-0042: cs35l41_pcm_vol_put: 0x0
+[   10.291216] cs35l41 7-0042: Falling back to syfs fallback for: cs35l40-spk-dsp1-spk-prot.wmfw
+[   10.292800] cs35l41 7-0042: DSP1: Firmware version: 3
+[   10.292804] cs35l41 7-0042: DSP1: cs35l40-spk-dsp1-spk-prot.wmfw: Fri 17 Jan 2020 16:05:21 W. Europe Standard Time
+[   10.587468] cs35l41 7-0042: DSP1: Firmware: 400a4 vendor: 0x2 v0.0.1, 1 algorithms
+[   10.588012] cs35l41 7-0042: DSP1: 0: ID cd v18.0.0 XM@83 YM@9
+[   10.588056] cs35l41 7-0042: Falling back to syfs fallback for: cs35l40-spk-dsp1-spk-prot.bin
+[   10.643771] cs35l41 7-0042: DSP1: Execution started
+[   10.643773] cs35l41 7-0042: cs35l41_dsp_power_ev: loaded
+[   10.645036] cirrus cirrus_cal: Writing calibration to cs35l41_br
+[   10.646283] cs35l41 7-0041: cs35l41_pcm_vol_put: 0x0
+[   10.650856] cs35l41 7-0041: Falling back to syfs fallback for: cs35l40-spk-dsp1-spk-prot.wmfw
+[   10.652722] cs35l41 7-0041: DSP1: Firmware version: 3
+[   10.652726] cs35l41 7-0041: DSP1: cs35l40-spk-dsp1-spk-prot.wmfw: Fri 17 Jan 2020 16:05:21 W. Europe Standard Time
+[   10.949269] cs35l41 7-0041: DSP1: Firmware: 400a4 vendor: 0x2 v0.0.1, 1 algorithms
+[   10.949813] cs35l41 7-0041: DSP1: 0: ID cd v18.0.0 XM@83 YM@9
+[   10.949845] cs35l41 7-0041: Falling back to syfs fallback for: cs35l40-spk-dsp1-spk-prot.bin
+[   11.005371] cs35l41 7-0041: DSP1: Execution started
+[   11.005376] cs35l41 7-0041: cs35l41_dsp_power_ev: loaded
+[   11.006738] cirrus cirrus_cal: Writing calibration to cs35l41
+[   11.008050] cs35l41 7-0040: cs35l41_pcm_vol_put: 0x0
+[   11.011881] cs35l41 7-0040: Falling back to syfs fallback for: cs35l40-spk-dsp1-spk-prot.wmfw
+[   11.013506] cs35l41 7-0040: DSP1: Firmware version: 3
+[   11.013511] cs35l41 7-0040: DSP1: cs35l40-spk-dsp1-spk-prot.wmfw: Fri 17 Jan 2020 16:05:21 W. Europe Standard Time
+[   11.310215] cs35l41 7-0040: DSP1: Firmware: 400a4 vendor: 0x2 v0.0.1, 1 algorithms
+[   11.310764] cs35l41 7-0040: DSP1: 0: ID cd v18.0.0 XM@83 YM@9
+[   11.310797] cs35l41 7-0040: Falling back to syfs fallback for: cs35l40-spk-dsp1-spk-prot.bin
+[   11.366332] cs35l41 7-0040: DSP1: Execution started
+[   11.366334] cs35l41 7-0040: cs35l41_dsp_power_ev: loaded
+[   11.367590] cirrus cirrus_cal: Writing calibration to cs35l41_r

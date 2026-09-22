@@ -1,0 +1,16 @@
+[    0.000000] OF: reserved mem: initialized node pil_slpi_region@88c00000, compatible id removed-dma-pool
+[    0.267275] platform 5c00000.qcom,ssc: assigned reserved memory node pil_slpi_region@88c00000
+[    0.705635] minidump-id not found for slpi
+[    3.300822] adsprpc: fastrpc_device_init: SSR notifier registered for slpi
+[    6.448250] idx:0, path:/spu/sensorhub/slpi_ver.txt
+[    6.448258] slpi_need_update_spu - Can't open :/spu/sensorhub/slpi_ver.txt, -2
+[    6.448265] subsys-restart: __subsystem_get(): __subsystem_get: slpi count:0
+[    6.448267] subsys-restart: __subsystem_get(): Changing subsys fw_name to slpi
+[    6.448279] subsys-pil-tz 5c00000.qcom,ssc: slpi: Sending ON message to AOP ...
+[    6.448779] subsys-pil-tz 5c00000.qcom,ssc: slpi: loading from 0x0000000089200000 to 0x000000008a700000
+[    6.661081] subsys-pil-tz 5c00000.qcom,ssc: slpi: Brought out of reset
+[    6.721346] subsys-pil-tz 5c00000.qcom,ssc: slpi: Power/Clock ready interrupt received
+[    6.721716] adsprpc: fastrpc_restart_notifier_cb: slpi subsystem is up
+[    6.728817] adsprpc: fastrpc_rpmsg_probe: opened rpmsg channel for slpi
+[    7.094100] sysmon-qmi: ssctl_new_server: Connection established between QMI handle and slpi's SSCTL service
+[    7.094238] sysmon-qmi: ssctl_new_server: Connection established between QMI handle and slpi's SSCTL service

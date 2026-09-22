@@ -1042,6 +1042,22 @@ Exit criteria:
 - [x] KMS/DRM brings up the native panel resolution at the correct refresh
       rate. **Done at 1600x2560@96Hz** (not native 120Hz - see note above;
       a real, panel-supported DFPS rate, not a workaround).
+- [x] Backlight brightness control working. **Done, 2026-09-22** - three
+      real bugs found and fixed together in `panel-novatek-nt36523.c`
+      (`kernel/patches/0013-nt36523-fix-backlight-control.patch`): (1)
+      `get_brightness()` issued a real DCS read this panel's firmware
+      never answers, surfacing as an I/O error on sysfs
+      `actual_brightness` that silently broke KDE's powerdevil
+      brightness helper (it reads that file before writing) - dropped
+      the op entirely, matching the standard mainline pattern for a
+      write-only-brightness panel; (2) `max_brightness=4095` was an
+      arbitrary placeholder, not this panel's real range - downstream's
+      own dtsi says `qcom,mdss-dsi-bl-max-level = <462>`, already
+      correctly noted in this doc's own table above but never actually
+      matched in the driver; (3) the real blocker - this panel is
+      dual-DSI, but the backlight device only ever held one of its two
+      `mipi_dsi_device`s, so the brightness command only ever reached
+      one physical half of the panel. Confirmed fixed on real hardware.
 - [x] Touchscreen driver working — **same IC as the panel (Novatek NT36523
       TDDI)**, wired in DT as `novatek,nt36523-ts`
       (`drivers/input/touchscreen/nt36523-gts7l.c`, new driver - not a match
@@ -1062,8 +1078,20 @@ Exit criteria:
       confirmed - Vulkan/Turnip not separately tested). **Done** - real
       sustained 3D rendering (kmscube, 3000 frames at a vsync-locked
       96 fps) confirmed on hardware, 2026-09-20.
-- [ ] Basic KDE Plasma (Wayland/KWin) session reaches a usable desktop
-      on-device.
+- [x] Basic KDE Plasma (Wayland/KWin) session reaches a usable desktop
+      on-device. **Done, 2026-09-22**, after a chain of real, independent
+      bugs found and fixed (see progress log below for the full story):
+      a global environment.d leak that made `kwin_wayland` itself pick
+      the wrong compositor backend, `alarm` never granted `video`/
+      `render`/`input` group access (no logind seat integration since
+      this project's custom `plasma-autologin.service` bypasses SDDM's
+      normal PAM/seat setup), SDDM's own leftover X11 greeter fighting
+      `kwin` for DRM master, a stale `kwinoutputconfig.json` the
+      compositor failed to apply, and a first-run `Corona::loadLayout()`
+      crash that turned out to be a downstream symptom of the earlier
+      bugs, not an independent one - it stopped happening once the rest
+      were fixed. Autologin, KDE Discover, Firefox, and Bluetooth
+      (`bluedevil`) all confirmed working from a clean cold boot.
 
 Progress log:
 - 2026-09-19: Rounds 38-56 - real display output achieved on hardware
@@ -1242,10 +1270,51 @@ Exit criteria:
       real accessory both confirmed** (a BLE mouse pairs and its
       cursor/clicks work) - remaining work is audio/A2DP (not tested)
       and the Book Cover Keyboard's own Bluetooth/pogo-pin behavior, if
-      any.
+      any. **2026-09-22**: a from-scratch Arch rootfs rebuild (after a
+      real userdata wipe, see progress log) revealed a rootfs-level gap
+      this kernel-level bring-up doesn't cover on its own -
+      `bluetooth.service` (`bluetoothd` itself) was never enabled, so
+      `bluedevil`'s tray icon correctly stayed hidden (nothing for it to
+      talk to over D-Bus) even though the QCA6390 chip and kernel driver
+      were fine the whole time. Enabled the service and installed
+      `bluez-utils` (for `bluetoothctl`), baked into
+      `work/archroot-build/archroot-rootfs-v4.tar`.
 - [ ] Speakers and microphone(s) working.
-- [ ] Volume/power buttons working.
-- [ ] Motion sensors (accelerometer/gyro, rotation) working.
+- [x] Volume/power buttons working. **Done, 2026-09-22** - root-caused,
+      not guessed: `pon_pwrkey`/`pon_resin` (compatible
+      `qcom,pm8941-pwrkey`/`qcom,pm8941-resin`, children of the real
+      `pon@800` node under PM8150 at SPMI USID 0) were correctly enabled
+      in the devicetree and their own driver was builtin, but they never
+      got created as real platform devices at all - the parent
+      `qcom,pm8998-pon` driver (`drivers/power/reset/qcom-pon.c`, whose
+      probe() is what walks those DT children into devices via
+      `devm_of_platform_populate()`) was still at defconfig's `=m`, the
+      same no-module-loading bug class this fragment has hit repeatedly
+      (`DRM_MSM`, USB PHY, `refgen`, GPI DMA, `OSM_L3`, `ICC_BWMON`
+      before it) - just never added for this one. Forced
+      `CONFIG_POWER_RESET_QCOM_PON=y`
+      (`kernel/config/gts7l.fragment`). Confirmed fixed on real
+      hardware: both buttons now register as real input devices and
+      respond.
+- [ ] Motion sensors (accelerometer/gyro, rotation) working. **Scoped,
+      2026-09-22, not implemented - genuinely bigger than a devicetree
+      fix.** This device's IMU is a real chip (ST LSM6DSO, per
+      `references/kernel_samsung_sm8250/drivers/adsp_factory/
+      lsm6dso_accel.c`), but Samsung wires it exclusively to Qualcomm's
+      SLPI (Sensor DSP) coprocessor, not to the AP's own I2C bus at all
+      - the downstream driver has zero I2C client registration, purely
+      talking to the DSP over Qualcomm's own sensor IPC/QMI protocol,
+      and there's no plain I2C node anywhere in the devicetree for the
+      AP side to read directly. Real support would need booting the
+      SLPI remoteproc firmware and implementing that IPC protocol - a
+      substantial subsystem port, not a quick fix. **Confirmed via a
+      real stock Android boot capture, 2026-09-22**
+      (`docs/logs/stock-boot-2026-09-22/07-slpi-sensorhub-remoteproc-trace.txt`):
+      a genuine `subsys-pil-tz` firmware load (`slpi: loading from
+      0x89200000 to 0x8a700000`, "Brought out of reset", fastrpc/QMI
+      channels established) - this really is a full DSP subsystem
+      bring-up (PIL/TZ loader + fastrpc + QMI sensor IPC), not
+      something more devicetree comparison would shrink.
 - [ ] Suspend/resume cycle survives repeatedly without corruption (this bit
       the S9 Ultra project hard — see its `docs/resume-recovery.md` — budget
       real time for this).
@@ -1409,6 +1478,54 @@ Progress log:
   was deliberately left unwired rather than guessed (guessing a
   regulator voltage is a real safety risk, unlike omitting one). Next:
   find PM8150 L13's actual voltage and wire `vdd-supply`.
+- 2026-09-22: Booted real stock Android (Magisk root + adb) to get a
+  ground-truth probe trace - full story and the trace itself in
+  `docs/phase4-spen-scoping.md`'s "Real stock-Android probe trace
+  captured" section, raw logs in `docs/logs/stock-boot-2026-09-22/`.
+  Every software-visible detail (regulator, I2C bus, fwe-GPIO polarity
+  and sequencing, no power-cycle needed) now confirmed byte-identical
+  between our driver and the real working one - the chip still doesn't
+  respond under mainline. This rules out devicetree/driver-logic
+  comparison as a further source of progress; genuinely needs a live
+  UART/logic-analyzer capture of the I2C bus itself next, comparing a
+  working (stock) transaction against a failing (mainline) one at the
+  signal level. Also used this same stock boot to resolve two other
+  open questions cheaply: confirmed CS35L41 (not WSA881x) is the real
+  active speaker amp (`docs/phase3-audio-scoping.md`), and confirmed
+  the two previously-unexplained failing SPMI slaves (USIDs `0xa`/
+  `0xb`, found investigating the volume/power button fix) simply don't
+  exist on real hardware at all - stock only enumerates `00, 01, 03,
+  04, 05, 08, 09`
+  (`docs/logs/stock-boot-2026-09-22/04-spmi-devices-real-hardware-enumeration.txt`).
+  Those are two bogus/leftover devicetree child nodes to find and
+  remove, not a sequencing bug - low-risk future cleanup, not
+  investigated further this pass.
+- 2026-09-22 (later, same day): Dug further into S Pen with the fresh
+  stock trace as ground truth. Found one more real, previously-unknown
+  detail - the working stock boot runs the AVDD regulator
+  (`pm8150_l13`) in RPMh's High Power Mode, not its power-saving
+  default - and implemented it properly
+  (`kernel/patches/0014-wacom-w9000-rpmh-high-power-mode.patch`,
+  `regulator-initial-mode`/`regulator-allowed-modes` on
+  `kernel/dts/sm8250-samsung-gts7l.dts`'s `pm8150_l13` node). Took two
+  real hardware rounds to get right: the first attempt used the
+  generic Linux `REGULATOR_MODE_NORMAL` encoding for the devicetree
+  property, which this RPMh driver's `of_map_mode()` silently rejects
+  (it expects its own `RPMH_REGULATOR_MODE_*` numbering) - confirmed
+  via a live diagnostic print, fixed, and confirmed genuinely working
+  on the second attempt (`regulator_set_mode()` returns 0,
+  `regulator_get_mode()` confirms the change). **Made zero difference
+  to the S Pen - identical `-ENXIO`.** This is now the sixth
+  independent, real hypothesis (timing, both GPIO polarities, forced
+  power-cycle, genuinely-conditional power-cycle, regulator power
+  mode) tested and ruled out on real hardware while every
+  software-visible detail matches the working stock trace exactly.
+  Kept the fix anyway - real, confirmed-harmless correctness
+  improvement, matches downstream. Full story in
+  `docs/phase4-spen-scoping.md`. Genuinely exhausted the software/DT
+  comparison approach for this bug now - next step needs the chip's
+  real datasheet or a live UART/logic-analyzer capture of the I2C bus
+  itself, not more source reading.
 
 ---
 
@@ -1656,3 +1773,140 @@ decisions, scope changes) goes here instead of being forced into a phase log.
   revert the pseudo-NMI trial bootarg once this investigation is
   considered closed (~5% steady-state cost, and while it did let us
   capture this evidence, it can't fix the underlying issue either).
+- 2026-09-22: **Correction to the above** - this is very likely *not*
+  a hardware/firmware erratum after all. Ran a controlled comparison
+  on real stock Android (a minimal libc-free ARM64 reproducer
+  replicating the exact `stress-ng --vm --vm-keep` repro,
+  `tools/loadtest/vmstress-android.c`) at sizes up to 5GB, deliberately
+  exceeding available memory (`MemFree` genuinely dropped to ~156MB) -
+  **stock never hung, at any level, on the identical physical
+  hardware**. The one confirmed structural difference: stock has no
+  `khugepaged`/Transparent Huge Pages at all, while plain arm64
+  defconfig defaults to scanning constantly
+  (`CONFIG_TRANSPARENT_HUGEPAGE_ALWAYS=y`) - and `khugepaged ->
+  lru_add_drain_all()` is exactly the mechanism caught above. Online
+  research found this is a real, currently-open, *unmerged* upstream
+  Linux regression (reproduces on plain AWS Graviton3 ARM64 cloud
+  servers too, nothing Qualcomm-specific) - idle per-CPU workqueue
+  workers failing to dispatch pending drain work, not a stuck CPU core
+  at the hardware level. Mitigated with `CONFIG_TRANSPARENT_HUGEPAGE=n`
+  (matches Samsung's own real, proven-stable production config) -
+  **not yet validated against a real freeze repro on our own kernel**,
+  that's the next real test. Full story in
+  `../docs/kernel-boot-debugging.md`'s "CPU hard-hang, continued"
+  section.
+- 2026-09-22 (later, same day): **Tested `CONFIG_TRANSPARENT_HUGEPAGE=n`
+  on our own kernel with a real freeze repro - it did not fix the
+  freeze.** Flashed `boot` only (left `dtbo`/`data`/`vbmeta` stock, per
+  explicit instruction not to disturb Android userdata) with the
+  THP-disabled build and re-ran `vmstress` over the initramfs debug
+  console. Froze again. But the failure signature this time was more
+  precise than any earlier capture: the physical screen kept actively
+  spamming a `drm_crtc_wait_one_vblank()` timeout `WARN_ON` with
+  **advancing timestamps** the whole time, while two independent clean
+  passive captures of the `/dev/ttyACM0` serial console (25s, then ~8s)
+  came back completely empty. A kernel worker thread producing that
+  warning with climbing timestamps proves at least one CPU is still
+  alive and scheduling normally; total serial silence on the USB-gadget
+  console proves some other CPU/subsystem (most likely whatever
+  services the USB gadget's serial interrupt/data path, or a lock the
+  shell/vmstress needed next) is completely wedged. That's a
+  **single-CPU/single-subsystem lockup**, not a global stall - which
+  actually lines up better with the *original* 2026-09-21
+  single-CPU-hardware-lockup hypothesis above than with the
+  khugepaged/`lru_add_drain_all()` global-workqueue-starvation theory.
+  `CONFIG_TRANSPARENT_HUGEPAGE=n` is being kept (it's a real, valid fix
+  for the separate, independently-confirmed upstream workqueue-dispatch
+  bug), but it is **not** the fix for this freeze. Root cause is still
+  open; next step is researching this specific signature (one worker
+  thread advancing normally, one CPU/IRQ path totally dead, DRM/vblank
+  spam as a side-effect of the hang rather than its cause) against
+  known SM8250/mainline-arm64 lockup classes. Recovered via hard reset;
+  `/data` untouched throughout. Full story in
+  `../docs/kernel-boot-debugging.md`'s "CPU hard-hang, continued
+  (2026-09-22, later same day)" section.
+- 2026-09-22 (research pass): Found a strong lead for the CPU
+  hard-hang's real root cause - the `qcom_scm` (TrustZone SMC) driver
+  holds a single global mutex across the entire SMC-call lifecycle,
+  including any `QCOM_SCM_WAITQ_SLEEP` cycle, and waits in
+  uninterruptible `TASK_IDLE`. If one call parks on a firmware waitq
+  while holding that mutex, every unrelated SMC caller on any other
+  CPU/thread stalls forever on the same mutex - matching this
+  project's exact signature (one code path permanently, unrecoverably
+  wedged; unrelated kernel worker threads on other CPUs keep running
+  fine; nothing short of a hard reset recovers it). A string of
+  `linux-arm-msm`/LKML patches fixing exactly this ("firmware: qcom:
+  scm locking improvements", etc.) are dated 2026-05 through 2026-09 -
+  after this project's pinned v7.2.0 kernel and still at patch-review
+  stage upstream, not merged. **Not yet confirmed on this hardware** -
+  next step is adding SCM call tracing/printk and reproducing the
+  freeze to check directly whether a CPU is parked in that wait when
+  it happens. Full writeup in `../docs/kernel-boot-debugging.md`'s
+  "CPU hard-hang, online research" section.
+- 2026-09-22 (later, same day): **`qcom_scm` tracing added, tested,
+  and disconfirmed as the cause - real common thread found:
+  `smp_call_function_many_cond()`/IPI delivery to a specific CPU.**
+  Reinstalled the Arch rootfs onto `/dev/sda37` (the owner had wiped it
+  by booting stock Android again; recovered via the documented
+  `mke2fs -t ext4 -L archroot` + `adb push` + `tar -xpf` process using
+  `work/archroot-build/archroot-rootfs-v4.tar`) and switched all
+  further testing from the flaky `/dev/ttyACM0` serial console to SSH
+  over the USB-Ethernet (ECM) gadget - far more reliable. Ran
+  `vmstress` with a live `dmesg -w` watching: reproduced the original
+  "CPU stops responding even to a hardware NMI" signature exactly (CPU
+  4 this time), with **zero `gts7l-scm-trace` hits anywhere** -
+  disconfirming the `qcom_scm` WAITQ/mutex-stall theory. ~47s later, a
+  second, independent trigger hit in the same boot: `systemd` itself
+  soft-locked for 23s inside `kick_all_cpus_sync()` while JIT-compiling
+  a routine BPF program (cgroup/seccomp filter, nothing THP/khugepaged-
+  related). Log then went completely silent (even the softlockup
+  watchdog's own re-print stopped) and the device was confirmed
+  genuinely frozen on the physical screen, recovered via hard reset.
+  The common thread across every trigger caught this project
+  (`lru_add_drain_all()`, an NMI backtrace request, and now
+  `kick_all_cpus_sync()` - three unrelated callers) is
+  `smp_call_function_many_cond()`/cross-CPU IPI delivery itself: some
+  CPU stops acknowledging IPIs/NMIs under memory pressure regardless
+  of who's asking. This is closer to the *original* 2026-09-21
+  hardware/firmware-level-lockup framing than the THP- or
+  `qcom_scm`-specific theories tried since. Full log saved at
+  `../docs/logs/freeze-2026-09-22-ssh-capture/`; full writeup in
+  `../docs/kernel-boot-debugging.md`'s "CPU hard-hang, `qcom_scm`
+  tracing added and tested" section.
+- 2026-09-22: Long session covering an accidental full `data`/`archroot`
+  wipe and recovery, then a real chain of Phase 5/Phase 3/Phase 4 fixes.
+  **S Pen**: tested the last well-reasoned GPIO hypothesis left from
+  the prior session - letting `force_power_cycle` be genuinely driven
+  by the flash-mode line's real hardware-read state (it had been
+  hardcoded `true`, making the earlier "conditional" logic dead code) -
+  identical `-ENXIO` on real hardware
+  (`kernel/patches/0012-wacom-w9000-real-conditional-power-cycle.patch`).
+  This conclusively rules out flash-mode-gpios sequencing in every form
+  tried; what's left needs the chip's real datasheet or a live UART
+  capture (`docs/phase4-spen-scoping.md`).
+  **Rootfs recovery**: TWRP accidentally wiped the `archroot` partition
+  mid-session (owner's own account: "that was a mistake on my end").
+  Recovered via the project's own `archroot-rootfs.tar` backup, but that
+  backup predated several live fixes (USB ECM gadget, `bt`/`wlan`-rebind
+  services, a UFS udev fix) - rebuilt a fresh, complete `v2` tarball via
+  the same Docker/QEMU cross-build method the original was made with,
+  adding KDE Plasma, Firefox, Discover, and SSH access baked in from
+  build time rather than patched live. **KDE Plasma bring-up** (full
+  story above in this phase's exit criteria) needed a second full
+  rootfs rebuild (`v3`) once each bug was found and fixed live over
+  SSH, so a from-scratch cold boot actually reproduces the fix instead
+  of just the one already-patched instance. **Power/volume buttons**
+  and **backlight** (both above) were root-caused and fixed as real
+  kernel patches. **Bluetooth**'s rootfs-level gap (above) went into a
+  `v4` tarball. Also fixed along the way: the device's clock was stuck
+  at 1970-01-01 (no RTC) and breaking `pacman`'s PGP signature checks -
+  enabled `systemd-timesyncd`; set up host-side NAT
+  (`iptables`/`ip_forward`) so the device has real internet over its
+  USB debug link, letting `gdb`/`strace` actually get installed for the
+  first time this project has had them. **Motion sensors** scoped
+  (above) and found to be a substantially bigger task than anything
+  else in this pass. **120Hz**: the owner caught a proposed devicetree
+  porch-timing "fix" before it was applied - correctly, per this doc's
+  own Phase 2 notes, 96Hz was already a deliberate real-hardware-tested
+  choice (mainline's MDP core clock table is hard-capped below what
+  120Hz genuinely needs) - not touched.

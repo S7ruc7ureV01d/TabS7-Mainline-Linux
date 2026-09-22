@@ -1,0 +1,25 @@
+pm8150_l13
+---
+3300000
+---
+enabled
+total 0
+drwxr-xr-x 3 root root    0 2026-09-22 12:46 .
+drwxr-xr-x 3 root root    0 2026-09-22 12:46 ..
+lrwxrwxrwx 1 root root    0 2026-09-22 12:46 10-0056-pm8150_l13 -> ../../../../88c000.i2c/i2c-10/10-0056
+lrwxrwxrwx 1 root root    0 2026-09-22 12:46 device -> ../../../18200000.rsc:rpmh-regulator-ldoa13
+-r--r--r-- 1 root root 4096 2026-09-22 12:46 max_microvolts
+-r--r--r-- 1 root root 4096 2026-09-22 12:51 microvolts
+-r--r--r-- 1 root root 4096 2026-09-22 12:46 min_microvolts
+-r--r--r-- 1 root root 4096 2026-09-22 12:46 name
+-r--r--r-- 1 root root 4096 2026-09-22 12:46 num_users
+lrwxrwxrwx 1 root root    0 2026-09-22 12:46 of_node -> ../../../../../../../firmware/devicetree/base/soc/rsc@18200000/rpmh-regulator-ldoa13/regulator-pm8150-l13
+-r--r--r-- 1 root root 4096 2026-09-22 12:46 opmode
+drwxr-xr-x 2 root root    0 2026-09-22 12:46 power
+-r--r--r-- 1 root root 4096 2026-09-22 12:51 state
+lrwxrwxrwx 1 root root    0 2026-09-22 12:46 subsystem -> ../../../../../../../class/regulator
+-r--r--r-- 1 root root 4096 2026-09-22 12:46 suspend_disk_state
+-r--r--r-- 1 root root 4096 2026-09-22 12:46 suspend_mem_state
+-r--r--r-- 1 root root 4096 2026-09-22 12:46 suspend_standby_state
+-r--r--r-- 1 root root 4096 2026-09-22 12:46 type
+-rw-r--r-- 1 root root 4096 2019-04-01 17:16 uevent
