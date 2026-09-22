@@ -59,8 +59,8 @@ alone without asking, and getting this wrong wastes a round-trip):
     `/etc/sudoers.d/10-wheel` (`%wheel ALL=(ALL:ALL) ALL`, password
     required).
   - **Current rootfs tarball:**
-    `work/archroot-build/archroot-rootfs-v7.tar` (2026-09-22, sha256
-    `a2145afe283314228adcb8acb1c982b27e38462d963d3443502f74c5c4ca6679`).
+    `work/archroot-build/archroot-rootfs-v8.tar` (2026-09-22, sha256
+    `4fc18503969ddcd421025bdf05eab6568e382d297c6a94df3d392928cb2ec5bc`).
     Lineage, each step a verified stream-rewrite of the previous one with
     Python's `tarfile` (GNU `tar --delete` corrupted this archive):
     - v5 = v4 + `authorized_keys` owned by root + `/etc/sudoers.d/10-wheel`
@@ -70,11 +70,22 @@ alone without asking, and getting this wrong wastes a round-trip):
       random-seed, fstrim and ModemManager.
     - v7 = v6 + the RTC offset service (`tools/rootfs/rtc-offset/`),
       enabled
+    - v8 = v7 + the SLPI sensor stack as running live:
+      - `slpi.*` firmware;
+      - hexagonrpcd, built from `tools/rootfs/hexagonrpcd/`;
+      - the HexagonFS tree, with the SLPI-validated registry;
+      - a `fastrpc` user/group (963), added to the four account files;
+      - `slpi-start.service`, and `hexagonrpcd-sdsp.service` plus its
+        drop-in;
+      - udev rules 81/90.
+
+      The build tools (base-devel/meson/git) used on the live install
+      are *not* included.
 
     File capabilities (`kwin_wayland`, `newuidmap`, ...) are preserved
     byte-for-byte. Python tags two entries with a `hdrcharset=BINARY` pax
     keyword, which GNU tar ignores with a warning and bsdtar handles
-    cleanly. TWRP's own tar hasn't been tried on v5+ yet. Only v7 and
+    cleanly. TWRP's own tar hasn't been tried on v5+ yet. Only v8 and
     `ArchLinuxARM-aarch64-latest.tar.gz` (the upstream base) are kept.
   - Internet access on-device works via NAT: the host does
     `iptables -t nat -A POSTROUTING -s 172.16.42.0/24 -o wlan0 -j MASQUERADE`
@@ -95,7 +106,7 @@ alone without asking, and getting this wrong wastes a round-trip):
   - **SLPI sensor DSP (2026-09-22):** firmware `slpi.mdt` + `slpi.b00`-`b20`
     lives on the rootfs in `/lib/firmware/qcom/sm8250/samsung/gts7l/`
     (copied from `work/stock-dump/dump/vendor-firmware_mnt-image/`;
-    not in tarball v7 yet). `slpi-start.service` (`tools/rootfs/slpi/`)
+    in tarball v8). `slpi-start.service` (`tools/rootfs/slpi/`)
     boots it after the rootfs is mounted. Check with
     `cat /sys/class/remoteproc/remoteproc0/state` and
     `python3 tools/rootfs/slpi/qrtr_lookup.py` (look for service 400).
