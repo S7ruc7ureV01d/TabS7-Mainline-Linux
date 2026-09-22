@@ -49,14 +49,29 @@ alone without asking, and getting this wrong wastes a round-trip):
     ssh -i ~/.ssh/id_ed25519_gts7l -o BatchMode=yes root@172.16.42.1
     ```
   - If the key is suddenly rejected (`Permission denied (publickey,...)`),
-    check `/root/.ssh/authorized_keys` ownership: the v3 rootfs shipped it
-    owned by `alarm:alarm`, which sshd's StrictModes refuses for root. Log in
-    with the password and `chown root:root /root/.ssh/authorized_keys`
-    (done on the live install 2026-09-22; the tarball itself is still wrong).
+    check `/root/.ssh/authorized_keys` ownership: the v2-v4 rootfs
+    tarballs shipped it owned by `alarm:alarm`, which sshd's StrictModes
+    refuses for root. Log in with the password and
+    `chown root:root /root/.ssh/authorized_keys`. Fixed in v5.
   - Password root login is also enabled (`/etc/ssh/sshd_config.d/`) as a
     fallback, but the key is the normal path. Both `root` and `alarm`'s
-    password is `make.believe` (2026-09-22, baked into
-    `work/archroot-build/archroot-rootfs-v3.tar` onward).
+    password is `make.believe`. `alarm` has sudo via
+    `/etc/sudoers.d/10-wheel` (`%wheel ALL=(ALL:ALL) ALL`, password
+    required).
+  - **Current rootfs tarball:**
+    `work/archroot-build/archroot-rootfs-v5.tar` (2026-09-22, sha256
+    `f7c24bcf0f498583ea48fa7c48264069bf5614b13eb350bce34ce5ecd14c870e`).
+    It is v4 with exactly two changes: the `authorized_keys` ownership fix
+    and the sudoers rule. It was made by stream-rewriting v4 with Python's
+    `tarfile`, because GNU `tar --delete` corrupted this archive. The file
+    capabilities on `kwin_wayland`, `newuidmap` and others are preserved
+    byte-for-byte; whether they get applied depends on the extracting tar,
+    same as with v4. Python tags two of those entries with a
+    `hdrcharset=BINARY` pax keyword. GNU tar ignores it with a warning,
+    and bsdtar extracts cleanly. TWRP's own tar hasn't been tried on v5
+    yet. v1-v4 were deleted
+    for disk space; `ArchLinuxARM-aarch64-latest.tar.gz` (the upstream
+    base) is kept.
   - Internet access on-device works via NAT: the host does
     `iptables -t nat -A POSTROUTING -s 172.16.42.0/24 -o wlan0 -j MASQUERADE`
     plus `ip_forward=1`, and the device gets a default route via
