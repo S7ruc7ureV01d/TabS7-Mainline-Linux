@@ -191,6 +191,46 @@ the actuator (stage 5).
 
 Next: stage 3, libcamera `simple` pipeline + software ISP, then PipeWire.
 
+## Result: stage 3 (2026-09-23), the camera works for apps via PipeWire
+
+- Packages: `libcamera libcamera-ipa libcamera-tools pipewire-libcamera
+  gst-plugin-libcamera` (Arch ARM, libcamera 0.7.2), plus
+  `gst-plugin-pipewire gst-plugins-good` for testing.
+- libcamera's `simple` pipeline picks up CAMSS and lists "Internal back
+  camera". Two kernel gaps fixed:
+  - patch **0032** `s5k3m5`: NATIVE_SIZE (4216x3128), CROP_DEFAULT and
+    CROP_BOUNDS (active area (4,8)/4208x3120), and a per-mode analogue CROP
+    ((4,384)/4208x2368 for the 2x2-binned 2104x1184 mode), all from the
+    modes' address registers;
+  - config: `DMABUF_HEAPS` (system + CMA) and `UDMABUF`. Without a dma-buf
+    provider libcamera disables the software ISP. The heaps are root-only,
+    but `/dev/udmabuf` has a uaccess ACL, so the software ISP works for the
+    desktop user too.
+- `cam` streams processed RGB at **60 fps** (1280x720); the soft ISP's AGC
+  drives exposure and gain (it reached the maximum, 1620 lines and 16x, in
+  this dim room) and AWB gives neutral colour.
+- PipeWire: one video source, "Built-in Back Camera". A GStreamer
+  `pipewiresrc` capture as the desktop user works.
+  `tools/rootfs/camera/52-gts7l-camera.conf` hides CAMSS's 14 raw V4L2
+  nodes (they'd show up in apps as 14 "Qualcomm Camera Subsystem"
+  cameras). It disables the *nodes*: disabling the V4L2 *device* also made
+  PipeWire's libcamera monitor stop exposing the libcamera camera
+  (WirePlumber 0.5.17, PipeWire 1.6.8; not investigated further).
+
+Known limits, next steps:
+- **Dark**: the only mode libcamera uses here is the 60 fps binned one,
+  whose frame length caps exposure at ~16.5 ms. Allowing a longer frame
+  (vertical blanking) in low light, or a 30 fps mode, is the fix to look at.
+- **Soft focus**: no AF actuator yet (stage 5).
+- **Cropped field of view at small sizes**: libcamera's CPU debayer centre-
+  crops to the requested size instead of scaling (the same issue S9U
+  documented in `camera-gpu-full-field.md`; their fix is for the GPU path).
+- **libcamera has no data for the S5K3M5**: no sensor properties entry
+  (unit cell size, control delays) and no CameraSensorHelper (gain model),
+  so it uses defaults ("Failed to create camera sensor helper"). A small
+  libcamera patch.
+- Then stage 4: the rear second (S5K5E9) and front (S5K4HA) sensors.
+
 ## To grab during the stock boot (planned anyway for the suspend work)
 
 - `/vendor/lib64/camera/com.qti.sensormodule.*.bin` and

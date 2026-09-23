@@ -1,0 +1,74 @@
+From: gts7l project
+Subject: [PATCH] media: i2c: s5k3m5: report the pixel array and per-mode
+ crop for libcamera
+
+libcamera needs V4L2_SEL_TGT_NATIVE_SIZE, CROP_DEFAULT and CROP_BOUNDS
+to describe the pixel array ("The sensor kernel driver needs to be
+fixed", PixelArrayActiveAreas defaulted to the output size), and CROP
+to know each mode's field of view. The driver only answered CROP and
+CROP_BOUNDS, both with the output size.
+
+Describe the readable array (x 0x0000-0x1077, y 0x0000-0x0c37), the
+active area (the full-resolution mode's window) and each mode's analogue
+crop, taken from the modes' X/Y_ADDR_START/END registers. The 2104x1184
+mode is 2x2 binned from rows 0x180-0xabf.
+
+--- a/drivers/media/i2c/s5k3m5.c
++++ b/drivers/media/i2c/s5k3m5.c
+@@ -18,6 +18,10 @@
+ #define S5K3M5_MCLK_FREQ_24MHZ		(24 * HZ_PER_MHZ)
+ #define S5K3M5_DATA_LANES		4
+ 
++/* Readable pixel array: x 0x0000-0x1077, y 0x0000-0x0c37 */
++#define S5K3M5_NATIVE_WIDTH		4216
++#define S5K3M5_NATIVE_HEIGHT		3128
++
+ /* Register map is similar to MIPI CCS compliant camera sensors */
+ #define S5K3M5_REG_CHIP_ID		CCI_REG16(0x0000)
+ #define S5K3M5_CHIP_ID			0x30d5
+@@ -76,6 +80,7 @@
+ 	u32 hts;			/* Horizontal timing size */
+ 	u32 vts;			/* Default vertical timing size */
+ 	u32 exposure;			/* Default exposure value */
++	struct v4l2_rect crop;		/* Analogue crop in the pixel array */
+ 
+ 	const struct s5k3m5_reg_list reg_list;	/* Sensor register setting */
+ };
+@@ -697,6 +702,7 @@
+ 		.hts = 4848,
+ 		.vts = 3314,
+ 		.exposure = 256,
++		.crop = { .left = 4, .top = 8, .width = 4208, .height = 3120 },
+ 		.reg_list = {
+ 			.regs = s5k3m5_4208x3120_30fps_mode,
+ 			.num_regs = ARRAY_SIZE(s5k3m5_4208x3120_30fps_mode),
+@@ -708,6 +714,8 @@
+ 		.hts = 4928,
+ 		.vts = 1624,
+ 		.exposure = 256,
++		/* 2x2 binned: y 0x180-0xabf of the array */
++		.crop = { .left = 4, .top = 384, .width = 4208, .height = 2368 },
+ 		.reg_list = {
+ 			.regs = s5k3m5_2104x1184_60fps_mode,
+ 			.num_regs = ARRAY_SIZE(s5k3m5_2104x1184_60fps_mode),
+@@ -1048,11 +1056,18 @@
+ 
+ 	switch (sel->target) {
+ 	case V4L2_SEL_TGT_CROP:
++		sel->r = s5k3m5->mode->crop;
++		return 0;
++	case V4L2_SEL_TGT_CROP_DEFAULT:
+ 	case V4L2_SEL_TGT_CROP_BOUNDS:
++		/* Active pixel array: the full-resolution mode's window */
++		sel->r = s5k3m5_supported_modes[0].crop;
++		return 0;
++	case V4L2_SEL_TGT_NATIVE_SIZE:
+ 		sel->r.left = 0;
+ 		sel->r.top = 0;
+-		sel->r.width = s5k3m5->mode->width;
+-		sel->r.height = s5k3m5->mode->height;
++		sel->r.width = S5K3M5_NATIVE_WIDTH;
++		sel->r.height = S5K3M5_NATIVE_HEIGHT;
+ 		return 0;
+ 	default:
+ 		return -EINVAL;

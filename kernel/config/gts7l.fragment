@@ -673,3 +673,9 @@ CONFIG_VIDEO_QCOM_CAMSS=y
 CONFIG_I2C_QCOM_CCI=y
 CONFIG_SM_CAMCC_8250=y
 CONFIG_VIDEO_S5K3M5=y
+# libcamera's software ISP needs a dma-buf provider (dma-heaps or
+# udmabuf), else it disables software debayering.
+CONFIG_DMABUF_HEAPS=y
+CONFIG_DMABUF_HEAPS_SYSTEM=y
+CONFIG_DMABUF_HEAPS_CMA=y
+CONFIG_UDMABUF=y
