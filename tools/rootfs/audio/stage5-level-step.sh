@@ -30,9 +30,13 @@ amixer -q -c "$C" cset name="PRIMARY_TDM_RX_0 Audio Mixer MultiMedia1" on
 for c in 1 2 3 4; do
 	n=$(echo "FL FR RL RR" | cut -d' ' -f$c)
 	printf "Press Enter to play channel %s (%s, 3 s)... " $c $n; read _ </dev/tty
-	aplay -q -D hw:$C,0 /root/lvl-m$LEVEL-ch$c.wav || { echo "ABORT: aplay failed"; exit 1; }
+	aplay -q -D hw:$C,0 /root/lvl-m$LEVEL-ch$c.wav & AP=$!
+	# Read mid-beep: the amps hibernate as soon as the stream ends
+	# (autosuspend 0), and a hibernated DSP's controls can't be read.
+	sleep 1.2
 	P="$n DSP1 Protection"
 	st=$(get "$P cd CSPL_STATE"); halo=$(get "$P 400a4 HALO_STATE"); t=$(get "$P cd CSPL_TEMPERATURE")
+	wait $AP || { echo "ABORT: aplay failed"; exit 1; }
 	# temperature: Q10.14 (0x5c000 = 23.0 C)
 	tc=$(printf '%s' "$t" | awk -F, '{printf "%.1f", (strtonum($2)*65536 + strtonum($3)*256 + strtonum($4)) / 16384}')
 	errs=$(dmesg | grep cs35l41 | grep -v Handover | grep -iE "error|fail|short|temp|overvolt|undervolt|boost" )

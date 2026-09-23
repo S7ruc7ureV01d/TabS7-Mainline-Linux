@@ -452,10 +452,42 @@ about 1000/s; `CAL_SET_STATUS` must be 2).
    `tools/rootfs/audio/73-gts7l-cs35l41-autosuspend.rules`. It matches
    `add|bind`: the built-in driver binds before udev starts, so only the
    coldplug add is seen.
-5. **Not persistent yet:** after boot the amps come up with **PCM Source
-   = ASP**, which bypasses the protection DSP. It must be set to DSP (with
-   gain 0 and preload on) before any audio. The audio gate stays until
-   that is automatic and verified.
+5. **Boot-time safe state (step A, 2026-09-23):** the amps come up with
+   **PCM Source = ASP**, which bypasses the protection DSP. The fix is
+   `gts7l-audio-safe` (script, unit and `74-gts7l-audio-safe.rules`). It
+   runs when the card appears and sets all four amps to PCM Source = DSP,
+   DSP1 Firmware = Protection, preload on and Analog PCM Volume 0. It
+   verifies each value and writes `/run/gts7l-audio-safe.ok` on success.
+   Verified at boot, about 1 s after the ADSP starts.
+
+### Stage 4c (2026-09-23): level ramp to stock gain (step B)
+
+Stock's playback paths use **AMP PCM Gain 17** (= mainline `Analog PCM
+Volume` 17, +17.5 dB) and `Digital PCM Volume` 817 (0 dB; mainline's
+default is already 817). Its defaults (gain 0) apply only when idle.
+
+`tools/rootfs/audio/stage5-level-step.sh LEVEL GAIN` plays one 3 s
+1 kHz beep per speaker:
+- it refuses GAIN > 17 and needs the safe-state marker;
+- it reads CSPL_STATE/HALO_STATE/CSPL_TEMPERATURE mid-beep (after the
+  stream they can't be read, because the amp hibernates);
+- it aborts on any amp error;
+- it always restores gain 0.
+
+Temperature is Q.14 (0x5c000 = 23.0 C); the firmware reports a flat 23.0
+until it has signal to measure.
+
+| Step | Level | FL | FR | RL | RR | Owner |
+|---|---|---|---|---|---|---|
+| B1 | -40 dBFS, gain 17 | 33.2 C | 33.7 | 30.8 | 32.2 | fine, a little louder |
+| B2 | -30 dBFS | 34.2 | 34.5 | 32.5 | 32.3 | louder, fine |
+| B3 | -20 dBFS | 33.5 | 33.5 | 32.5 | 31.7 | louder, totally fine |
+| B4 | -12 dBFS | 34.7 | 35.1 | 33.4 | 33.2 | fine |
+
+Protection was running (CSPL_STATE 0, HALO_STATE 2) and there were no
+amp errors at every step. Coil temperatures moved by at most 1.7 C. The
+ramp stops at -12 dBFS; beyond that, levels are left to the protection
+firmware with real programme material (step C: UCM/desktop audio).
 
 ## Real hardware: a genuinely complex, multi-chip audio topology
 
