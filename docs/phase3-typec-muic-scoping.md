@@ -251,7 +251,43 @@ The three real problems:
   interface (PDO selection through the APCMD opcodes). A separate, later
   step.
 
-## Status: basic charging fixed (DT); source-aware limit not started
+### Source-aware input limit: done (2026-09-23, patch 0024)
+
+`drivers/power/supply/max77705_usbc_ilim.c` (`CONFIG_CHARGER_MAX77705_USBC_ILIM`,
+about 270 lines) binds to a new `usbc@25` node (`maxim,max77705-usbc`,
+`interrupts = <3>` from `max77705_pmic`):
+- It unmasks only VBUSDetI/ChgTypI (UIC_INT_M = 0xdd) and
+  CCIStatI/CCStatI (CC_INT_M = 0xfa).
+- Its regmap allows writes only to those two mask registers, so it
+  cannot command the USB-C firmware, request PD or change VBUS.
+- On each interrupt it clears UIC/CC/PD/VDM_INT and re-evaluates 300 ms
+  after the last event.
+- The input limit is the larger of the BC1.2 value (SDP 475, CDP 1000,
+  DCP 1800 mA) and the Type-C value (500 mA -> 475, 1.5 A -> 1500,
+  3 A -> 1800, capped at stock's 5 V TA value). The charge current is
+  2100 mA at 1800 input, otherwise the same as the input.
+- While neither result is known, which the chip briefly reports as
+  "type 0, current 0" during attach and detach, it leaves the setting
+  alone.
+
+Verified by the owner and by capture:
+- **Boot on the PC port:** SDP + Type-C 3 A, so 1800/2100 mA; the
+  battery charges at about 1.2 A.
+- **Superfast plug-ins:** set by Type-C 3 A (BC1.2 reports DCP later).
+  Every sample with a charger online had the input at 1825 mA, the
+  battery averaged +1.24 A, and KDE stayed on "Charging".
+- **V1 vs V1.1:** V1 followed the PC port's advertisement as it flipped
+  between 1.5 A and 3 A for about 0.5 s after attach (about 10 limit
+  writes). V1.1's 300 ms debounce turned 44 interrupts in a full replug
+  round into zero changes.
+
+## Next: 9 V / PPS (not started)
+
+The only piece that needs the CCIC's command interface is PDO selection
+(APCMD). See `references/gts7l/drivers/ccic/max77705_pd.c` and
+`max77705_usbc.c`. Stock's 9 V table is 1650 mA input and 3150 mA charge.
+
+## Status: 5 V charging done (DT + patch 0024); 9 V PD next
 
 Nothing built or flashed. This document is the research-only pass;
 implementation - if pursued at all, pending step 1 above - is a

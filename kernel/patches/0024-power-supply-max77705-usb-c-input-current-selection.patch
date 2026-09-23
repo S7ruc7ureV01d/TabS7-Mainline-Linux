@@ -1,0 +1,348 @@
+From: gts7l project
+Subject: [PATCH] power: supply: max77705: select the input current from the
+ USB-C block
+
+The MAX77705's USB-C block (I2C 0x25) detects the BC1.2 charger type and
+the Type-C current a source advertises, but nothing tells the charger
+block. Its input limit stays at the power-on default: 500 mA or 900 mA
+on the Galaxy Tab S7, with a 100-900 mA charge current. With a 3 A wall
+charger the tablet then barely charged, and the fuel gauge read about
+0 mA.
+
+Add a small driver for the USB-C block that only reads BC_STATUS and
+CC_STATUS0 on the block's interrupt (MFD source 3). It sets the
+charger's input and charge current from the stock gts7l table: USB
+475/475 mA, CDP 1000/1000, Type-C 1.5 A 1500/1500, and DCP or Type-C
+3 A 1800/2100 (the stock 5 V TA values). The Type-C 3 A value is capped
+at the TA value. It re-evaluates 300 ms after the last event: a PC port's
+advertisement flipped between 1.5 A and 3 A for about 0.5 s after attach.
+It leaves the setting alone while neither result is known, since the chip
+briefly reports "type 0, current 0" during attach and detach. It writes only the two interrupt-mask registers of the
+block, never its command interface, so no PD contract is requested and
+VBUS stays at 5 V.
+
+--- a/drivers/power/supply/Kconfig
++++ b/drivers/power/supply/Kconfig
+@@ -642,6 +642,16 @@
+ 	help
+ 	  Say Y to enable support for the Maxim MAX77705 battery charger.
+ 
++config CHARGER_MAX77705_USBC_ILIM
++	tristate "Maxim MAX77705 USB-C input current selection"
++	depends on CHARGER_MAX77705 && I2C
++	select REGMAP_I2C
++	help
++	  Say Y to set the MAX77705 charger's input and charge current from
++	  what the chip's USB-C block detects (BC1.2 charger type and the
++	  Type-C current advertised on CC). Without it the charger stays at
++	  its power-on input limit. No USB-PD negotiation is done.
++
+ config CHARGER_MAX77759
+ 	tristate "Maxim MAX77759 battery charger driver"
+ 	depends on MFD_MAX77759 && REGULATOR
+--- a/drivers/power/supply/Makefile
++++ b/drivers/power/supply/Makefile
+@@ -87,6 +87,7 @@
+ obj-$(CONFIG_CHARGER_MAX77650)	+= max77650-charger.o
+ obj-$(CONFIG_CHARGER_MAX77693)	+= max77693_charger.o
+ obj-$(CONFIG_CHARGER_MAX77705)	+= max77705_charger.o
++obj-$(CONFIG_CHARGER_MAX77705_USBC_ILIM)	+= max77705_usbc_ilim.o
+ obj-$(CONFIG_CHARGER_MAX77976)	+= max77976_charger.o
+ obj-$(CONFIG_CHARGER_MAX8971)	+= max8971_charger.o
+ obj-$(CONFIG_CHARGER_MAX8997)	+= max8997_charger.o
+--- /dev/null
++++ b/drivers/power/supply/max77705_usbc_ilim.c
+@@ -0,0 +1,293 @@
++// SPDX-License-Identifier: GPL-2.0-or-later
++/*
++ * MAX77705 USB-C/BC1.2 input current selection
++ *
++ * The MAX77705's USB-C interface block (I2C 0x25) runs its own CC/PD
++ * firmware and reports what is attached: the BC1.2 charger type and the
++ * Type-C current the source advertises on CC. The charger block (driven by
++ * max77705_charger) never learns about either, so its input current limit
++ * stays at the chip's power-on default (500 or 900 mA) and a 3 A wall
++ * charger ends up barely charging a tablet in use.
++ *
++ * This driver only reads that status, on the block's interrupt, and sets
++ * the charger's input and charge current to the matching values of the
++ * Galaxy Tab S7's stock battery table, once the status has been stable for
++ * 300 ms (a PC port's advertisement can flip for ~0.5 s after attach). It
++ * never commands the USB-C firmware: no PD contract is requested, VBUS
++ * stays at 5 V.
++ */
++
++#include <linux/bitfield.h>
++#include <linux/devm-helpers.h>
++#include <linux/i2c.h>
++#include <linux/interrupt.h>
++#include <linux/minmax.h>
++#include <linux/module.h>
++#include <linux/mutex.h>
++#include <linux/of.h>
++#include <linux/power_supply.h>
++#include <linux/regmap.h>
++#include <linux/workqueue.h>
++
++#define MAX77705_USBC_REG_UIC_INT	0x02
++#define MAX77705_USBC_REG_CC_INT	0x03
++#define MAX77705_USBC_REG_PD_INT	0x04
++#define MAX77705_USBC_REG_VDM_INT	0x05
++#define MAX77705_USBC_REG_BC_STATUS	0x08
++#define MAX77705_USBC_REG_CC_STATUS0	0x0a
++#define MAX77705_USBC_REG_UIC_INT_M	0x0e
++#define MAX77705_USBC_REG_CC_INT_M	0x0f
++
++/* UIC_INT(_M) */
++#define MAX77705_VBUSDETI		BIT(5)
++#define MAX77705_CHGTYPI		BIT(1)
++/* CC_INT(_M) */
++#define MAX77705_CCISTATI		BIT(2)
++#define MAX77705_CCSTATI		BIT(0)
++/* BC_STATUS */
++#define MAX77705_BC_VBUSDET		BIT(7)
++#define MAX77705_BC_CHGTYP		GENMASK(1, 0)
++/* CC_STATUS0 */
++#define MAX77705_CC_CCISTAT		GENMASK(5, 4)
++
++enum max77705_chgtyp {
++	MAX77705_CHGTYP_NONE,
++	MAX77705_CHGTYP_SDP,
++	MAX77705_CHGTYP_CDP,
++	MAX77705_CHGTYP_DCP,
++};
++
++enum max77705_ccistat {
++	MAX77705_CCI_NOT_SINK,
++	MAX77705_CCI_500MA,
++	MAX77705_CCI_1500MA,
++	MAX77705_CCI_3000MA,
++};
++
++/* Stock gts7l cable-info (mA): USB 475/475, CDP 1000/1000, TA 1800/2100 */
++#define MAX77705_ILIM_DEFAULT_MA	475
++#define MAX77705_ILIM_CDP_MA		1000
++#define MAX77705_ILIM_1500_MA		1500
++#define MAX77705_ILIM_TA_MA		1800
++#define MAX77705_CHG_TA_MA		2100
++
++/* CC advertisement and BC1.2 result settle over ~0.5 s after attach */
++#define MAX77705_ILIM_DEBOUNCE_MS	300
++
++struct max77705_usbc_ilim {
++	struct device *dev;
++	struct regmap *regmap;
++	struct power_supply *charger;
++	struct mutex lock;
++	struct delayed_work work;
++	int ilim_ma;
++};
++
++static int max77705_bc_ilim_ma(unsigned int chgtyp)
++{
++	switch (chgtyp) {
++	case MAX77705_CHGTYP_SDP:
++		return MAX77705_ILIM_DEFAULT_MA;
++	case MAX77705_CHGTYP_CDP:
++		return MAX77705_ILIM_CDP_MA;
++	case MAX77705_CHGTYP_DCP:
++		return MAX77705_ILIM_TA_MA;
++	default:
++		return 0;
++	}
++}
++
++static int max77705_cc_ilim_ma(unsigned int ccistat)
++{
++	switch (ccistat) {
++	case MAX77705_CCI_500MA:
++		return MAX77705_ILIM_DEFAULT_MA;
++	case MAX77705_CCI_1500MA:
++		return MAX77705_ILIM_1500_MA;
++	case MAX77705_CCI_3000MA:
++		/* capped at the stock 5 V charger value */
++		return MAX77705_ILIM_TA_MA;
++	default:
++		return 0;
++	}
++}
++
++static int max77705_set_ma(struct max77705_usbc_ilim *ilim,
++			   enum power_supply_property psp, int ma)
++{
++	union power_supply_propval val = { .intval = ma * 1000 };
++
++	return power_supply_set_property(ilim->charger, psp, &val);
++}
++
++static void max77705_usbc_ilim_update(struct max77705_usbc_ilim *ilim)
++{
++	unsigned int bc, cc0, chgtyp, ccistat;
++	int ilim_ma, chg_ma, ret;
++
++	if (regmap_read(ilim->regmap, MAX77705_USBC_REG_BC_STATUS, &bc) ||
++	    regmap_read(ilim->regmap, MAX77705_USBC_REG_CC_STATUS0, &cc0)) {
++		dev_warn(ilim->dev, "cannot read USB-C status\n");
++		return;
++	}
++
++	/* Nothing to do without VBUS; the next attach sets a fresh limit */
++	if (!(bc & MAX77705_BC_VBUSDET))
++		return;
++
++	chgtyp = FIELD_GET(MAX77705_BC_CHGTYP, bc);
++	ccistat = FIELD_GET(MAX77705_CC_CCISTAT, cc0);
++
++	/*
++	 * Neither result yet (attach in progress) or any more (VBUS still
++	 * decaying after detach): keep the current setting.
++	 */
++	ilim_ma = max(max77705_bc_ilim_ma(chgtyp), max77705_cc_ilim_ma(ccistat));
++	if (!ilim_ma)
++		return;
++	chg_ma = ilim_ma == MAX77705_ILIM_TA_MA ? MAX77705_CHG_TA_MA : ilim_ma;
++
++	mutex_lock(&ilim->lock);
++	if (ilim_ma != ilim->ilim_ma) {
++		ret = max77705_set_ma(ilim, POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT,
++				      ilim_ma);
++		if (!ret)
++			ret = max77705_set_ma(ilim,
++					      POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT,
++					      chg_ma);
++		if (ret) {
++			dev_warn(ilim->dev, "cannot set charger current: %d\n", ret);
++		} else {
++			dev_info(ilim->dev,
++				 "BC1.2 type %u, Type-C current %u: input %d mA, charge %d mA\n",
++				 chgtyp, ccistat, ilim_ma, chg_ma);
++			ilim->ilim_ma = ilim_ma;
++		}
++	}
++	mutex_unlock(&ilim->lock);
++}
++
++static void max77705_usbc_ilim_clear(struct max77705_usbc_ilim *ilim)
++{
++	unsigned int reg, val;
++
++	/* The interrupt registers clear on read */
++	for (reg = MAX77705_USBC_REG_UIC_INT; reg <= MAX77705_USBC_REG_VDM_INT; reg++)
++		regmap_read(ilim->regmap, reg, &val);
++}
++
++static void max77705_usbc_ilim_work(struct work_struct *work)
++{
++	struct max77705_usbc_ilim *ilim =
++		container_of(to_delayed_work(work), struct max77705_usbc_ilim, work);
++
++	max77705_usbc_ilim_update(ilim);
++}
++
++static irqreturn_t max77705_usbc_ilim_irq(int irq, void *data)
++{
++	struct max77705_usbc_ilim *ilim = data;
++
++	max77705_usbc_ilim_clear(ilim);
++	mod_delayed_work(system_wq, &ilim->work,
++			 msecs_to_jiffies(MAX77705_ILIM_DEBOUNCE_MS));
++
++	return IRQ_HANDLED;
++}
++
++static bool max77705_usbc_readable(struct device *dev, unsigned int reg)
++{
++	return reg <= MAX77705_USBC_REG_CC_INT_M + 2;
++}
++
++static bool max77705_usbc_writeable(struct device *dev, unsigned int reg)
++{
++	/* Only the two interrupt masks: never the command/firmware registers */
++	return reg == MAX77705_USBC_REG_UIC_INT_M ||
++	       reg == MAX77705_USBC_REG_CC_INT_M;
++}
++
++static const struct regmap_config max77705_usbc_regmap_config = {
++	.reg_bits = 8,
++	.val_bits = 8,
++	.max_register = MAX77705_USBC_REG_CC_INT_M + 2,
++	.readable_reg = max77705_usbc_readable,
++	.writeable_reg = max77705_usbc_writeable,
++	.cache_type = REGCACHE_NONE,
++};
++
++static void max77705_usbc_ilim_put_charger(void *data)
++{
++	power_supply_put(data);
++}
++
++static int max77705_usbc_ilim_probe(struct i2c_client *client)
++{
++	struct device *dev = &client->dev;
++	struct max77705_usbc_ilim *ilim;
++	int ret;
++
++	ilim = devm_kzalloc(dev, sizeof(*ilim), GFP_KERNEL);
++	if (!ilim)
++		return -ENOMEM;
++
++	ilim->dev = dev;
++	mutex_init(&ilim->lock);
++
++	ilim->regmap = devm_regmap_init_i2c(client, &max77705_usbc_regmap_config);
++	if (IS_ERR(ilim->regmap))
++		return dev_err_probe(dev, PTR_ERR(ilim->regmap), "regmap init failed\n");
++
++	ilim->charger = power_supply_get_by_name("max77705-charger");
++	if (!ilim->charger)
++		return dev_err_probe(dev, -EPROBE_DEFER, "waiting for the charger\n");
++
++	ret = devm_add_action_or_reset(dev, max77705_usbc_ilim_put_charger,
++				       ilim->charger);
++	if (ret)
++		return ret;
++
++	/* Unmask only attach, charger-type and Type-C current changes */
++	ret = regmap_write(ilim->regmap, MAX77705_USBC_REG_UIC_INT_M,
++			   (u8)~(MAX77705_VBUSDETI | MAX77705_CHGTYPI));
++	if (!ret)
++		ret = regmap_write(ilim->regmap, MAX77705_USBC_REG_CC_INT_M,
++				   (u8)~(MAX77705_CCISTATI | MAX77705_CCSTATI));
++	if (ret)
++		return dev_err_probe(dev, ret, "cannot unmask interrupts\n");
++
++	ret = devm_delayed_work_autocancel(dev, &ilim->work, max77705_usbc_ilim_work);
++	if (ret)
++		return ret;
++
++	max77705_usbc_ilim_clear(ilim);
++
++	ret = devm_request_threaded_irq(dev, client->irq, NULL,
++					max77705_usbc_ilim_irq, IRQF_ONESHOT,
++					"max77705-usbc", ilim);
++	if (ret)
++		return dev_err_probe(dev, ret, "cannot request interrupt\n");
++
++	/* Whatever is attached at boot */
++	max77705_usbc_ilim_update(ilim);
++
++	return 0;
++}
++
++static const struct of_device_id max77705_usbc_ilim_of_match[] = {
++	{ .compatible = "maxim,max77705-usbc" },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, max77705_usbc_ilim_of_match);
++
++static struct i2c_driver max77705_usbc_ilim_driver = {
++	.driver = {
++		.name = "max77705-usbc-ilim",
++		.of_match_table = max77705_usbc_ilim_of_match,
++	},
++	.probe = max77705_usbc_ilim_probe,
++};
++module_i2c_driver(max77705_usbc_ilim_driver);
++
++MODULE_DESCRIPTION("MAX77705 USB-C/BC1.2 input current selection");
++MODULE_LICENSE("GPL");

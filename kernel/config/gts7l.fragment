@@ -600,3 +600,10 @@ CONFIG_SND_SOC_LPASS_MACRO_COMMON=y
 CONFIG_SND_SOC_LPASS_VA_MACRO=y
 CONFIG_PINCTRL_LPASS_LPI=y
 CONFIG_PINCTRL_SM8250_LPASS_LPI=y
+
+# 2026-09-23, charging (docs/phase3-typec-muic-scoping.md): new driver
+# (kernel/patches/0024) that sets the MAX77705 charger's input/charge
+# current from what the chip's USB-C block detects (BC1.2 type, Type-C Rp
+# current). Without it the input limit stays at the 500/900 mA power-on
+# default and a 3 A charger barely keeps up with the tablet's load.
+CONFIG_CHARGER_MAX77705_USBC_ILIM=y

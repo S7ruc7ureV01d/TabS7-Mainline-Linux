@@ -110,6 +110,16 @@ Exit criteria:
       availability not yet checked (not needed until Phase 5).
 
 Progress log:
+- 2026-09-23: **Charging from USB-C chargers fixed at 5 V.**
+  - The "icon vanishes" bug was not a PD bounce. The fuel gauge had no
+    supplier (status always Unknown), its sense resistor was wrong
+    (2 mOhm, not 10; readings were 5x low), and mainline never set the
+    charger's input limit.
+  - New driver 0024 reads the MAX77705 USB-C block's BC1.2 and Type-C
+    current results and sets stock's limits: 1800/2100 mA on a 3 A
+    charger, about 1.2 A into the battery.
+  - Owner-verified with the Superfast charger. Details:
+    `../docs/phase3-typec-muic-scoping.md`. Next: 9 V PD.
 - 2026-09-23: **Internal microphones work.**
   - Two digital mics through the LPASS VA macro, which clocks them
     (mainline's TX macro can't). KDE shows "Internal microphones", and

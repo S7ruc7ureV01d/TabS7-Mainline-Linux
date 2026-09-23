@@ -728,6 +728,20 @@
 		 */
 		power-supplies = <&max77705_charger>;
 	};
+
+	/*
+	 * MAX77705 USB-C interface block (MUIC/CCIC, downstream I2C_ADDR_MUIC
+	 * = 0x4a >> 1). Its firmware does the CC/BC1.2 detection by itself;
+	 * kernel/patches/0024 only reads the result on the block's interrupt
+	 * (pmic@66 source 3, "usb type-c management block") and sets the
+	 * charger's input/charge current from the stock table. No PD.
+	 */
+	usbc@25 {
+		compatible = "maxim,max77705-usbc";
+		reg = <0x25>;
+		interrupt-parent = <&max77705_pmic>;
+		interrupts = <3>;
+	};
 };
 
 /*
