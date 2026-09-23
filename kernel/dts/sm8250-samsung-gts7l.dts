@@ -672,7 +672,7 @@
 		pinctrl-0 = <&max77705_int_gts7l>;
 	};
 
-	charger@69 {
+	max77705_charger: charger@69 {
 		compatible = "maxim,max77705-charger";
 		reg = <0x69>;
 		monitored-battery = <&battery>;
@@ -714,7 +714,19 @@
 		reg = <0x36>;
 		interrupt-parent = <&max77705_pmic>;
 		interrupts = <2>;
-		shunt-resistor-micro-ohms = <10000>;
+		/*
+		 * 2 mOhm, not 10: stock's max77705_fuelgauge.c scales CURRENT by
+		 * 15625 * fg_resistor / 100000 mA per bit with fg_resistor = 5,
+		 * i.e. 0.78125 mA/bit = 1.5625 uV / 2 mOhm (its own comment: 10
+		 * mOhm = 0.15625 mA/bit), and FullCAP by 5/2. 10000 here read
+		 * every current and charge 5x too low.
+		 */
+		shunt-resistor-micro-ohms = <2000>;
+		/*
+		 * max17042_get_status() reports Unknown unless the battery has a
+		 * supplier (power_supply_am_i_supplied()) - KDE's "Not charging".
+		 */
+		power-supplies = <&max77705_charger>;
 	};
 };
 

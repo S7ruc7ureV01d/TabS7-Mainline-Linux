@@ -199,7 +199,59 @@ effort:
    something to fold into "just enable one more devicetree node" the
    way every other Phase 3 chunk has been so far this session.
 
-## Status: scoped, not yet started
+## Result (2026-09-23): not a PD problem - three smaller bugs, two fixed
+
+The capture script `tools/rootfs/charging/pdcap.sh` reads the charger
+regmap and the unbound CCIC at 0x25 over `i2cget`, 5 times a second.
+Logs are in `docs/logs/charging-2026-09-23/`. With the Samsung Superfast
+charger plugged in, the working theory above turned out wrong:
+
+- **CHGIN never bounced.** `CHG_DETAILS_00` stayed 0xe0 (CHGIN valid)
+  and `online` stayed 1 for the whole ~27 s. The charger was in
+  fast-charge CC mode throughout.
+- **VBUS stayed at 5 V** (CCIC `USBC_STATUS1` VBADC = 2). Without a host
+  driver, the CCIC firmware does not negotiate a higher PD voltage.
+- **The charger advertises 3 A on CC** (`CC_STATUS0` = 0xb1:
+  CCPinStat = CC2, CCIStat = 3 = CCI_3_0A, CCStat = sink) and is
+  detected as a **DCP** (`BC_STATUS` = 0x83, ChgTyp = 3).
+
+The three real problems:
+1. **The battery status was always Unknown**, which KDE shows as "Not
+   charging". `max17042_get_status()` calls
+   `power_supply_am_i_supplied()`, and the fuel gauge had no supplier.
+   **Fixed:** `power-supplies = <&max77705_charger>` on `fuelgauge@36`.
+2. **Every current and charge reading was 5x too low.** Stock's
+   `max77705_fuelgauge.c` uses `fg_resistor = 5` as a multiplier on
+   10 mOhm steps (15625 x 5 / 100000 = 0.78125 mA/bit), so the sense
+   resistor is **2 mOhm**, not the DTS's 10 mOhm. **Fixed:**
+   `shunt-resistor-micro-ohms = <2000>`. Confirmed: `charge_full_design`
+   now reads 7255 mAh = stock's `fuelgauge,capacity` 0xb56 x 2.5 mAh.
+3. **Charging was starved (open).** Mainline's charger driver never sets
+   the input limit or the charge current, so the chip's power-on
+   defaults stay. Those were 900/900 mA on some boots and 500/100 mA on
+   others. Tablet load then ate most of it: battery current was about 0,
+   or discharging. Stock's `cable-info` for a 5 V TA is
+   `default_input_current` 1800 mA and `default_charging_current`
+   2100 mA; USB (SDP) uses 475 mA, and 9 V TA uses 1650 mA input with
+   3150 mA charge.
+   - With 1800/2100 set by hand through sysfs, the battery charged at
+     1.30 A on the Superfast charger (all samples "Charging") and 1.25 A
+     on the PC's USB-C port.
+   - The owner confirmed the icon and state now stay "Charging", and go
+     back correctly on unplug.
+
+**What's left, and much smaller than the port above:**
+- **Source-aware input limit at 5 V:** read `BC_STATUS` (ChgTyp:
+  SDP/CDP/DCP) and `CC_STATUS0` (CCIStat: 500 mA/1.5 A/3 A) on the
+  MAX77705 USB-C interrupt (MFD index 3), then set the charger's
+  `input_current_limit` from stock's table. A small MFD-child driver of
+  a few hundred lines. No PD message bridge, no VDM. Blind 1800 mA would
+  be wrong for a 500 mA USB-A port.
+- **9 V / PPS "Superfast":** the only part that needs the CCIC command
+  interface (PDO selection through the APCMD opcodes). A separate, later
+  step.
+
+## Status: basic charging fixed (DT); source-aware limit not started
 
 Nothing built or flashed. This document is the research-only pass;
 implementation - if pursued at all, pending step 1 above - is a
