@@ -286,6 +286,65 @@ the downstream `qcom,msm-dai-tdm-pri-*` nodes.
   runs on all four; apply calibration and read it back.
 - **4:** first sound under the rules above.
 
+### Stage 3 result (2026-09-22): card up, gate holds, protection firmware loaded on all four
+
+- **Kernel:** `kernel/patches/0017-asoc-qcom-sm8250-primary-tdm-for-gts7l-speaker-amps.patch`
+  (TDM for sm8250.c). Built in: `SND_SOC_SM8250`, `SND_SOC_QDSP6`,
+  `SND_SOC_QCOM(_COMMON/_SDW)` and the SoundWire *bus core*.
+  `SND_SOC_QDSP6_USB` and `SND_SOC_QCOM_OFFLOAD_UTILS` are off (the
+  latter capped the machine driver at `=m`). WCD938x, WSA881x, the LPASS
+  macros and `SOUNDWIRE_QCOM` stay `=m`.
+- **DTS:** the `&sound` card `Samsung-GTS7L-CS35L41-Speakers`
+  (MultiMedia1 -> PRIMARY_TDM_RX_0 -> FL/FR/RL/RR), `q6afedai dai@24`
+  with stock's TDM values, `pri_tdm_active` pins, amp prefixes
+  FL/FR/RL/RR, and `cirrus,subsystem-id = "gts7l"`.
+- **Rootfs** (`tools/rootfs/audio/`):
+  - `72-gts7l-audio-gate.rules`: all ALSA nodes root:root 0600, no
+    uaccess.
+  - stock firmware as `cirrus/cs35l41-dsp1-spk-prot-gts7l.wmfw` and
+    `.bin` (md5 `262db054...`, `a11d8387...`, the same as stock).
+  - Note that linux-firmware ships a generic
+    `cirrus/cs35l41-dsp1-spk-prot.wmfw|bin` (a laptop default) at the
+    end of wm_adsp's fallback chain, so always confirm from the log which
+    file loaded.
+- **Verified:**
+  - card 0 registered; `pcmC0D0p`/`controlC0` root 0600 with no user
+    ACL; PipeWire sees only "Dummy Output";
+  - all four amps "Subsystem ID: gts7l"; `GLOBAL_EN = 0` throughout.
+  - **Defaults after boot:** `PCM Source = ASP` (protection bypassed -
+    the reason for the gate), `Analog PCM Volume = 0` (the minimum,
+    0.5 dB), `Digital PCM Volume = 817` (0 dB, stock's value),
+    `DSP1 Firmware = Protection`.
+- **3c, firmware:** `PCM Source` set to DSP on all four, then `DSP1
+  Preload Switch` on. Every amp loaded
+  `cirrus/cs35l41-dsp1-spk-prot-gts7l.wmfw` ("Fri 17 Jan 2020 16:05:21",
+  the same timestamp as stock's boot log, firmware 400a4 v0.0.1) and
+  `...-gts7l.bin`, whose embedded tuning name is
+  **`TAB_S7_SPKPV1_PPP_20200603.bin`**. No errors, and `GLOBAL_EN`
+  stayed 0 (logs: `docs/logs/audio-stage3-2026-09-22/`).
+- **3c, calibration: not possible in preload.** The firmware exposes
+  `cd CAL_R/CAL_AMBIENT/CAL_STATUS/CAL_CHECKSUM` and `400a4
+  VIMON_CAL/VSC/ISC`, `HALO_STATE/HALO_HEARTBEAT`, `CSPL_STATE`. But they
+  are *volatile* controls, and wm_adsp refuses both reads and writes
+  ("Operation not permitted") until the DSP is *running*, which in
+  mainline happens only when a stream starts (preload loads it but
+  doesn't run it; heartbeat reads 0). Stock applies calibration at the
+  same point, when the DSP boots at stream start.
+
+**Revised stage 4 procedure** (so calibration is in place before any
+non-zero signal):
+1. As root, with the gate still in place, set every amp to
+   `Analog PCM Volume = 0` and `PCM Source = DSP`.
+2. Open the PRIMARY_TDM stream playing **digital silence** (all zeros).
+   The DSPs start and the amps power up with no signal.
+3. Immediately write each amp's calibration through the controls, and
+   read it back.
+4. Confirm `HALO_STATE`/`CSPL_STATE` are running and `HALO_HEARTBEAT` is
+   incrementing, on all four amps.
+5. Only then, feed a short, low-level test tone (about -40 dBFS, analog
+   gain still at its minimum). Stop at the first anomaly.
+
+
 
 ## Real hardware: a genuinely complex, multi-chip audio topology
 

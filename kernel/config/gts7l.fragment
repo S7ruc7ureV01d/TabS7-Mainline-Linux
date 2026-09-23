@@ -576,3 +576,16 @@ CONFIG_SND_SOC_CS35L41_I2C=y
 # the line only returns to its default (reset asserted) when the LAST
 # consumer drops its vote, so one amp can't reset the others mid-use.
 CONFIG_GPIO_SHARED_PROXY=y
+
+# 2026-09-22, audio stage 3 (docs/phase3-audio-scoping.md): the SM8250
+# machine driver + Q6 stack for the speaker card (PRIMARY_TDM_RX_0 -> the
+# four CS35L41s; TDM support is kernel/patches/0017). The machine driver
+# depends on SOUNDWIRE (bus core only - SOUNDWIRE_QCOM stays =m, no
+# controller binds) and is capped at =m while SND_SOC_QCOM_OFFLOAD_UTILS is
+# =m, which SND_SOC_QDSP6_USB (USB audio offload, unused) selects - so that
+# is disabled. WCD938x/WSA881x/LPASS macros stay =m (not loadable).
+CONFIG_SND_SOC_QCOM=y
+CONFIG_SND_SOC_QDSP6=y
+CONFIG_SND_SOC_SM8250=y
+CONFIG_SOUNDWIRE=y
+# CONFIG_SND_SOC_QDSP6_USB is not set

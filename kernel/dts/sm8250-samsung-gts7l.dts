@@ -29,6 +29,7 @@
 #include <dt-bindings/interrupt-controller/irq.h>
 #include <dt-bindings/phy/phy.h>
 #include <dt-bindings/regulator/qcom,rpmh-regulator.h>
+#include <dt-bindings/sound/qcom,q6asm.h>
 #include "sm8250-samsung-common.dtsi"
 
 /*
@@ -1935,7 +1936,8 @@
 		compatible = "cirrus,cs35l41";
 		reg = <0x40>;
 		#sound-dai-cells = <1>;
-		sound-name-prefix = "AMP40";
+		sound-name-prefix = "RR";
+		cirrus,subsystem-id = "gts7l";
 		interrupt-parent = <&tlmm>;
 		reset-gpios = <&tlmm 69 GPIO_ACTIVE_HIGH>;
 		interrupts = <84 IRQ_TYPE_LEVEL_LOW>;
@@ -1951,7 +1953,8 @@
 		compatible = "cirrus,cs35l41";
 		reg = <0x41>;
 		#sound-dai-cells = <1>;
-		sound-name-prefix = "AMP41";
+		sound-name-prefix = "RL";
+		cirrus,subsystem-id = "gts7l";
 		interrupt-parent = <&tlmm>;
 		reset-gpios = <&tlmm 69 GPIO_ACTIVE_HIGH>;
 		interrupts = <84 IRQ_TYPE_LEVEL_LOW>;
@@ -1967,7 +1970,8 @@
 		compatible = "cirrus,cs35l41";
 		reg = <0x42>;
 		#sound-dai-cells = <1>;
-		sound-name-prefix = "AMP42";
+		sound-name-prefix = "FR";
+		cirrus,subsystem-id = "gts7l";
 		interrupt-parent = <&tlmm>;
 		reset-gpios = <&tlmm 69 GPIO_ACTIVE_HIGH>;
 		interrupts = <84 IRQ_TYPE_LEVEL_LOW>;
@@ -1983,7 +1987,8 @@
 		compatible = "cirrus,cs35l41";
 		reg = <0x43>;
 		#sound-dai-cells = <1>;
-		sound-name-prefix = "AMP43";
+		sound-name-prefix = "FL";
+		cirrus,subsystem-id = "gts7l";
 		interrupt-parent = <&tlmm>;
 		reset-gpios = <&tlmm 69 GPIO_ACTIVE_HIGH>;
 		interrupts = <84 IRQ_TYPE_LEVEL_LOW>;
@@ -1993,5 +1998,108 @@
 		cirrus,asp-sdout-hiz = <3>;
 		cirrus,gpio2-src-select = <2>;
 		cirrus,gpio2-output-enable;
+	};
+};
+
+/*
+ * Audio stage 3 (2026-09-22, docs/phase3-audio-scoping.md "Stage 3/4
+ * design"): the speaker sound card. Everything is from stock sources:
+ *  - link: stock kona.c msm_tdm_be_dai_links[] PRI_TDM_RX_0 (AFE 36864),
+ *    DSP_A, amps as clock consumers, IB_NF; 4 x 32-bit slots at 48 kHz
+ *    (stock qcom,tdm-max-slots = <4>). The machine driver (sm8250.c,
+ *    kernel/patches/0017) puts amp i on slot i in the codec order below,
+ *    matching stock mixer_paths.xml ASPRX1 slots FL 0, FR 1, RL 2, RR 3.
+ *  - port: stock qcom,msm-dai-tdm-pri-rx sync-mode 1, sync-src 1,
+ *    data-out 0, invert-sync 1, data-delay 1, data-align 0.
+ *  - pins: stock pri_tdm_* states - gpio138 mi2s0_sck, gpio141 mi2s0_ws,
+ *    gpio140 mi2s0_data1 (data to the amps), gpio139 mi2s0_data0 (VI
+ *    feedback), drive-strength 2, bias-disable.
+ *  - codec order FL, FR, RL, RR = amps 0x43, 0x42, 0x41, 0x40 (stock MFD
+ *    probe order + kona_tdm_cirrus_init's codec_dais[0..3]).
+ *
+ * SAFETY: the ALSA device nodes are root-only until protection is
+ * verified (tools/rootfs/audio/72-gts7l-audio-gate.rules), and the amps'
+ * "PCM Source" resets to ASP (protection bypassed) - it must be set to
+ * DSP before any stream. See the scoping doc's hard rules.
+ */
+&tlmm {
+	pri_tdm_active: pri-tdm-active-state {
+		sck-pins {
+			pins = "gpio138";
+			function = "mi2s0_sck";
+			drive-strength = <2>;
+			bias-disable;
+		};
+
+		din-pins {
+			pins = "gpio139";
+			function = "mi2s0_data0";
+			drive-strength = <2>;
+			bias-disable;
+		};
+
+		dout-pins {
+			pins = "gpio140";
+			function = "mi2s0_data1";
+			drive-strength = <2>;
+			bias-disable;
+		};
+
+		ws-pins {
+			pins = "gpio141";
+			function = "mi2s0_ws";
+			drive-strength = <2>;
+			bias-disable;
+		};
+	};
+};
+
+&q6afedai {
+	dai@24 {
+		reg = <PRIMARY_TDM_RX_0>;
+		qcom,tdm-sync-mode = <1>;
+		qcom,tdm-sync-src = <1>;
+		qcom,tdm-data-out = <0>;
+		qcom,tdm-invert-sync = <1>;
+		qcom,tdm-data-delay = <1>;
+		qcom,tdm-data-align = <0>;
+	};
+};
+
+&q6asmdai {
+	dai@0 {
+		reg = <MSM_FRONTEND_DAI_MULTIMEDIA1>;
+	};
+};
+
+&sound {
+	compatible = "qcom,sm8250-sndcard";
+	model = "Samsung-GTS7L-CS35L41-Speakers";
+	pinctrl-names = "default";
+	pinctrl-0 = <&pri_tdm_active>;
+
+	mm1-dai-link {
+		link-name = "MultiMedia1";
+
+		cpu {
+			sound-dai = <&q6asmdai MSM_FRONTEND_DAI_MULTIMEDIA1>;
+		};
+	};
+
+	speaker-dai-link {
+		link-name = "Speaker Playback";
+
+		cpu {
+			sound-dai = <&q6afedai PRIMARY_TDM_RX_0>;
+		};
+
+		platform {
+			sound-dai = <&q6routing>;
+		};
+
+		codec {
+			sound-dai = <&cs35l41_43 0>, <&cs35l41_42 0>,
+				    <&cs35l41_41 0>, <&cs35l41_40 0>;
+		};
 	};
 };

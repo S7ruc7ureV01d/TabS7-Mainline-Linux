@@ -1,0 +1,20 @@
+[  151.560130] archlinux kernel: cs35l41 11-0043: DSP1: cirrus/cs35l41-dsp1-spk-prot-gts7l.wmfw: format 3 timestamp 0x5e21cd31
+[  151.561342] archlinux kernel: cs35l41 11-0043: DSP1: cirrus/cs35l41-dsp1-spk-prot-gts7l.wmfw: Fri 17 Jan 2020 16:05:21 W. Europe Standard Time
+[  152.244244] archlinux kernel: cs35l41 11-0043: DSP1: Firmware: 400a4 vendor: 0x2 v0.0.1, 1 algorithms
+[  152.245040] archlinux kernel: cs35l41 11-0043: DSP1: cirrus/cs35l41-dsp1-spk-prot-gts7l.bin (v1): v0.0.1
+[  152.245580] archlinux kernel: cs35l41 11-0043: DSP1: Protection: C:\SPbin\TAB_S7_SPKPV1_PPP_20200603.bin
+[  222.046567] archlinux kernel: cs35l41 11-0042: DSP1: cirrus/cs35l41-dsp1-spk-prot-gts7l.wmfw: format 3 timestamp 0x5e21cd31
+[  222.047418] archlinux kernel: cs35l41 11-0042: DSP1: cirrus/cs35l41-dsp1-spk-prot-gts7l.wmfw: Fri 17 Jan 2020 16:05:21 W. Europe Standard Time
+[  222.728269] archlinux kernel: cs35l41 11-0042: DSP1: Firmware: 400a4 vendor: 0x2 v0.0.1, 1 algorithms
+[  222.730579] archlinux kernel: cs35l41 11-0042: DSP1: cirrus/cs35l41-dsp1-spk-prot-gts7l.bin (v1): v0.0.1
+[  222.732861] archlinux kernel: cs35l41 11-0042: DSP1: Protection: C:\SPbin\TAB_S7_SPKPV1_PPP_20200603.bin
+[  222.844049] archlinux kernel: cs35l41 11-0041: DSP1: cirrus/cs35l41-dsp1-spk-prot-gts7l.wmfw: format 3 timestamp 0x5e21cd31
+[  222.844981] archlinux kernel: cs35l41 11-0041: DSP1: cirrus/cs35l41-dsp1-spk-prot-gts7l.wmfw: Fri 17 Jan 2020 16:05:21 W. Europe Standard Time
+[  223.524053] archlinux kernel: cs35l41 11-0041: DSP1: Firmware: 400a4 vendor: 0x2 v0.0.1, 1 algorithms
+[  223.525025] archlinux kernel: cs35l41 11-0041: DSP1: cirrus/cs35l41-dsp1-spk-prot-gts7l.bin (v1): v0.0.1
+[  223.525621] archlinux kernel: cs35l41 11-0041: DSP1: Protection: C:\SPbin\TAB_S7_SPKPV1_PPP_20200603.bin
+[  223.652201] archlinux kernel: cs35l41 11-0040: DSP1: cirrus/cs35l41-dsp1-spk-prot-gts7l.wmfw: format 3 timestamp 0x5e21cd31
+[  223.653067] archlinux kernel: cs35l41 11-0040: DSP1: cirrus/cs35l41-dsp1-spk-prot-gts7l.wmfw: Fri 17 Jan 2020 16:05:21 W. Europe Standard Time
+[  224.332255] archlinux kernel: cs35l41 11-0040: DSP1: Firmware: 400a4 vendor: 0x2 v0.0.1, 1 algorithms
+[  224.334560] archlinux kernel: cs35l41 11-0040: DSP1: cirrus/cs35l41-dsp1-spk-prot-gts7l.bin (v1): v0.0.1
+[  224.336852] archlinux kernel: cs35l41 11-0040: DSP1: Protection: C:\SPbin\TAB_S7_SPKPV1_PPP_20200603.bin
