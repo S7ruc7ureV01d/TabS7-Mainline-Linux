@@ -14,6 +14,88 @@ Nothing here has been built or tested yet - this is pure research,
 following the same methodology as every other Phase 2/3 scoping doc
 (real sources cited, nothing assumed).
 
+
+## Status and plan (2026-09-22, night) - stage 0 done; speaker safety gates next
+
+### Corrections to the scoping below, found against real hardware and the stock dumps
+
+- **The CS35L41 amps are I2C, not SoundWire.** Stock's boot log shows
+  all four on **I2C bus 7**, at `0x40`-`0x43` (`cs35l41`, `_b`, `_br`, `_r`),
+  with audio over TDM/I2S from LPASS. `sm8250-mtp.dts` is a template for
+  the LPASS/Q6 plumbing only; its speaker graph (WSA881x over SoundWire)
+  doesn't apply.
+- **No module loading is needed.** The early-boot problem is firmware
+  availability, the same as for the SLPI: the PAS driver is built in and
+  probes before the rootfs mounts. Starting the DSP from a unit after
+  `local-fs.target` fixes it, and the Q6 APR services (and anything that
+  binds to them) only appear then. (`/lib/modules` on the rootfs is
+  still empty in any case.)
+- **The ADSP carveout had to move to stock's placement** (see stage 0).
+
+### Safety-critical facts
+
+Wrong values here can damage the amps or speakers.
+
+- **Speaker protection:** stock runs Cirrus speaker protection on each
+  amp's DSP: `cs35l40-spk-dsp1-spk-prot.wmfw` plus `.bin` tuning and
+  `-calib.bin`, all present in `work/stock-dump/dump/vendor-firmware/`.
+- **Per-unit calibration:** this unit's factory speaker calibration is
+  in `work/stock-dump/dump/cirrus/` (`rdc_cal*`, `temp_cal`,
+  `vsc_cal*`/`isc_cal*`, one set per speaker suffix).
+- **Boost converter:** the downstream DT sets only
+  `cirrus,boost-peak-milliamp = <4100>`; the downstream driver never
+  configures the boost inductor or capacitor. Mainline's binding
+  *requires* `cirrus,boost-ind-nanohenry` and `cirrus,boost-cap-microfarad`
+  and derives the boost loop coefficients from them. **Do not guess
+  these.**
+
+### Stages
+
+| Stage | Work | Speaker risk | Status |
+|---|---|---|---|
+| 0 | Move the ADSP carveout to stock's placement and boot the ADSP (`QCOM_APR=y` only; all sound drivers stay unbuilt). | none | **done** |
+| 1 | Read the CS35L41 boost-converter registers read-only from **stock Android** (it configures them at runtime), and derive the real inductor/capacitor values. | none | next |
+| 2 | Control-only CS35L41 bring-up on I2C7 with those values; amps stay in shutdown, PCM muted. | very low | |
+| 3 | Load the protection firmware and tuning, feed this unit's calibration into the DSP, and confirm protection is running before any sound. | low | |
+| 4 | Machine graph: LPASS TDM port -> 4 amps (port from the downstream DAI links). First sound at about -40 dB with a UCM software volume cap, then raise gradually. | controlled | |
+| 5 | Microphones (no 3.5 mm jack; likely digital mics via WCD938x or the VA macro). | none | |
+
+**Rules throughout:**
+- no audio through an amp unless its protection DSP is confirmed
+  running;
+- never hand-write amp registers;
+- exact DT values from stock only;
+- a hard software volume ceiling until the whole chain is verified.
+
+### Stage 0 result
+
+**Carveouts, moved to stock's live layout:**
+- `adsp_mem` -> `0x8a700000` + `0x2c00000`
+- `spss_mem` -> `0x8d300000` + `0x100000`
+- the unreferenced `cdsp_secure_heap` -> a placeholder at
+  `0x8d400000` + `0x3100000`
+
+So `0x89200000`-`0x90500000` stays one contiguous no-map range, as on
+stock. `gpu_mem` is left at upstream's address (the zap shader works
+there).
+
+**Firmware:** stock `adsp.mdt` + 22 parts in
+`/lib/firmware/qcom/sm8250/samsung/gts7l/`, started by
+`tools/rootfs/slpi/slpi-start.service` (which now boots SLPI and ADSP).
+
+**Result on real hardware:**
+- "remote processor adsp is now up";
+- `PDR: Indication received from msm/adsp/audio_pd`;
+- APR registered `aprsvc:service:4:3` (q6core), `4:4` (q6afe), `4:7`
+  (q6asm) and `4:8` (q6adm);
+- ADSP fastrpc compute banks 3-5 appeared;
+- both DSPs running 10+ minutes with no crash, and the SLPI
+  accelerometer unaffected.
+
+(The SLPI's recurring `Handover signaled, but it already happened`
+tracks the accelerometer stream: it stops when iio-sensor-proxy stops.
+It's cosmetic and unrelated to audio.)
+
 ## Real hardware: a genuinely complex, multi-chip audio topology
 
 Confirmed directly in the downstream overlay

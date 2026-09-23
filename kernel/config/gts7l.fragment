@@ -552,3 +552,10 @@ CONFIG_QCOM_PDR_HELPERS=y
 CONFIG_QCOM_SOCINFO=y
 CONFIG_RPMSG_CHAR=y
 CONFIG_RPMSG_CTRL=y
+
+# 2026-09-22, audio stage 0 (docs/phase3-audio-scoping.md): only the ADSP's
+# APR IPC bus, so its audio services (q6core/afe/asm/adm) can be seen
+# registering once the ADSP boots. The audio drivers themselves stay =m
+# (with no /lib/modules they cannot load) until the CS35L41 safety gates
+# in the scoping doc are done - nothing here can drive the speaker amps.
+CONFIG_QCOM_APR=y

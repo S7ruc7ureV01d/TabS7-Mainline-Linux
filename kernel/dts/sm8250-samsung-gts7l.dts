@@ -757,23 +757,43 @@
  * 07-slpi-sensorhub-remoteproc-trace.txt), not upstream's 0x88c00000 -
  * TrustZone validates the load region at PAS auth.
  *
- * ADSP/CDSP are disabled until their carveouts are fixed the same way
- * (stock pil_adsp_region = 0x8a700000 + 0x2c00000, pil_cdsp_region =
- * 0x8e300000 + 0x1a00000 - both shifted from upstream). adsp_mem is
- * trimmed to 0x8a700000-0x8be00000 here only so it doesn't overlap the
- * moved slpi_mem; 0x88c00000-0x89200000 becomes RAM, matching stock's
- * /proc/iomem (System RAM 86600000-891fffff).
+ * CDSP stays disabled until its carveout is fixed the same way (stock
+ * pil_cdsp_region = 0x8e300000 + 0x1a00000; ADSP was, see below).
+ * 0x88c00000-0x89200000 becomes RAM, matching stock's /proc/iomem
+ * (System RAM 86600000-891fffff).
  */
 &slpi_mem {
 	reg = <0x0 0x89200000 0x0 0x1500000>;
 };
 
+/*
+ * Audio stage 0 (2026-09-22, docs/phase3-audio-scoping.md): ADSP moved to
+ * stock's live placement, pil_adsp_region = 0x8a700000 + 0x2c00000
+ * (TrustZone validates the load region at PAS auth, as for the SLPI).
+ * That overlaps upstream's spss_mem (0x8be00000) and cdsp_secure_heap
+ * (0x8bf00000), so both move too: spss_mem to stock's 0x8d300000, and
+ * cdsp_secure_heap (referenced by nothing in mainline) becomes a
+ * placeholder covering stock's npu/video/cvp/cdsp/camera/wlan/ipa/gpu
+ * block up to the old heap end. 0x89200000-0x90500000 stays one
+ * contiguous no-map range, matching stock's /proc/iomem.
+ * gpu_mem is deliberately left at upstream's address: the Adreno zap
+ * shader already loads fine there.
+ */
 &adsp_mem {
-	reg = <0x0 0x8a700000 0x0 0x1700000>;
+	reg = <0x0 0x8a700000 0x0 0x2c00000>;
+};
+
+&spss_mem {
+	reg = <0x0 0x8d300000 0x0 0x100000>;
+};
+
+&cdsp_secure_heap {
+	reg = <0x0 0x8d400000 0x0 0x3100000>;
 };
 
 &adsp {
-	status = "disabled";
+	firmware-name = "qcom/sm8250/samsung/gts7l/adsp.mdt";
+	status = "okay";
 };
 
 &cdsp {

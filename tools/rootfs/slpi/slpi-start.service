@@ -1,18 +1,20 @@
 [Unit]
-Description=Boot the SLPI sensor DSP (firmware lives on the rootfs)
+Description=Boot the SLPI (sensor) and ADSP (audio) DSPs - firmware lives on the rootfs
 Documentation=https://github.com/S7ruc7ureV01d/tabs7-mainlinelinux/blob/main/docs/kernel-boot-debugging.md
 # qcom_q6v5_pas is built in and probes before the rootfs is mounted, so
 # the kernel's own auto-boot can't find the firmware ("Direct firmware
-# load ... failed with error -2"). Start it once the firmware is there.
+# load ... failed with error -2"). Start each DSP once its firmware is
+# there. The ADSP only boots its audio services (APR); no sound driver is
+# built in, so this cannot drive the speaker amps (see
+# docs/phase3-audio-scoping.md for the audio safety gates).
 DefaultDependencies=no
 After=local-fs.target
 Before=sysinit.target
-ConditionPathExists=/lib/firmware/qcom/sm8250/samsung/gts7l/slpi.mdt
 
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-ExecStart=/bin/sh -c 'for r in /sys/class/remoteproc/remoteproc*; do [ "$(cat $r/name)" = slpi ] || continue; [ "$(cat $r/state)" = offline ] && echo start > $r/state; cat $r/state; done'
+ExecStart=/bin/sh -c 'FW=/lib/firmware/qcom/sm8250/samsung/gts7l; for r in /sys/class/remoteproc/remoteproc*; do n=$(cat $r/name); case $n in slpi|adsp) ;; *) continue;; esac; [ -e $FW/$n.mdt ] || { echo "$n: no firmware, skipped"; continue; }; [ "$(cat $r/state)" = offline ] && echo start > $r/state; echo "$n: $(cat $r/state)"; done'
 
 [Install]
 WantedBy=sysinit.target

@@ -1336,6 +1336,13 @@ Exit criteria:
       real time for this).
 
 Progress log:
+- 2026-09-22 (night): **Audio stage 0 done: the ADSP boots on mainline.**
+  Its carveout is moved to stock's placement, and the APR audio services
+  (q6core/afe/asm/adm) register. The CS35L41 amps turned out to be
+  I2C (bus 7), not SoundWire. The staged, safety-gated plan is in
+  `../docs/phase3-audio-scoping.md` "Status and plan". Next is stage 1:
+  a read-only stock-Android readout of the CS35L41 boost registers
+  before any amp is touched.
 - 2026-09-20: Wi-Fi kernel-level bring-up - full story in
   `docs/phase3-wifi-bt-scoping.md`'s "Status: Wi-Fi working on real
   hardware" section. Highlights: corrected an elish-borrowed GPIO
