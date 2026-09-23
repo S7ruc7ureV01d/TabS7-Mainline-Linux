@@ -281,14 +281,76 @@ Verified by the owner and by capture:
   writes). V1.1's 300 ms debounce turned 44 interrupts in a full replug
   round into zero changes.
 
-## Next: 9 V / PPS (not started)
+### 9 V USB-PD and battery temperature bands: done (2026-09-23, patch 0025)
 
-The only piece that needs the CCIC's command interface is PDO selection
-(APCMD). See `references/gts7l/drivers/ccic/max77705_pd.c` and
-`max77705_usbc.c`. Stock's 9 V table is 1650 mA input and 3150 mA charge.
+**What the charger offers** (read-only `tools/rootfs/charging/pdoread.sh`
+with OPCODE_CURRENT_SRCCAP 0x30; log
+`docs/logs/charging-2026-09-23/pdo-list-samsung-charger.log`). The
+Samsung charger lists 7 PDOs:
+- fixed 5 V/3 A, 9 V/3 A, 15 V/3 A and 20 V/3.25 A;
+- PPS 3.3-11 V/5 A, 3.3-16 V/3 A and 3.3-21 V/2.25 A.
 
-## Status: 5 V charging done (DT + patch 0024); 9 V PD next
+Without a host, the CCIC firmware agrees fixed PDO 1 (5 V) on its own:
+PD_STATUS1 has PSRDY set and PD_STATUS0 = 0x01. The PC's USB-C port is
+also a PD source, with a single 5 V PDO.
 
-Nothing built or flashed. This document is the research-only pass;
-implementation - if pursued at all, pending step 1 above - is a
-separate, future step.
+**Command protocol** (downstream `max77705_i2c_opcode_write/read`):
+1. write `[opcode, data...]` at 0x21;
+2. write 0x00 to 0x41 to execute;
+3. the reply raises APCmdResI (UIC_INT bit 7) and sits at 0x51
+   (echoed opcode, then data).
+
+The CURRENT_SRCCAP reply's byte 1 is `selected << 3 | count`, followed
+by 4-byte little-endian USB-PD PDOs.
+
+**Driver (V2):**
+1. On the 5 V PSRDY event (PD_INT PDMsgI, PD_STATUS0 = 0x01) it sends
+   0x30.
+2. If there is a fixed 9 V PDO worth more than 9 W, it sets stock's 9 V
+   input limit first (1650 mA, safe at 5 V too), then sends
+   OPCODE_SRCCAP_REQUEST (0x32) with that PDO.
+3. It raises the charge current to 3150 mA only once PSRDY comes again
+   and VBADC reads 8.5-9.5 V.
+4. A refusal (0xfe/0xff), no 9 V within 3 s, or VBUS leaving 9 V returns
+   it to the 5 V limits. Each attach starts at 5 V.
+
+Only fixed PDOs up to 9 V are used (stock `AVAILABLE_VOLTAGE 9000`).
+Stock's PPS/45 W path goes through a separate PCA9468 direct charger
+(`pca9468@57`) and is out of scope. The regmap allows writes only to the
+three interrupt masks and the command buffer, and only 0x30 and 0x32 are
+ever sent.
+
+**Temperature (stock's sec-battery bands, applied through the charge
+current, re-checked every 30 s):**
+
+| Battery | Charge current | 9 V |
+|---|---|---|
+| 15-42 C | normal | allowed |
+| 42-50 C (recover 40) | 1000 mA (stock 2750, but stock also drops the float voltage, which mainline can't) | no |
+| 5-15 C / 0-5 C | 1850 / 750 mA | no |
+| >50 C or <0 C (recover 48 / 2) | 100 mA (charger minimum) | no |
+| no plausible reading | at most 1000 mA | no |
+
+The source is the **battery thermistor on PM8150L ADC5 channel 0x4d**
+(AMUX_THM1_100K_PU, ratiometric). That is stock sec-battery's
+"adc-temp"; its `temp_table_adc` puts 25 C at about 941 mV of 1.875 V,
+matching mainline's 100 k NTC scaling. The MAX77705 fuel gauge's
+temperature is **not** wired to it: it reads a constant 33.5 C. This
+needed `QCOM_SPMI_ADC5`/`QCOM_VADC_COMMON` built in (they were modules)
+and the DTS channel, and the driver reads it as the "batt-therm" io-channel.
+
+**Verified** (`docs/logs/charging-2026-09-23/pd9v-final.log`, plus the
+owner):
+- 9 V was requested and confirmed about 0.4 s after the 5 V contract, on
+  every Superfast plug-in;
+- VBADC showed 8.5-9.5 V in 332 of 336 samples, and the battery averaged
+  **2.51 A**, about double the 5 V rate;
+- the thermistor read 33.2-33.9 C and moved;
+- the PC port was found to offer 5 V only and stayed at 5 V;
+- KDE showed Charging throughout.
+
+## Status: done - 5 V source-aware limits, 9 V PD, temperature bands (0024, 0025)
+
+Not covered: PPS through the PCA9468 direct charger (up to 45 W), and a
+float-voltage drop in the hot band (the charger driver has no writable
+CV).

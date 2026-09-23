@@ -607,3 +607,7 @@ CONFIG_PINCTRL_SM8250_LPASS_LPI=y
 # current). Without it the input limit stays at the 500/900 mA power-on
 # default and a 3 A charger barely keeps up with the tablet's load.
 CONFIG_CHARGER_MAX77705_USBC_ILIM=y
+# The PMIC ADC for the battery thermistor (PM8150L AMUX_THM1), which the
+# driver above uses for the charging temperature bands.
+CONFIG_QCOM_VADC_COMMON=y
+CONFIG_QCOM_SPMI_ADC5=y

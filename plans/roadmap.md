@@ -118,8 +118,12 @@ Progress log:
   - New driver 0024 reads the MAX77705 USB-C block's BC1.2 and Type-C
     current results and sets stock's limits: 1800/2100 mA on a 3 A
     charger, about 1.2 A into the battery.
-  - Owner-verified with the Superfast charger. Details:
-    `../docs/phase3-typec-muic-scoping.md`. Next: 9 V PD.
+  - Owner-verified with the Superfast charger.
+  - Then **9 V USB-PD** (0025): the driver asks the CCIC firmware for the
+    fixed 9 V PDO. The battery takes about 2.5 A, and stock's battery
+    temperature bands apply, read from the real battery thermistor on
+    the PM8150L ADC (the fuel gauge's temperature reads a constant).
+  - Details: `../docs/phase3-typec-muic-scoping.md`.
 - 2026-09-23: **Internal microphones work.**
   - Two digital mics through the LPASS VA macro, which clocks them
     (mainline's TX macro can't). KDE shows "Internal microphones", and

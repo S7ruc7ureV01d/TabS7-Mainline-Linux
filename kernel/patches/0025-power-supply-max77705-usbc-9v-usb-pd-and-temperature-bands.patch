@@ -1,0 +1,705 @@
+From: gts7l project
+Subject: [PATCH] power: supply: max77705_usbc_ilim: 9 V USB-PD and battery
+ temperature bands
+
+The MAX77705's USB-C firmware agrees a 5 V PD contract on its own (the
+Galaxy Tab S7's Samsung charger offers 5/9/15/20 V fixed and three PPS
+ranges). Stock then moves to the fixed 9 V PDO through the firmware's
+command interface; its battery table gives 9 V a 1650 mA input limit
+(15 W) and 3150 mA charge current. Do the same:
+- on the firmware's 5 V PSRDY event, read the source's PDOs with
+  OPCODE_CURRENT_SRCCAP (0x30), reply at 0x51;
+- if there is a fixed 9 V PDO worth more than the 5 V TA's 9 W, set the
+  9 V input limit first (it is safe at 5 V too), then request that PDO
+  with OPCODE_SRCCAP_REQUEST (0x32);
+- only once the firmware reports the new contract ready (PSRDY again)
+  and its own VBUS ADC reads 8.5-9.5 V, raise the charge current to
+  3150 mA;
+- a refused request (0xfe/0xff), no 9 V within 3 s, or VBUS leaving 9 V
+  returns to the 5 V limits. Each attach starts again at 5 V.
+
+Only fixed PDOs up to 9 V are used (stock AVAILABLE_VOLTAGE); stock's PPS
+path goes through a separate direct charger. The regmap now allows writes
+to the three interrupt masks and the command buffer (0x21-0x41) only, and
+the only commands sent are 0x30 and 0x32.
+
+The mainline charger has no battery temperature handling, so apply the
+stock bands (0.1 C) through the charge current:
+- 15-42 C: normal, 9 V allowed;
+- 42-50 C: 1000 mA, below stock's 2750 mA because the float voltage
+  cannot be lowered as stock does;
+- 5-15 C: 1850 mA; 0-5 C: 750 mA;
+- above 50 C or below 0 C: 100 mA, the charger's minimum;
+with stock's recovery thresholds, re-checked every 30 s while attached.
+Outside the normal band no 9 V is requested.
+
+The temperature comes from the battery thermistor on the PMIC ADC
+("batt-therm" io-channel; on gts7l this is PM8150L AMUX_THM1_100K_PU,
+stock sec-battery's "adc-temp"). The MAX77705 fuel gauge's own
+temperature is not wired to it on this board and reads a constant 33.5 C.
+Without a plausible reading (-40 to 100 C) the driver requests no 9 V and
+charges at 1000 mA at most. Kconfig now depends on IIO.
+
+--- a/drivers/power/supply/Kconfig
++++ b/drivers/power/supply/Kconfig
+@@ -644,13 +644,15 @@
+ 
+ config CHARGER_MAX77705_USBC_ILIM
+ 	tristate "Maxim MAX77705 USB-C input current selection"
+-	depends on CHARGER_MAX77705 && I2C
++	depends on CHARGER_MAX77705 && I2C && IIO
+ 	select REGMAP_I2C
+ 	help
+ 	  Say Y to set the MAX77705 charger's input and charge current from
+ 	  what the chip's USB-C block detects (BC1.2 charger type and the
+-	  Type-C current advertised on CC). Without it the charger stays at
+-	  its power-on input limit. No USB-PD negotiation is done.
++	  Type-C current advertised on CC), and to move a USB-PD source to its
++	  fixed 9 V PDO through the block's firmware. Charging follows the
++	  battery temperature, read from the battery thermistor's ADC channel.
++	  Without it the charger stays at its power-on input limit.
+ 
+ config CHARGER_MAX77759
+ 	tristate "Maxim MAX77759 battery charger driver"
+--- a/drivers/power/supply/max77705_usbc_ilim.c
++++ b/drivers/power/supply/max77705_usbc_ilim.c
+@@ -1,25 +1,39 @@
+ // SPDX-License-Identifier: GPL-2.0-or-later
+ /*
+- * MAX77705 USB-C/BC1.2 input current selection
++ * MAX77705 USB-C/BC1.2 input current selection and 9 V USB-PD
+  *
+  * The MAX77705's USB-C interface block (I2C 0x25) runs its own CC/PD
+- * firmware and reports what is attached: the BC1.2 charger type and the
+- * Type-C current the source advertises on CC. The charger block (driven by
+- * max77705_charger) never learns about either, so its input current limit
+- * stays at the chip's power-on default (500 or 900 mA) and a 3 A wall
+- * charger ends up barely charging a tablet in use.
++ * firmware: it detects the BC1.2 charger type and the Type-C current a
++ * source advertises, and on its own agrees a 5 V USB-PD contract. The
++ * charger block (driven by max77705_charger) never learns about any of
++ * it, so its input current stays at the chip's power-on default (500 or
++ * 900 mA) and a 3 A wall charger ends up barely charging a tablet in use.
+  *
+- * This driver only reads that status, on the block's interrupt, and sets
+- * the charger's input and charge current to the matching values of the
+- * Galaxy Tab S7's stock battery table, once the status has been stable for
+- * 300 ms (a PC port's advertisement can flip for ~0.5 s after attach). It
+- * never commands the USB-C firmware: no PD contract is requested, VBUS
+- * stays at 5 V.
++ * This driver reads that status on the block's interrupt and sets the
++ * charger's input and charge current from the Galaxy Tab S7's stock
++ * battery table, once it has been stable for 300 ms (a PC port's
++ * advertisement can flip for ~0.5 s after attach).
++ *
++ * With a PD source it also moves the contract to the source's fixed 9 V
++ * PDO, as stock does through the same firmware commands: it reads the
++ * source's PDOs (OPCODE_CURRENT_SRCCAP), sets the 9 V input limit, and
++ * requests the PDO (OPCODE_SRCCAP_REQUEST). The 9 V charge current is only
++ * set once the firmware reports the new contract ready and its own VBUS
++ * ADC reads 8.5-9.5 V; otherwise the 5 V limits come back. Only fixed
++ * PDOs up to 9 V are used (stock AVAILABLE_VOLTAGE); PPS is not.
++ *
++ * Charging follows the stock battery temperature bands: no 9 V and a lower
++ * charge current outside 15-42 C, a trickle outside 0-50 C. The battery
++ * temperature comes from the battery thermistor on the PMIC ADC (stock's
++ * "adc-temp", PM8150L AMUX_THM1_100K_PU); the fuel gauge's own reading is
++ * not wired to it on this board. Without a plausible reading: no 9 V and
++ * at most 1000 mA.
+  */
+ 
+ #include <linux/bitfield.h>
+ #include <linux/devm-helpers.h>
+ #include <linux/i2c.h>
++#include <linux/iio/consumer.h>
+ #include <linux/interrupt.h>
+ #include <linux/minmax.h>
+ #include <linux/module.h>
+@@ -27,28 +41,59 @@
+ #include <linux/of.h>
+ #include <linux/power_supply.h>
+ #include <linux/regmap.h>
++#include <linux/unaligned.h>
+ #include <linux/workqueue.h>
+ 
+ #define MAX77705_USBC_REG_UIC_INT	0x02
+ #define MAX77705_USBC_REG_CC_INT	0x03
+ #define MAX77705_USBC_REG_PD_INT	0x04
+ #define MAX77705_USBC_REG_VDM_INT	0x05
++#define MAX77705_USBC_REG_STATUS1	0x06
+ #define MAX77705_USBC_REG_BC_STATUS	0x08
+ #define MAX77705_USBC_REG_CC_STATUS0	0x0a
++#define MAX77705_USBC_REG_PD_STATUS0	0x0c
+ #define MAX77705_USBC_REG_UIC_INT_M	0x0e
+ #define MAX77705_USBC_REG_CC_INT_M	0x0f
++#define MAX77705_USBC_REG_PD_INT_M	0x10
++#define MAX77705_USBC_REG_OPCODE_W	0x21
++#define MAX77705_USBC_REG_OPCODE_END	0x41
++#define MAX77705_USBC_REG_OPCODE_R	0x51
++#define MAX77705_USBC_OPCODE_LEN	33	/* opcode + 32 data bytes */
++#define MAX77705_USBC_MAX_REG		(MAX77705_USBC_REG_OPCODE_R + \
++					 MAX77705_USBC_OPCODE_LEN - 1)
+ 
+ /* UIC_INT(_M) */
++#define MAX77705_APCMDRESI		BIT(7)
+ #define MAX77705_VBUSDETI		BIT(5)
+ #define MAX77705_CHGTYPI		BIT(1)
+ /* CC_INT(_M) */
+ #define MAX77705_CCISTATI		BIT(2)
+ #define MAX77705_CCSTATI		BIT(0)
++/* PD_INT(_M) */
++#define MAX77705_PDMSGI			BIT(7)
++/* USBC_STATUS1 */
++#define MAX77705_VBADC			GENMASK(7, 4)
++#define MAX77705_VBADC_8V5_9V5		0x6
+ /* BC_STATUS */
+ #define MAX77705_BC_VBUSDET		BIT(7)
+ #define MAX77705_BC_CHGTYP		GENMASK(1, 0)
+ /* CC_STATUS0 */
+ #define MAX77705_CC_CCISTAT		GENMASK(5, 4)
++/* PD_STATUS0: last PD event */
++#define MAX77705_PD_SNK_PSRDY		0x01
++
++/* Firmware commands (downstream max77705.h) */
++#define MAX77705_OP_CURRENT_SRCCAP	0x30
++#define MAX77705_OP_SRCCAP_REQUEST	0x32
++
++/* OPCODE_CURRENT_SRCCAP reply: [1] = selected position << 3 | count */
++#define MAX77705_SRCCAP_SEL		GENMASK(5, 3)
++#define MAX77705_SRCCAP_NUM		GENMASK(2, 0)
++/* USB-PD fixed supply PDO */
++#define PDO_TYPE			GENMASK(31, 30)
++#define PDO_TYPE_FIXED			0
++#define PDO_FIXED_VOLT			GENMASK(19, 10)	/* 50 mV units */
++#define PDO_FIXED_CURR			GENMASK(9, 0)	/* 10 mA units */
+ 
+ enum max77705_chgtyp {
+ 	MAX77705_CHGTYP_NONE,
+@@ -70,17 +115,75 @@
+ #define MAX77705_ILIM_1500_MA		1500
+ #define MAX77705_ILIM_TA_MA		1800
+ #define MAX77705_CHG_TA_MA		2100
++/* Stock 9 V: 1650 mA input (pd_charging_charge_power 15 W), 3150 charge */
++#define MAX77705_PD_MV			9000
++#define MAX77705_ILIM_9V_MA		1650
++#define MAX77705_CHG_9V_MA		3150
++
++/*
++ * Stock battery temperature bands (0.1 C). Hot: swelling_high_temp_block
++ * 42.0/40.0 C; stock also drops the float voltage there, which the charger
++ * driver can't, so the current is cut well below stock's 2750 mA. Stop:
++ * temp_high/low_threshold 50.0/48.0 C and 0.0/2.0 C. Cold: swelling low
++ * temp 15.0/17.0 C (1850 mA) and 5.0/7.0 C (750 mA).
++ */
++#define MAX77705_T_STOP_HIGH		500
++#define MAX77705_T_STOP_HIGH_REC	480
++#define MAX77705_T_HOT			420
++#define MAX77705_T_HOT_REC		400
++#define MAX77705_T_COOL			150
++#define MAX77705_T_COOL_REC		170
++#define MAX77705_T_COLD			50
++#define MAX77705_T_COLD_REC		70
++#define MAX77705_T_STOP_LOW		0
++#define MAX77705_T_STOP_LOW_REC		20
++#define MAX77705_CHG_HOT_MA		1000
++#define MAX77705_CHG_COOL_MA		1850
++#define MAX77705_CHG_COLD_MA		750
++#define MAX77705_CHG_STOP_MA		100	/* the charger's minimum */
++#define MAX77705_CHG_UNKNOWN_MA		1000
++#define MAX77705_T_VALID_MIN		-400	/* outside: sensor fault */
++#define MAX77705_T_VALID_MAX		1000
++
++enum max77705_tband {
++	MAX77705_TB_UNKNOWN,
++	MAX77705_TB_STOP,
++	MAX77705_TB_COLD,
++	MAX77705_TB_COOL,
++	MAX77705_TB_NORMAL,
++	MAX77705_TB_HOT,
++};
++
++enum max77705_pd_state {
++	MAX77705_PD_IDLE,	/* nothing asked this attach */
++	MAX77705_PD_READING,	/* OPCODE_CURRENT_SRCCAP sent */
++	MAX77705_PD_REQUESTED,	/* OPCODE_SRCCAP_REQUEST sent */
++	MAX77705_PD_9V,		/* 9 V contract confirmed */
++	MAX77705_PD_DONE,	/* nothing (more) to do this attach */
++};
+ 
+-/* CC advertisement and BC1.2 result settle over ~0.5 s after attach */
+-#define MAX77705_ILIM_DEBOUNCE_MS	300
++/* CC and BC1.2 results settle over ~0.5 s after attach */
++#define MAX77705_DEBOUNCE_MS		300
++#define MAX77705_POLL_MS		30000	/* temperature, while attached */
++#define MAX77705_PD_TIMEOUT_MS		3000
+ 
+ struct max77705_usbc_ilim {
+ 	struct device *dev;
+ 	struct regmap *regmap;
+ 	struct power_supply *charger;
++	struct iio_channel *batt_therm;
+ 	struct mutex lock;
+ 	struct delayed_work work;
++	struct delayed_work pd_timeout;
++	enum max77705_tband tband;
++	enum max77705_pd_state pd;
++	bool attached;
++	bool psrdy;
++	bool cmd_done;
++	int pdo_ma;
+ 	int ilim_ma;
++	int chg_ma;
++	int temp;
+ };
+ 
+ static int max77705_bc_ilim_ma(unsigned int chgtyp)
+@@ -112,6 +215,61 @@
+ 	}
+ }
+ 
++static enum max77705_tband max77705_tband(struct max77705_usbc_ilim *ilim)
++{
++	enum max77705_tband prev = ilim->tband;
++	int t, mdegc, ret;
++
++	if (!ilim->batt_therm)
++		return MAX77705_TB_UNKNOWN;
++	ret = iio_read_channel_processed(ilim->batt_therm, &mdegc);
++	if (ret < 0) {
++		dev_warn_ratelimited(ilim->dev, "cannot read battery temperature: %d\n", ret);
++		return MAX77705_TB_UNKNOWN;
++	}
++	t = mdegc / 100;	/* 0.1 C, as the stock tables */
++	if (t < MAX77705_T_VALID_MIN || t > MAX77705_T_VALID_MAX) {
++		dev_warn_ratelimited(ilim->dev, "implausible battery temperature %d\n", t);
++		return MAX77705_TB_UNKNOWN;
++	}
++	ilim->temp = t;
++
++	/* Hysteresis: leaving a band needs the recovery temperature */
++	if (t >= MAX77705_T_STOP_HIGH || t <= MAX77705_T_STOP_LOW)
++		return MAX77705_TB_STOP;
++	if (prev == MAX77705_TB_STOP &&
++	    (t > MAX77705_T_STOP_HIGH_REC || t < MAX77705_T_STOP_LOW_REC))
++		return MAX77705_TB_STOP;
++	if (t >= MAX77705_T_HOT ||
++	    (prev == MAX77705_TB_HOT && t > MAX77705_T_HOT_REC))
++		return MAX77705_TB_HOT;
++	if (t <= MAX77705_T_COLD ||
++	    (prev == MAX77705_TB_COLD && t < MAX77705_T_COLD_REC))
++		return MAX77705_TB_COLD;
++	if (t <= MAX77705_T_COOL ||
++	    (prev == MAX77705_TB_COOL && t < MAX77705_T_COOL_REC))
++		return MAX77705_TB_COOL;
++	return MAX77705_TB_NORMAL;
++}
++
++static int max77705_tband_chg_ma(enum max77705_tband tband, int chg_ma)
++{
++	switch (tband) {
++	case MAX77705_TB_UNKNOWN:
++		return min(chg_ma, MAX77705_CHG_UNKNOWN_MA);
++	case MAX77705_TB_STOP:
++		return MAX77705_CHG_STOP_MA;
++	case MAX77705_TB_COLD:
++		return min(chg_ma, MAX77705_CHG_COLD_MA);
++	case MAX77705_TB_COOL:
++		return min(chg_ma, MAX77705_CHG_COOL_MA);
++	case MAX77705_TB_HOT:
++		return min(chg_ma, MAX77705_CHG_HOT_MA);
++	default:
++		return chg_ma;
++	}
++}
++
+ static int max77705_set_ma(struct max77705_usbc_ilim *ilim,
+ 			   enum power_supply_property psp, int ma)
+ {
+@@ -120,97 +278,274 @@
+ 	return power_supply_set_property(ilim->charger, psp, &val);
+ }
+ 
+-static void max77705_usbc_ilim_update(struct max77705_usbc_ilim *ilim)
++/* Called with ilim->lock held */
++static void max77705_apply(struct max77705_usbc_ilim *ilim, int ilim_ma,
++			   int chg_ma, const char *why)
+ {
+-	unsigned int bc, cc0, chgtyp, ccistat;
+-	int ilim_ma, chg_ma, ret;
++	int ret;
++
++	if (ilim_ma == ilim->ilim_ma && chg_ma == ilim->chg_ma)
++		return;
++
++	ret = max77705_set_ma(ilim, POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT, ilim_ma);
++	if (!ret)
++		ret = max77705_set_ma(ilim, POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT,
++				      chg_ma);
++	if (ret) {
++		dev_warn(ilim->dev, "cannot set charger current: %d\n", ret);
++		return;
++	}
++
++	dev_info(ilim->dev, "%s: input %d mA, charge %d mA (battery %d.%d C, band %d)\n",
++		 why, ilim_ma, chg_ma, ilim->temp / 10, abs(ilim->temp % 10),
++		 ilim->tband);
++	ilim->ilim_ma = ilim_ma;
++	ilim->chg_ma = chg_ma;
++}
++
++/* Called with ilim->lock held */
++static int max77705_opcode(struct max77705_usbc_ilim *ilim, u8 opcode,
++			   const u8 *data, size_t len)
++{
++	u8 buf[2] = { opcode };
++	int ret;
++
++	if (len > sizeof(buf) - 1)
++		return -EINVAL;
++	if (len)
++		memcpy(&buf[1], data, len);
++
++	ilim->cmd_done = false;
++	ret = regmap_bulk_write(ilim->regmap, MAX77705_USBC_REG_OPCODE_W, buf,
++				len + 1);
++	/* The end marker makes the firmware execute the command */
++	if (!ret)
++		ret = regmap_write(ilim->regmap, MAX77705_USBC_REG_OPCODE_END, 0);
++	if (ret)
++		dev_warn(ilim->dev, "cannot send opcode 0x%02x: %d\n", opcode, ret);
++	return ret;
++}
++
++/* Called with ilim->lock held: act on a finished firmware command */
++static void max77705_pd_reply(struct max77705_usbc_ilim *ilim)
++{
++	u8 r[MAX77705_USBC_OPCODE_LEN];
++	int i, num, sel, best = 0, best_ma = 0;
++	u8 pos;
++
++	if (regmap_bulk_read(ilim->regmap, MAX77705_USBC_REG_OPCODE_R, r, sizeof(r)))
++		return;
++
++	if (ilim->pd == MAX77705_PD_READING && r[0] == MAX77705_OP_CURRENT_SRCCAP) {
++		sel = FIELD_GET(MAX77705_SRCCAP_SEL, r[1]);
++		num = FIELD_GET(MAX77705_SRCCAP_NUM, r[1]);
++
++		for (i = 0; i < num; i++) {
++			u32 pdo = get_unaligned_le32(&r[2 + i * 4]);
++
++			if (FIELD_GET(PDO_TYPE, pdo) != PDO_TYPE_FIXED ||
++			    FIELD_GET(PDO_FIXED_VOLT, pdo) * 50 != MAX77705_PD_MV)
++				continue;
++			best = i + 1;
++			best_ma = FIELD_GET(PDO_FIXED_CURR, pdo) * 10;
++			break;
++		}
++
++		/* Not worth it below the 5 V TA's power */
++		if (!best || best_ma * MAX77705_PD_MV < MAX77705_ILIM_TA_MA * 5000) {
++			dev_info(ilim->dev, "PD source: %d PDOs, no usable fixed 9 V\n", num);
++			ilim->pd = MAX77705_PD_DONE;
++			return;
++		}
++
++		ilim->pdo_ma = min(best_ma, MAX77705_ILIM_9V_MA);
++		if (best == sel) {
++			/* already at 9 V: confirmed by the next update */
++			ilim->pd = MAX77705_PD_REQUESTED;
++			ilim->psrdy = true;
++			return;
++		}
++
++		/* The 9 V input limit is safe at 5 V too: set it first */
++		max77705_apply(ilim, ilim->pdo_ma,
++			       max77705_tband_chg_ma(ilim->tband, MAX77705_CHG_TA_MA),
++			       "before 9 V");
++		dev_info(ilim->dev, "PD source: requesting PDO %d (9 V, %d mA)\n",
++			 best, best_ma);
++		pos = best;
++		ilim->psrdy = false;
++		if (max77705_opcode(ilim, MAX77705_OP_SRCCAP_REQUEST, &pos, 1)) {
++			ilim->pd = MAX77705_PD_DONE;
++			return;
++		}
++		ilim->pd = MAX77705_PD_REQUESTED;
++		mod_delayed_work(system_wq, &ilim->pd_timeout,
++				 msecs_to_jiffies(MAX77705_PD_TIMEOUT_MS));
++		return;
++	}
++
++	/* 0xfe/0xff: the request could not be sent to the source */
++	if (ilim->pd == MAX77705_PD_REQUESTED && r[0] == MAX77705_OP_SRCCAP_REQUEST &&
++	    (r[1] == 0xfe || r[1] == 0xff)) {
++		dev_info(ilim->dev, "PD request not sent (0x%02x), staying at 5 V\n", r[1]);
++		ilim->pd = MAX77705_PD_DONE;
++	}
++}
++
++static void max77705_update(struct max77705_usbc_ilim *ilim)
++{
++	unsigned int bc, cc0, st1, chgtyp, ccistat;
++	int ilim_ma, chg_ma;
++	bool vbus_9v;
+ 
+ 	if (regmap_read(ilim->regmap, MAX77705_USBC_REG_BC_STATUS, &bc) ||
+-	    regmap_read(ilim->regmap, MAX77705_USBC_REG_CC_STATUS0, &cc0)) {
++	    regmap_read(ilim->regmap, MAX77705_USBC_REG_CC_STATUS0, &cc0) ||
++	    regmap_read(ilim->regmap, MAX77705_USBC_REG_STATUS1, &st1)) {
+ 		dev_warn(ilim->dev, "cannot read USB-C status\n");
+ 		return;
+ 	}
++	vbus_9v = FIELD_GET(MAX77705_VBADC, st1) == MAX77705_VBADC_8V5_9V5;
+ 
+-	/* Nothing to do without VBUS; the next attach sets a fresh limit */
+-	if (!(bc & MAX77705_BC_VBUSDET))
+-		return;
++	mutex_lock(&ilim->lock);
+ 
+-	chgtyp = FIELD_GET(MAX77705_BC_CHGTYP, bc);
+-	ccistat = FIELD_GET(MAX77705_CC_CCISTAT, cc0);
++	/* Detach: forget this attach's PD state; the next one starts at 5 V */
++	if (!(bc & MAX77705_BC_VBUSDET)) {
++		ilim->attached = false;
++		ilim->pd = MAX77705_PD_IDLE;
++		ilim->psrdy = false;
++		ilim->cmd_done = false;
++		cancel_delayed_work(&ilim->pd_timeout);
++		goto out;
++	}
++	ilim->attached = true;
++	ilim->tband = max77705_tband(ilim);
++
++	if (ilim->cmd_done) {
++		ilim->cmd_done = false;
++		max77705_pd_reply(ilim);
++	}
++
++	/* The 9 V contract counts once the firmware and the VBUS ADC agree */
++	if (ilim->pd == MAX77705_PD_REQUESTED && ilim->psrdy && vbus_9v) {
++		cancel_delayed_work(&ilim->pd_timeout);
++		ilim->pd = MAX77705_PD_9V;
++	} else if (ilim->pd == MAX77705_PD_9V && !vbus_9v) {
++		dev_info(ilim->dev, "VBUS left 9 V\n");
++		ilim->pd = MAX77705_PD_DONE;
++	}
++
++	if (ilim->pd == MAX77705_PD_9V) {
++		chg_ma = max77705_tband_chg_ma(ilim->tband, MAX77705_CHG_9V_MA);
++		max77705_apply(ilim, ilim->pdo_ma, chg_ma, "9 V PD");
++		goto out;
++	}
++
++	/* Keep the 9 V input limit while the request settles */
++	if (ilim->pd == MAX77705_PD_READING || ilim->pd == MAX77705_PD_REQUESTED)
++		goto out;
+ 
+ 	/*
+ 	 * Neither result yet (attach in progress) or any more (VBUS still
+ 	 * decaying after detach): keep the current setting.
+ 	 */
++	chgtyp = FIELD_GET(MAX77705_BC_CHGTYP, bc);
++	ccistat = FIELD_GET(MAX77705_CC_CCISTAT, cc0);
+ 	ilim_ma = max(max77705_bc_ilim_ma(chgtyp), max77705_cc_ilim_ma(ccistat));
+-	if (!ilim_ma)
+-		return;
+-	chg_ma = ilim_ma == MAX77705_ILIM_TA_MA ? MAX77705_CHG_TA_MA : ilim_ma;
++	if (ilim_ma) {
++		chg_ma = ilim_ma == MAX77705_ILIM_TA_MA ? MAX77705_CHG_TA_MA : ilim_ma;
++		max77705_apply(ilim, ilim_ma,
++			       max77705_tband_chg_ma(ilim->tband, chg_ma), "5 V");
++	}
+ 
+-	mutex_lock(&ilim->lock);
+-	if (ilim_ma != ilim->ilim_ma) {
+-		ret = max77705_set_ma(ilim, POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT,
+-				      ilim_ma);
+-		if (!ret)
+-			ret = max77705_set_ma(ilim,
+-					      POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT,
+-					      chg_ma);
+-		if (ret) {
+-			dev_warn(ilim->dev, "cannot set charger current: %d\n", ret);
++	/* A 5 V PD contract is up: see whether the source offers 9 V */
++	if (ilim->pd == MAX77705_PD_IDLE && ilim->psrdy &&
++	    ilim->tband == MAX77705_TB_NORMAL) {
++		if (!max77705_opcode(ilim, MAX77705_OP_CURRENT_SRCCAP, NULL, 0)) {
++			ilim->pd = MAX77705_PD_READING;
++			mod_delayed_work(system_wq, &ilim->pd_timeout,
++					 msecs_to_jiffies(MAX77705_PD_TIMEOUT_MS));
+ 		} else {
+-			dev_info(ilim->dev,
+-				 "BC1.2 type %u, Type-C current %u: input %d mA, charge %d mA\n",
+-				 chgtyp, ccistat, ilim_ma, chg_ma);
+-			ilim->ilim_ma = ilim_ma;
++			ilim->pd = MAX77705_PD_DONE;
+ 		}
+ 	}
++
++out:
++	if (ilim->attached)
++		mod_delayed_work(system_wq, &ilim->work,
++				 msecs_to_jiffies(MAX77705_POLL_MS));
+ 	mutex_unlock(&ilim->lock);
+ }
+ 
+-static void max77705_usbc_ilim_clear(struct max77705_usbc_ilim *ilim)
++static void max77705_work(struct work_struct *work)
+ {
+-	unsigned int reg, val;
++	struct max77705_usbc_ilim *ilim =
++		container_of(to_delayed_work(work), struct max77705_usbc_ilim, work);
+ 
+-	/* The interrupt registers clear on read */
+-	for (reg = MAX77705_USBC_REG_UIC_INT; reg <= MAX77705_USBC_REG_VDM_INT; reg++)
+-		regmap_read(ilim->regmap, reg, &val);
++	max77705_update(ilim);
+ }
+ 
+-static void max77705_usbc_ilim_work(struct work_struct *work)
++static void max77705_pd_timeout(struct work_struct *work)
+ {
+ 	struct max77705_usbc_ilim *ilim =
+-		container_of(to_delayed_work(work), struct max77705_usbc_ilim, work);
++		container_of(to_delayed_work(work), struct max77705_usbc_ilim,
++			     pd_timeout);
+ 
+-	max77705_usbc_ilim_update(ilim);
++	mutex_lock(&ilim->lock);
++	if (ilim->pd == MAX77705_PD_READING || ilim->pd == MAX77705_PD_REQUESTED) {
++		dev_info(ilim->dev, "no 9 V contract, staying at 5 V\n");
++		ilim->pd = MAX77705_PD_DONE;
++	}
++	mutex_unlock(&ilim->lock);
++	mod_delayed_work(system_wq, &ilim->work, 0);
+ }
+ 
+ static irqreturn_t max77705_usbc_ilim_irq(int irq, void *data)
+ {
+ 	struct max77705_usbc_ilim *ilim = data;
++	unsigned int uic = 0, pd = 0, msg, val;
++
++	/* The interrupt registers clear on read */
++	regmap_read(ilim->regmap, MAX77705_USBC_REG_UIC_INT, &uic);
++	regmap_read(ilim->regmap, MAX77705_USBC_REG_CC_INT, &val);
++	regmap_read(ilim->regmap, MAX77705_USBC_REG_PD_INT, &pd);
++	regmap_read(ilim->regmap, MAX77705_USBC_REG_VDM_INT, &val);
+ 
+-	max77705_usbc_ilim_clear(ilim);
++	mutex_lock(&ilim->lock);
++	if (uic & MAX77705_APCMDRESI)
++		ilim->cmd_done = true;
++	if ((pd & MAX77705_PDMSGI) &&
++	    !regmap_read(ilim->regmap, MAX77705_USBC_REG_PD_STATUS0, &msg) &&
++	    msg == MAX77705_PD_SNK_PSRDY)
++		ilim->psrdy = true;
++	mutex_unlock(&ilim->lock);
++
++	/* Command replies need no debounce */
+ 	mod_delayed_work(system_wq, &ilim->work,
+-			 msecs_to_jiffies(MAX77705_ILIM_DEBOUNCE_MS));
++			 (uic & MAX77705_APCMDRESI) ? 0 :
++			 msecs_to_jiffies(MAX77705_DEBOUNCE_MS));
+ 
+ 	return IRQ_HANDLED;
+ }
+ 
+ static bool max77705_usbc_readable(struct device *dev, unsigned int reg)
+ {
+-	return reg <= MAX77705_USBC_REG_CC_INT_M + 2;
++	return reg <= MAX77705_USBC_REG_PD_INT_M + 1 ||
++	       (reg >= MAX77705_USBC_REG_OPCODE_R && reg <= MAX77705_USBC_MAX_REG);
+ }
+ 
+ static bool max77705_usbc_writeable(struct device *dev, unsigned int reg)
+ {
+-	/* Only the two interrupt masks: never the command/firmware registers */
+-	return reg == MAX77705_USBC_REG_UIC_INT_M ||
+-	       reg == MAX77705_USBC_REG_CC_INT_M;
++	/* The interrupt masks and the firmware command buffer only */
++	return (reg >= MAX77705_USBC_REG_UIC_INT_M &&
++		reg <= MAX77705_USBC_REG_PD_INT_M) ||
++	       (reg >= MAX77705_USBC_REG_OPCODE_W &&
++		reg <= MAX77705_USBC_REG_OPCODE_END);
+ }
+ 
+ static const struct regmap_config max77705_usbc_regmap_config = {
+ 	.reg_bits = 8,
+ 	.val_bits = 8,
+-	.max_register = MAX77705_USBC_REG_CC_INT_M + 2,
++	.max_register = MAX77705_USBC_MAX_REG,
+ 	.readable_reg = max77705_usbc_readable,
+ 	.writeable_reg = max77705_usbc_writeable,
+ 	.cache_type = REGCACHE_NONE,
+@@ -225,6 +560,7 @@
+ {
+ 	struct device *dev = &client->dev;
+ 	struct max77705_usbc_ilim *ilim;
++	unsigned int msg;
+ 	int ret;
+ 
+ 	ilim = devm_kzalloc(dev, sizeof(*ilim), GFP_KERNEL);
+@@ -247,20 +583,40 @@
+ 	if (ret)
+ 		return ret;
+ 
+-	/* Unmask only attach, charger-type and Type-C current changes */
++	ilim->batt_therm = devm_iio_channel_get(dev, "batt-therm");
++	if (IS_ERR(ilim->batt_therm)) {
++		ret = PTR_ERR(ilim->batt_therm);
++		if (ret == -EPROBE_DEFER)
++			return dev_err_probe(dev, ret, "waiting for the battery thermistor\n");
++		dev_warn(dev, "no battery thermistor (%d): no 9 V, at most %d mA\n",
++			 ret, MAX77705_CHG_UNKNOWN_MA);
++		ilim->batt_therm = NULL;
++	}
++
++	ret = devm_delayed_work_autocancel(dev, &ilim->work, max77705_work);
++	if (!ret)
++		ret = devm_delayed_work_autocancel(dev, &ilim->pd_timeout,
++						   max77705_pd_timeout);
++	if (ret)
++		return ret;
++
++	/* Attach, charger type, Type-C current, PD events, command replies */
+ 	ret = regmap_write(ilim->regmap, MAX77705_USBC_REG_UIC_INT_M,
+-			   (u8)~(MAX77705_VBUSDETI | MAX77705_CHGTYPI));
++			   (u8)~(MAX77705_APCMDRESI | MAX77705_VBUSDETI |
++				 MAX77705_CHGTYPI));
+ 	if (!ret)
+ 		ret = regmap_write(ilim->regmap, MAX77705_USBC_REG_CC_INT_M,
+ 				   (u8)~(MAX77705_CCISTATI | MAX77705_CCSTATI));
++	if (!ret)
++		ret = regmap_write(ilim->regmap, MAX77705_USBC_REG_PD_INT_M,
++				   (u8)~MAX77705_PDMSGI);
+ 	if (ret)
+ 		return dev_err_probe(dev, ret, "cannot unmask interrupts\n");
+ 
+-	ret = devm_delayed_work_autocancel(dev, &ilim->work, max77705_usbc_ilim_work);
+-	if (ret)
+-		return ret;
+-
+-	max77705_usbc_ilim_clear(ilim);
++	/* A 5 V contract agreed before we probed left no event for us */
++	if (!regmap_read(ilim->regmap, MAX77705_USBC_REG_PD_STATUS0, &msg) &&
++	    msg == MAX77705_PD_SNK_PSRDY)
++		ilim->psrdy = true;
+ 
+ 	ret = devm_request_threaded_irq(dev, client->irq, NULL,
+ 					max77705_usbc_ilim_irq, IRQF_ONESHOT,
+@@ -269,7 +625,7 @@
+ 		return dev_err_probe(dev, ret, "cannot request interrupt\n");
+ 
+ 	/* Whatever is attached at boot */
+-	max77705_usbc_ilim_update(ilim);
++	mod_delayed_work(system_wq, &ilim->work, 0);
+ 
+ 	return 0;
+ }
+@@ -289,5 +645,5 @@
+ };
+ module_i2c_driver(max77705_usbc_ilim_driver);
+ 
+-MODULE_DESCRIPTION("MAX77705 USB-C/BC1.2 input current selection");
++MODULE_DESCRIPTION("MAX77705 USB-C/BC1.2 input current selection and 9 V USB-PD");
+ MODULE_LICENSE("GPL");
