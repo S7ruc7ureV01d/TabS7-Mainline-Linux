@@ -1913,6 +1913,8 @@
  *    owns it and releases it, the rest get -EBUSY and log "assuming shared
  *    reset". If probe fails, the error path drives it low again, holding
  *    all four silently in reset.
+ *  - cirrus,use-fsync-errata: as stock, for the short-sync TDM port
+ *    (patch 0021 writes ASP_CONTROL4 = 0x01010000).
  *  - Calibration (cirrus,cal-* / cirrus,vimon-cal-*, patch 0018): THIS
  *    UNIT's factory values from its /efs (rdc_cal*, temp_cal, vsc_cal*,
  *    isc_cal*), mapped per amp by stock's cirrus,mfd-suffix (0x43 "_b",
@@ -1952,6 +1954,7 @@
 		cirrus,asp-sdout-hiz = <3>;
 		cirrus,gpio2-src-select = <2>;
 		cirrus,gpio2-output-enable;
+		cirrus,use-fsync-errata;
 		cirrus,cal-r = <9144>;
 		cirrus,cal-ambient = <27>;
 		cirrus,vimon-cal-vsc = <9560>;
@@ -1973,6 +1976,7 @@
 		cirrus,asp-sdout-hiz = <3>;
 		cirrus,gpio2-src-select = <2>;
 		cirrus,gpio2-output-enable;
+		cirrus,use-fsync-errata;
 		cirrus,cal-r = <9087>;
 		cirrus,cal-ambient = <27>;
 		cirrus,vimon-cal-vsc = <16760669>;
@@ -1994,6 +1998,7 @@
 		cirrus,asp-sdout-hiz = <3>;
 		cirrus,gpio2-src-select = <2>;
 		cirrus,gpio2-output-enable;
+		cirrus,use-fsync-errata;
 		cirrus,cal-r = <8590>;
 		cirrus,cal-ambient = <27>;
 		cirrus,vimon-cal-vsc = <9608>;
@@ -2015,6 +2020,7 @@
 		cirrus,asp-sdout-hiz = <3>;
 		cirrus,gpio2-src-select = <2>;
 		cirrus,gpio2-output-enable;
+		cirrus,use-fsync-errata;
 		cirrus,cal-r = <8401>;
 		cirrus,cal-ambient = <27>;
 		cirrus,vimon-cal-vsc = <16769733>;
@@ -2030,8 +2036,16 @@
  *    (stock qcom,tdm-max-slots = <4>). The machine driver (sm8250.c,
  *    kernel/patches/0017) puts amp i on slot i in the codec order below,
  *    matching stock mixer_paths.xml ASPRX1 slots FL 0, FR 1, RL 2, RR 3.
- *  - port: stock qcom,msm-dai-tdm-pri-rx sync-mode 1, sync-src 1,
- *    data-out 0, invert-sync 1, data-delay 1, data-align 0.
+ *  - port: stock gts7l overlay (fragment@119 -> tdm_pri_rx; it overrides
+ *    msm-audio-lpass.dtsi's 1/1): sync-mode 0 (short sync), sync-src 1,
+ *    data-out 0, invert-sync 0, data-delay 1, data-align 0. Mainline only
+ *    sends data-out/invert-sync/data-delay to the ADSP with patch 0020;
+ *    before it they were always 0.
+ *  - bit clock: stock clk-attribute 0x0001 (COUPLE_NO, not inverted).
+ *    Mainline hardcodes INVERT_COUPLE_NO for TDM bit clocks, which with
+ *    the amps' IB_NF puts their sampling edge on the data transitions:
+ *    slots 1-3 crackled with long sync, and short sync lost the frames
+ *    (DSP heartbeat stalled). qcom,tdm-clk-attribute is patch 0022.
  *  - pins: stock pri_tdm_* states - gpio138 mi2s0_sck, gpio141 mi2s0_ws,
  *    gpio140 mi2s0_data1 (data to the amps), gpio139 mi2s0_data0 (VI
  *    feedback), drive-strength 2, bias-disable.
@@ -2078,12 +2092,14 @@
 &q6afedai {
 	dai@24 {
 		reg = <PRIMARY_TDM_RX_0>;
-		qcom,tdm-sync-mode = <1>;
+		qcom,tdm-sync-mode = <0>;
 		qcom,tdm-sync-src = <1>;
 		qcom,tdm-data-out = <0>;
-		qcom,tdm-invert-sync = <1>;
+		qcom,tdm-invert-sync = <0>;
 		qcom,tdm-data-delay = <1>;
 		qcom,tdm-data-align = <0>;
+		/* Q6AFE_LPASS_CLK_ATTRIBUTE_COUPLE_NO, as stock (patch 0022) */
+		qcom,tdm-clk-attribute = <1>;
 	};
 };
 

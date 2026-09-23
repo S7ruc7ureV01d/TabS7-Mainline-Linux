@@ -400,9 +400,62 @@ Logs: `docs/logs/audio-stage4-2026-09-22/`. Scripts:
   for the DSP's ack IRQ.
 - **First tone:** 1 kHz at -40 dBFS for 2 s, analog gain 0, through the
   protection DSP. No kernel errors, protection running throughout. The
-  owner heard it, quiet, apparently from all four speakers. Per-speaker
-  channel mapping isn't verified yet (the stream is stereo; the 4-slot
-  mapping is done in the ADSP).
+  owner heard it, quiet. (It was stereo, so only channels 1-2 played: see
+  below.)
+
+### Stage 4b (2026-09-23): per-speaker check, and four TDM-link bugs
+
+The test plays one channel of a 4-channel stream at a time: -40 dBFS,
+analog gain 0, run by the owner with
+`tools/rootfs/audio/stage4-per-speaker.sh`. Each fix below changed one
+thing and was checked with silence first (the DSP heartbeat must climb
+about 1000/s; `CAL_SET_STATUS` must be 2).
+
+1. **Channels 3 and 4 were silent (patch 0017 fix plus new 0019).** The
+   BE fixup's `snd_mask_set_format(S32_LE)` added to the format mask but
+   never cleared S16, so the link ran S16. cs35l41 sized its slots from
+   the sample width, giving 16-bit slots on a 32-bit-slot link: amp n
+   read half of ADSP slot n/2. Stock: S16_LE, 4 channels,
+   `cirrus,fixed-width = 32`. Fix: the fixup sets S16 explicitly (mask
+   cleared first), and new patch 0019 adds cs35l41 `set_tdm_slot()` for
+   the slot width. The machine driver calls it with 4 x 32.
+2. **Slots 1-3 crackled continuously, slot 0 was clean.** The TDM
+   framing and clock didn't match stock, with three causes:
+   - The DTS took Qualcomm's base `msm-audio-lpass.dtsi` values
+     (sync-mode 1, invert-sync 1). Samsung's overlay (fragment@119 ->
+     `tdm_pri_rx`) sets **sync-mode 0, invert-sync 0, data-delay 1**.
+   - Mainline q6afe-dai parses `qcom,tdm-data-out/-invert-sync/
+     -data-delay` but never sent them: always 0. Fixed by **patch 0020**.
+   - Mainline hardcodes `Q6AFE_LPASS_CLK_ATTRIBUTE_INVERT_COUPLE_NO` for
+     TDM bit clocks. Stock is `clk-attribute 0x0001` (COUPLE_NO). The
+     extra inversion, on top of the amps' IB_NF, puts their sampling edge
+     on the data transitions. With long sync that gave marginal bits on
+     slots 1-3. With short sync, the amps lost the frames and the DSP
+     heartbeat stalled at 1-6. Fixed by **patch 0022**, an optional
+     `qcom,tdm-clk-attribute` per port; the DTS sets 1.
+   - Also stock: `cirrus,use-fsync-errata`. **Patch 0021** adds the one
+     write mainline's revision errata lack, `ASP_CONTROL4 = 0x01010000`.
+     Alone it did not fix the stall. It is kept because stock has it.
+3. **Result:** all four channels clean ("perfect sound"). The mapping,
+   landscape with the camera on top:
+
+   | Channel | Slot | Amp | Speaker |
+   |---|---|---|---|
+   | 1 | 0 | 0x43 "FL" | bottom right |
+   | 2 | 1 | 0x42 "FR" | top right |
+   | 3 | 2 | 0x41 "RL" | bottom left |
+   | 4 | 3 | 0x40 "RR" | top left |
+
+   Landscape stereo is therefore **L = channels 3+4, R = channels 1+2**.
+   Samsung's FL/FR/RL/RR names don't describe landscape positions.
+4. **Autosuspend workaround made persistent:**
+   `tools/rootfs/audio/73-gts7l-cs35l41-autosuspend.rules`. It matches
+   `add|bind`: the built-in driver binds before udev starts, so only the
+   coldplug add is seen.
+5. **Not persistent yet:** after boot the amps come up with **PCM Source
+   = ASP**, which bypasses the protection DSP. It must be set to DSP (with
+   gain 0 and preload on) before any audio. The audio gate stays until
+   that is automatic and verified.
 
 ## Real hardware: a genuinely complex, multi-chip audio topology
 

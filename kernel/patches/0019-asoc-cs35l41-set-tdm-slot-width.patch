@@ -1,0 +1,96 @@
+From: gts7l project
+Subject: [PATCH] ASoC: cs35l41: add set_tdm_slot for the ASP slot width
+
+cs35l41 sets its ASP slot width (SP_FORMAT ASP_WIDTH_RX/TX) from the
+sample width. On the Galaxy Tab S7 the link carries 16-bit samples in
+four 32-bit TDM slots, as in stock, where the amps have
+cirrus,fixed-width = 32. With 16-bit slots, amp n read half of ADSP slot
+n/2: two amps played channels 1 and 2 and the other two got the zero
+padding, while channels 3 and 4 reached no amp.
+
+Add set_tdm_slot() to set the slot width; slot positions still come from
+set_channel_map(). The word length (SP_RX_WL/SP_TX_WL) stays at the
+sample width. If set_tdm_slot() is never called, nothing changes.
+
+--- a/sound/soc/codecs/cs35l41.c
++++ b/sound/soc/codecs/cs35l41.c
+@@ -687,6 +687,26 @@
+ 	return cs35l41_set_channels(cs35l41->dev, cs35l41->regmap, tx_n, tx_slot, rx_n, rx_slot);
+ }
+ 
++/*
++ * Slot positions come from set_channel_map(); this only sets the slot
++ * width, for TDM links whose slots are wider than the samples (e.g. 16-bit
++ * data in 32-bit slots, as on the Galaxy Tab S7).
++ */
++static int cs35l41_set_tdm_slot(struct snd_soc_dai *dai, unsigned int tx_mask,
++				unsigned int rx_mask, int slots, int slot_width)
++{
++	struct cs35l41_private *cs35l41 = snd_soc_component_get_drvdata(dai->component);
++
++	if (slot_width && (slot_width < 12 || slot_width > 32)) {
++		dev_err(cs35l41->dev, "Unsupported slot width: %d\n", slot_width);
++		return -EINVAL;
++	}
++
++	cs35l41->slot_width = slot_width;
++
++	return 0;
++}
++
+ static int cs35l41_set_dai_fmt(struct snd_soc_dai *dai, unsigned int fmt)
+ {
+ 	struct cs35l41_private *cs35l41 = snd_soc_component_get_drvdata(dai->component);
+@@ -764,7 +784,7 @@
+ {
+ 	struct cs35l41_private *cs35l41 = snd_soc_component_get_drvdata(dai->component);
+ 	unsigned int rate = params_rate(params);
+-	u8 asp_wl;
++	u8 asp_wl, asp_width;
+ 	int i;
+ 
+ 	for (i = 0; i < ARRAY_SIZE(cs35l41_fs_rates); i++) {
+@@ -778,6 +798,7 @@
+ 	}
+ 
+ 	asp_wl = params_width(params);
++	asp_width = cs35l41->slot_width ?: asp_wl;
+ 
+ 	regmap_update_bits(cs35l41->regmap, CS35L41_GLOBAL_CLK_CTRL,
+ 			   CS35L41_GLOBAL_FS_MASK,
+@@ -786,14 +807,14 @@
+ 	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
+ 		regmap_update_bits(cs35l41->regmap, CS35L41_SP_FORMAT,
+ 				   CS35L41_ASP_WIDTH_RX_MASK,
+-				   asp_wl << CS35L41_ASP_WIDTH_RX_SHIFT);
++				   asp_width << CS35L41_ASP_WIDTH_RX_SHIFT);
+ 		regmap_update_bits(cs35l41->regmap, CS35L41_SP_RX_WL,
+ 				   CS35L41_ASP_RX_WL_MASK,
+ 				   asp_wl << CS35L41_ASP_RX_WL_SHIFT);
+ 	} else {
+ 		regmap_update_bits(cs35l41->regmap, CS35L41_SP_FORMAT,
+ 				   CS35L41_ASP_WIDTH_TX_MASK,
+-				   asp_wl << CS35L41_ASP_WIDTH_TX_SHIFT);
++				   asp_width << CS35L41_ASP_WIDTH_TX_SHIFT);
+ 		regmap_update_bits(cs35l41->regmap, CS35L41_SP_TX_WL,
+ 				   CS35L41_ASP_TX_WL_MASK,
+ 				   asp_wl << CS35L41_ASP_TX_WL_SHIFT);
+@@ -964,6 +985,7 @@
+ 	.hw_params = cs35l41_pcm_hw_params,
+ 	.set_sysclk = cs35l41_dai_set_sysclk,
+ 	.set_channel_map = cs35l41_set_channel_map,
++	.set_tdm_slot = cs35l41_set_tdm_slot,
+ };
+ 
+ #define CS35L41_RATES (		    \
+--- a/sound/soc/codecs/cs35l41.h
++++ b/sound/soc/codecs/cs35l41.h
+@@ -41,6 +41,8 @@
+ 	u32 vimon_vsc;
+ 	u32 vimon_isc;
+ 	struct delayed_work cal_report_work;
++	/* ASP slot width from set_tdm_slot(), 0 = the sample width */
++	unsigned int slot_width;
+ };
+ 
+ int cs35l41_probe(struct cs35l41_private *cs35l41, const struct cs35l41_hw_cfg *hw_cfg);

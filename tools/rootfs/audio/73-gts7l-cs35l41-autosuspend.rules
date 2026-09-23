@@ -1,0 +1,7 @@
+# Workaround for a mainline cs35l41 bug (docs/phase3-audio-scoping.md,
+# stage 4): a stream that starts within the 3 s autosuspend window, before
+# the amps hibernate, fails the protection DSP's RESUME and plays silence.
+# Hibernating straight after each stream avoids it. Remove once fixed.
+# "add" too: the built-in driver binds before udev runs, so at boot only
+# the coldplug add event is seen.
+ACTION=="add|bind", SUBSYSTEM=="i2c", DRIVER=="cs35l41", ATTR{power/autosuspend_delay_ms}="0"

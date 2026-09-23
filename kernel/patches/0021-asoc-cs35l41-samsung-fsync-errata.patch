@@ -1,0 +1,56 @@
+From: gts7l project
+Subject: [PATCH] ASoC: cs35l41: apply Samsung's fsync errata
+ (cirrus,use-fsync-errata)
+
+Samsung's driver has cirrus,use-fsync-errata on all four Galaxy Tab S7
+amps. Their TDM port runs a short (one BCLK) frame sync, and for that the
+driver adds a register patch: VIMON_SPKMON_RESYNC, 0x4310 and
+VPVBST_FS_SEL = 0 (already in mainline's revision errata) and
+ASP_CONTROL4 = 0x01010000 (missing from mainline).
+
+With the port on stock's short sync (patch 0020 and the DTS) and without
+this write, each amp's protection DSP ran a few blocks and then stopped
+getting frames: HALO_HEARTBEAT stalled at 6.
+
+Add the ASP_CONTROL4 write as a registered patch when the property is
+present, so regcache_sync() re-applies it with the test key unlocked
+after hibernation.
+
+--- a/sound/soc/codecs/cs35l41.c
++++ b/sound/soc/codecs/cs35l41.c
+@@ -1113,6 +1113,19 @@
+ #define CS35L41_VIMON_CAL_SUCCESS	2
+ #define CS35L41_CAL_SET_STATUS_SET	2
+ 
++/*
++ * Samsung's driver applies this when DT has cirrus,use-fsync-errata (set on
++ * all four Galaxy Tab S7 amps, whose TDM link uses a one-BCLK short frame
++ * sync). The revision errata (A0 here) already cover VIMON_SPKMON_RESYNC,
++ * 0x4310 and VPVBST_FS_SEL; ASP_CONTROL4 is the missing write. Without it
++ * the DSP stops getting frames (heartbeat stalls) once the port runs short
++ * sync. Registered as a patch, so it is re-applied with the test key
++ * unlocked on every regcache sync (hibernation exit).
++ */
++static const struct reg_sequence cs35l41_fsync_errata_patch[] = {
++	{ CS35L41_ASP_CONTROL4,		0x01010000 },
++};
++
+ static void cs35l41_read_calibration(struct cs35l41_private *cs35l41)
+ {
+ 	struct device *dev = cs35l41->dev;
+@@ -1492,6 +1505,15 @@
+ 	if (ret)
+ 		goto err;
+ 
++	if (device_property_read_bool(cs35l41->dev, "cirrus,use-fsync-errata")) {
++		ret = regmap_register_patch(cs35l41->regmap, cs35l41_fsync_errata_patch,
++					    ARRAY_SIZE(cs35l41_fsync_errata_patch));
++		if (ret) {
++			dev_err_probe(cs35l41->dev, ret, "Failed to apply fsync errata\n");
++			goto err;
++		}
++	}
++
+ 	ret = cs35l41_otp_unpack(cs35l41->dev, cs35l41->regmap);
+ 	if (ret < 0) {
+ 		dev_err_probe(cs35l41->dev, ret, "OTP Unpack failed\n");

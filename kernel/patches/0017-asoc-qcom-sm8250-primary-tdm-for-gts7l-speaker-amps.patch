@@ -16,8 +16,11 @@ Modelled on sdm845.c's TDM handling:
   matches stock mixer_paths.xml's ASPRX1/ASPTX1 positions for FL/FR/RL/RR
   when the codecs are listed in that order. Each amp's PLL runs from
   SCLK.
-- be_hw_params_fixup: 4 channels S32_LE for this port (stock's
-  cirrus,fixed-width = 32). Other back-ends are unchanged.
+- be_hw_params_fixup: 4 channels S16_LE for this port, as stock's
+  kona.c (tdm_rx_cfg PRI RX_0) and mixer_paths ("PRI_TDM_RX_0 Channels"
+  = Four). The samples sit in 32-bit slots, so each amp also gets
+  set_tdm_slot(4, 32) (stock: cirrus,fixed-width = 32; needs 0019).
+  Other back-ends are unchanged.
 - init: no jack setup on the speaker link.
 
 --- a/sound/soc/qcom/sm8250.c
@@ -49,7 +52,7 @@ Modelled on sdm845.c's TDM handling:
  struct sm8250_snd_data {
  	bool stream_prepared[AFE_PORT_MAX];
  	struct snd_soc_card *card;
-@@ -36,6 +49,9 @@
+@@ -36,6 +49,9 @@ static int sm8250_snd_init(struct snd_soc_pcm_runtime *rtd)
  	switch (cpu_dai->id) {
  	case DISPLAY_PORT_RX:
  		return qcom_snd_dp_jack_setup(rtd, &data->dp_jack, 0);
@@ -59,7 +62,7 @@ Modelled on sdm845.c's TDM handling:
  	case USB_RX:
  		return qcom_snd_usb_offload_jack_setup(rtd, &data->usb_offload_jack,
  						       &data->usb_offload_jack_setup);
-@@ -63,8 +79,15 @@
+@@ -63,8 +79,19 @@ static int sm8250_be_hw_params_fixup(struct snd_soc_pcm_runtime *rtd,
  	struct snd_interval *channels = hw_param_interval(params,
  					SNDRV_PCM_HW_PARAM_CHANNELS);
  	struct snd_mask *fmt = hw_param_mask(params, SNDRV_PCM_HW_PARAM_FORMAT);
@@ -67,15 +70,19 @@ Modelled on sdm845.c's TDM handling:
  
  	rate->min = rate->max = 48000;
 +	if (cpu_dai->id == PRIMARY_TDM_RX_0) {
-+		/* One 32-bit channel per amp slot. */
++		/*
++		 * One channel per amp slot, 16-bit samples in 32-bit slots, as
++		 * stock (S16_LE here, cirrus,fixed-width = 32 on the amps).
++		 */
 +		channels->min = channels->max = TDM_SLOTS;
-+		snd_mask_set_format(fmt, SNDRV_PCM_FORMAT_S32_LE);
++		snd_mask_none(fmt);
++		snd_mask_set_format(fmt, SNDRV_PCM_FORMAT_S16_LE);
 +		return 0;
 +	}
  	channels->min = channels->max = 2;
  	snd_mask_set_format(fmt, SNDRV_PCM_FORMAT_S16_LE);
  
-@@ -112,6 +135,22 @@
+@@ -112,6 +139,22 @@ static int sm8250_snd_startup(struct snd_pcm_substream *substream)
  		snd_soc_dai_set_fmt(cpu_dai, fmt);
  		snd_soc_dai_set_fmt(codec_dai, codec_dai_fmt);
  		break;
@@ -98,7 +105,7 @@ Modelled on sdm845.c's TDM handling:
  	default:
  		break;
  	}
-@@ -119,6 +158,55 @@
+@@ -119,6 +162,61 @@ static int sm8250_snd_startup(struct snd_pcm_substream *substream)
  	return qcom_snd_sdw_startup(substream);
  }
  
@@ -135,6 +142,12 @@ Modelled on sdm845.c's TDM handling:
 +		if (ret < 0)
 +			return ret;
 +
++		/* Without this the amp would size its slots from the 16-bit samples. */
++		ret = snd_soc_dai_set_tdm_slot(codec_dai, BIT(i), BIT(i),
++					       TDM_SLOTS, TDM_SLOT_WIDTH);
++		if (ret < 0)
++			return ret;
++
 +		/* The amp's PLL runs from the TDM bit clock. */
 +		ret = snd_soc_component_set_sysclk(codec_dai->component,
 +						   CS35L41_CLKID_SCLK, 0,
@@ -154,7 +167,7 @@ Modelled on sdm845.c's TDM handling:
  static int sm8250_snd_prepare(struct snd_pcm_substream *substream)
  {
  	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
-@@ -139,6 +227,7 @@
+@@ -139,6 +237,7 @@ static int sm8250_snd_hw_free(struct snd_pcm_substream *substream)
  
  static const struct snd_soc_ops sm8250_be_ops = {
  	.startup = sm8250_snd_startup,
