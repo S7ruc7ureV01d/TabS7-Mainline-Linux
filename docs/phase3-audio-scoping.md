@@ -502,8 +502,26 @@ speakers, with left on the left end and right on the right end.
 | `73-gts7l-cs35l41-autosuspend.rules` | `/etc/udev/rules.d/` | autosuspend 0 (mailbox RESUME workaround) |
 | `74-gts7l-audio-safe.rules`, `gts7l-audio-safe(.service)` | udev, `/usr/local/sbin`, `/etc/systemd/system` | at card add: DSP source, Protection firmware, preload, gain 0; verify; write the `.ok` file; re-trigger udev to open the gate |
 | `ucm2/.../Samsung-GTS7L-CS35L41-Speakers.conf`, `ucm2/Samsung/gts7l/HiFi.conf` | `/usr/share/alsa/ucm2/` | UCM: verb re-asserts the DSP source/firmware/preload and routes MultiMedia1 -> PRIMARY_TDM_RX_0; Speaker device sets stock gains (analog 17, digital 817), and back to analog 0 on disable. 4 channels, software volume |
-| `51-gts7l-speakers.conf` | `/etc/wireplumber/wireplumber.conf.d/` | sink: S16LE, positions `FR RR FL RL` |
+| `51-gts7l-speakers.conf` | `/etc/wireplumber/wireplumber.conf.d/` | sink: S16LE, positions `RR FR RL FL` (channels 1-4) |
+| `speaker-id.sh` (+ `speaker-id-ch1..4.wav`, -20 dBFS) | `~/speaker-id/` (user) | beeps each speaker by hardware channel, whatever its label; the stream uses the sink's own positions so no remapping happens |
 | `50-gts7l-upmix.conf` | `/etc/pipewire/{client,pipewire-pulse,pipewire}.conf.d/` | client streams: simple upmix (front copied to rear) |
+
+**Speaker labels (checked by the owner with `speaker-id.sh` and KDE's
+speaker test):** front = the camera edge. Landscape with the camera on
+top:
+
+| Channel | Speaker | Label |
+|---|---|---|
+| 1 | bottom right | Rear Right |
+| 2 | top right | Front Right |
+| 3 | bottom left | Rear Left |
+| 4 | top left | Front Left |
+
+Simple upmix then sends stereo left to 4+3 and right to 2+1. When
+checking labels, use `speaker-id.sh` or KDE's test with System Settings
+restarted: PipeWire routes by channel name, so any other file played
+while the labels change lands on different speakers each time, and KDE's
+settings page keeps showing the old layout until it is reopened.
 
 **Volume:** software only, so 100% is stock's maximum (analog 17,
 digital 0 dB, full-scale signal). The protection firmware manages that

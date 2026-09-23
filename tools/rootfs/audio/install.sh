@@ -24,3 +24,4 @@ for d in client.conf.d pipewire-pulse.conf.d pipewire.conf.d; do
 	inst 644 50-gts7l-upmix.conf              etc/pipewire/$d/50-gts7l-upmix.conf
 done
 echo "done"
+echo "optional, per user: copy speaker-id.sh and speaker-id-ch*.wav to ~/speaker-id/"
