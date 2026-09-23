@@ -25,6 +25,9 @@ background/feasibility writeup this roadmap is based on, and
 
 ## How to use this file
 
+**Everything still unfinished, in one place:** `../docs/open-items.md`
+(last updated 2026-09-23).
+
 - Each phase has a `Status` line: `not started` / `in progress` / `blocked` /
   `done`.
 - Checkboxes are exit criteria for that phase, not a task list — check one only

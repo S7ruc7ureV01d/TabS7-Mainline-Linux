@@ -1,0 +1,92 @@
+# Open items (as of 2026-09-23)
+
+A single list of everything still unfinished, gathered from the roadmap, the
+scoping docs and this session's work. Each item says where it stands and the
+first concrete step. Finished work is in `plans/roadmap.md` and the scoping
+docs it links.
+
+**Build state:** the kernel is fully reproducible from the repo. v7.2 plus
+`kernel/patches/0002-0025` (all apply cleanly and reproduce the working tree
+exactly, checked 2026-09-23), `kernel/dts/sm8250-samsung-gts7l.dts` and
+`kernel/config/gts7l.fragment`. The current rootfs tarball is v10
+(`docs/dev-environment-quickref.md`).
+
+## Not started (roadmap exit criteria)
+
+| Item | What is known | First step |
+|---|---|---|
+| **Suspend/resume** | Never tested on this port. It bit the S9 Ultra project hard (`docs/resume-recovery.md` there). The audio amps, SLPI/ADSP, Wi-Fi and the MAX77705 USB-C driver all have state to survive. | Try `systemctl suspend` from a shell (not KDE), with a console or `pstore` ready; see what fails to resume. |
+| **LTE modem** | In scope (roadmap 2026-09-11 decision), but it has no checklist line and was never scoped. | Scoping pass: which modem subsystem (MPSS on SM8250), its firmware, and mainline's `qcom_q6v5_pas` + QMI/`rmnet` + ModemManager path. |
+| **Cameras** | Not scoped beyond the roadmap line. Mainline SM8250 CAMSS support is partial; the sensors are unknown. | Scoping: identify the sensors from the stock DT (`qcom,cam-sensor*`) and check mainline driver coverage. |
+| **Fingerprint** | Goodix GW3X in the power button. Stock's kernel side is only a TEE shim. | Check `libfprint` support for this sensor; it probably needs the TZ app, which may make it infeasible. |
+| **microSD and USB host** | USB host needs the MAX77705 USB-C block to act as a **source** (VBUS out, DRP). The current driver (0024/0025) is sink-only. | microSD first (SDHC2, likely DT only). Then USB host: CCIC source role plus the charger's OTG boost (`OTG_ILIM` exists in the charger driver). |
+| **USB-C DisplayPort** | Stock has a `ps5169` redriver and DP alt-mode VDMs through the CCIC (the part of `max77705_usbc.c` we skipped). | Only after USB host; it needs the VDM/alt-mode side of the CCIC. |
+| **Book Cover Keyboard** | Pogo pins, an `stm32@2a` MCU (`stm,touchpad`, `stm,keypad`) in the stock DT. Untested. | Scoping: the stock `stm32` driver and its I2C protocol. |
+| **Installer ZIP, dual boot, pacman updates, "Tab Companion" app** | Phase 5 packaging, not started. | After the hardware items; see `docs/phase5-userspace-scoping.md`. |
+| **Project docs** | `hardware-status.md`, `development-notes.md`, `porting-log.md`, known issues, a licensing/provenance file (roadmap end). | This file covers "known issues" in part. |
+
+## Parked on purpose
+
+### Ambient light sensor / auto-brightness (parked 2026-09-22 at the owner's request)
+
+What was established:
+- The sensor is a **VEML3235**, reached through the SLPI sensor stack
+  (hexagonrpcd + libssc, the same stack that makes the accelerometer and
+  auto-rotate work). libssc finds `ambient_light_v`, and the SLPI accepts
+  the enable request.
+- It never sends data: no physical-config event (768) and no samples.
+- Already tried with no change: request IDs 513/514/768, continuous
+  mode, non-wakeup delivery, and also enabling `light_cct_v`.
+- So the request side looks right. The best remaining theory is a
+  **missing sensor supply**: **pm8150_l10** (2.8-2.9 V, always-on in
+  stock) is not enabled in our DTS. The accelerometer needed its own rail
+  (L8C) in the same way.
+- A test build of libssc sits on the tablet in `/root/libssc` (not
+  installed).
+
+First step: enable `pm8150_l10` at stock's voltage in the DTS, then retry
+the libssc enable.
+
+### Charging: what's not covered
+
+- **PPS / up to 45 W:** stock uses a separate **PCA9468** direct charger
+  (`pca9468@57`, its own IRQ/enable GPIOs) for PPS. We do fixed 9 V
+  through the MAX77705 only (about 2.5 A into the battery). This would be
+  a separate driver with its own safety work.
+- **Hot band charge voltage:** above 42 C stock also drops the float
+  voltage to 4.15 V. The mainline charger driver has no writable CV, so
+  our driver instead cuts the current to 1000 mA (stock: 2750 mA).
+- **No true charge-disable:** above 50 C or below 0 C we set the
+  charger's minimum, 100 mA, not "off". A `charge_behaviour` or CHG_EN
+  control in `max77705_charger` would allow a real stop.
+- **Float voltage 4.2 V vs stock's 4.38 V:** the DT battery node has no
+  `voltage-max-design-microvolt` (the boot log warns about it), so the
+  charger uses 4.2 V. That is safer, but it leaves some capacity unused.
+  Setting stock's 4380 mV is a DT one-liner once we're sure of it.
+- **Fuel gauge temperature** reads a constant 33.5 C (not wired to the
+  thermistor). Charging now uses the PM8150L ADC thermistor instead, but
+  `max170xx_battery`'s own `temp` in sysfs/upower is still the fake value.
+
+## Known quirks, left as is (documented)
+
+| Quirk | Where |
+|---|---|
+| Once per boot: LPASS LPI pinctrl vote timeout (`AFE failed to vote (3)`, `-110`). The first AFE command after the ADSP comes up gets no reply; harmless because the VA macro holds the same votes. | `docs/phase3-audio-scoping.md` |
+| 24-bit audio front end: S24 playback is silent and S24 capture is garbage. PipeWire is pinned to S16 for both (as stock). | same |
+| Speaker left/right stays fixed to the landscape ends when rotated to portrait. It would need a small service to swap WirePlumber positions on rotation. | same |
+| SLPI "Handover signaled, but it already happened" log spam, tracking the accelerometer stream. Cosmetic. | `docs/dev-environment-quickref.md` |
+| `CONFIG_CMDLINE` still has `loglevel=15 clk_ignore_unused` from bring-up. `clk_ignore_unused` is still needed (display); `loglevel=15` could drop. The owner said to skip this for now. | `kernel/config/gts7l.fragment` |
+
+## Housekeeping
+
+- **Three config options are not pinned in the fragment.**
+  `PHY_QCOM_QMP_PCIE_8996`, `PHY_QCOM_QMP_USB` and `RTL_CARDS` are `=y` in
+  the working `.config`, but a fresh defconfig merge makes them `=m`. That
+  would silently lose Wi-Fi PCIe and USB. Add all three to the fragment.
+- **Host-side USB network:** the host's NetworkManager profile
+  `gts7l-debug` (172.16.42.2) is now bound to `enp0s20f0u1`, the USB port
+  used since 2026-09-23. Moving the cable back to the old port needs
+  `nmcli con mod gts7l-debug connection.interface-name enp0s20f0u3`.
+- **WirePlumber's saved speaker volume** was left at 0%/muted once during
+  label testing (in `~/.local/state/wireplumber/default-routes`). It's
+  fixed by just raising the volume in KDE; listed only in case it recurs.
