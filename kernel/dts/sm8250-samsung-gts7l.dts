@@ -1497,12 +1497,20 @@
 			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
 		};
 
-		/* Antenna switch supply (downstream: pm8150a_l5). */
+		/*
+		 * pm8150a_l5 downstream. The gts7l overlay's only consumer is
+		 * the TX macro's "sub-mic-bias" supply: Samsung's tx-macro.c
+		 * powers the main mic (DMIC1) from it, at the 1.8 V init
+		 * voltage. Qualcomm's kona.dtsi also names it the WLAN
+		 * antenna-switch supply. Fixed 1.8 V, always on: nothing in
+		 * mainline switches it with the DMIC widget.
+		 */
 		vreg_l5c_1p8: ldo5 {
 			regulator-name = "vreg_l5c_1p8";
 			regulator-min-microvolt = <1800000>;
-			regulator-max-microvolt = <2800000>;
+			regulator-max-microvolt = <1800000>;
 			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+			regulator-always-on;
 		};
 	};
 
@@ -2107,6 +2115,47 @@
 	dai@0 {
 		reg = <MSM_FRONTEND_DAI_MULTIMEDIA1>;
 	};
+
+	dai@1 {
+		reg = <MSM_FRONTEND_DAI_MULTIMEDIA2>;
+		direction = <Q6ASM_DAI_TX>;
+	};
+};
+
+/*
+ * Microphones (docs/phase3-audio-scoping.md, stage 5): two digital mics, no
+ * WCD codec (stock never probes one). Stock mixer_paths routes them through
+ * the TX macro (main-mic = DMIC1 -> DEC0, sub-mic = DMIC3 -> DEC1,
+ * TX_CODEC_DMA_TX_3), but on this LPASS the DMIC clocks come from the VA
+ * macro (stock bolero_dmic_clk_enable() writes VA_TOP_CSR_DMICn_CTL even
+ * for TX DMICs), and mainline's TX macro never enables them - the first
+ * try recorded a constant line. Mainline's VA macro clocks its own DMIC
+ * inputs, so the mics go through it (as on RB5): VA DMIC1 and DMIC3 ->
+ * VA_CODEC_DMA_TX_0. DMIC0/1 share the dmic01 pins (gpio6/7) and DMIC2/3
+ * the dmic23 pins (gpio8/9). DMIC clock 2.4 MHz, stock's TX-path rate.
+ * Main mic power: vreg_l5c_1p8.
+ */
+&lpass_tlmm {
+	dmic23_active: dmic23-active-state {
+		clk-pins {
+			pins = "gpio8";
+			function = "dmic2_clk";
+			drive-strength = <8>;
+			output-high;
+		};
+
+		data-pins {
+			pins = "gpio9";
+			function = "dmic2_data";
+			drive-strength = <8>;
+		};
+	};
+};
+
+&vamacro {
+	pinctrl-0 = <&dmic01_active>, <&dmic23_active>;
+	pinctrl-names = "default";
+	qcom,dmic-sample-rate = <2400000>;
 };
 
 &sound {
@@ -2120,6 +2169,30 @@
 
 		cpu {
 			sound-dai = <&q6asmdai MSM_FRONTEND_DAI_MULTIMEDIA1>;
+		};
+	};
+
+	mm2-dai-link {
+		link-name = "MultiMedia2";
+
+		cpu {
+			sound-dai = <&q6asmdai MSM_FRONTEND_DAI_MULTIMEDIA2>;
+		};
+	};
+
+	mic-dai-link {
+		link-name = "Mic Capture";
+
+		cpu {
+			sound-dai = <&q6afedai VA_CODEC_DMA_TX_0>;
+		};
+
+		platform {
+			sound-dai = <&q6routing>;
+		};
+
+		codec {
+			sound-dai = <&vamacro 0>;
 		};
 	};
 

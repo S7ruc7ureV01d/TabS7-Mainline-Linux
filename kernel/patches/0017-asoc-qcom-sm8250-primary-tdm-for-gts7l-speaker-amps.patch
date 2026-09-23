@@ -21,7 +21,8 @@ Modelled on sdm845.c's TDM handling:
   = Four). The samples sit in 32-bit slots, so each amp also gets
   set_tdm_slot(4, 32) (stock: cirrus,fixed-width = 32; needs 0019).
   Other back-ends are unchanged.
-- init: no jack setup on the speaker link.
+- init: no jack setup on the speaker link, nor on the VA_CODEC_DMA_TX_0
+  digital-mic link (VA macro DMICs, no codec with a jack).
 
 --- a/sound/soc/qcom/sm8250.c
 +++ b/sound/soc/qcom/sm8250.c
@@ -52,17 +53,20 @@ Modelled on sdm845.c's TDM handling:
  struct sm8250_snd_data {
  	bool stream_prepared[AFE_PORT_MAX];
  	struct snd_soc_card *card;
-@@ -36,6 +49,9 @@ static int sm8250_snd_init(struct snd_soc_pcm_runtime *rtd)
+@@ -36,6 +49,12 @@ static int sm8250_snd_init(struct snd_soc_pcm_runtime *rtd)
  	switch (cpu_dai->id) {
  	case DISPLAY_PORT_RX:
  		return qcom_snd_dp_jack_setup(rtd, &data->dp_jack, 0);
 +	case PRIMARY_TDM_RX_0:
 +		/* Speaker amps only, no jack on this link. */
 +		return 0;
++	case VA_CODEC_DMA_TX_0:
++		/* Digital mics on the VA macro, no jack either. */
++		return 0;
  	case USB_RX:
  		return qcom_snd_usb_offload_jack_setup(rtd, &data->usb_offload_jack,
  						       &data->usb_offload_jack_setup);
-@@ -63,8 +79,19 @@ static int sm8250_be_hw_params_fixup(struct snd_soc_pcm_runtime *rtd,
+@@ -63,8 +82,19 @@ static int sm8250_be_hw_params_fixup(struct snd_soc_pcm_runtime *rtd,
  	struct snd_interval *channels = hw_param_interval(params,
  					SNDRV_PCM_HW_PARAM_CHANNELS);
  	struct snd_mask *fmt = hw_param_mask(params, SNDRV_PCM_HW_PARAM_FORMAT);
@@ -82,7 +86,7 @@ Modelled on sdm845.c's TDM handling:
  	channels->min = channels->max = 2;
  	snd_mask_set_format(fmt, SNDRV_PCM_FORMAT_S16_LE);
  
-@@ -112,6 +139,22 @@ static int sm8250_snd_startup(struct snd_pcm_substream *substream)
+@@ -112,6 +142,22 @@ static int sm8250_snd_startup(struct snd_pcm_substream *substream)
  		snd_soc_dai_set_fmt(cpu_dai, fmt);
  		snd_soc_dai_set_fmt(codec_dai, codec_dai_fmt);
  		break;
@@ -105,7 +109,7 @@ Modelled on sdm845.c's TDM handling:
  	default:
  		break;
  	}
-@@ -119,6 +162,61 @@ static int sm8250_snd_startup(struct snd_pcm_substream *substream)
+@@ -119,6 +165,61 @@ static int sm8250_snd_startup(struct snd_pcm_substream *substream)
  	return qcom_snd_sdw_startup(substream);
  }
  
@@ -167,7 +171,7 @@ Modelled on sdm845.c's TDM handling:
  static int sm8250_snd_prepare(struct snd_pcm_substream *substream)
  {
  	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
-@@ -139,6 +237,7 @@ static int sm8250_snd_hw_free(struct snd_pcm_substream *substream)
+@@ -139,6 +240,7 @@ static int sm8250_snd_hw_free(struct snd_pcm_substream *substream)
  
  static const struct snd_soc_ops sm8250_be_ops = {
  	.startup = sm8250_snd_startup,

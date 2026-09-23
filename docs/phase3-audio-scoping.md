@@ -15,7 +15,7 @@ following the same methodology as every other Phase 2/3 scoping doc
 (real sources cited, nothing assumed).
 
 
-## Status and plan (2026-09-23) - speakers done: protected desktop audio on all four; microphones next
+## Status and plan (2026-09-23) - speakers and microphones done
 
 ### Corrections to the scoping below, found against real hardware and the stock dumps
 
@@ -58,7 +58,7 @@ Wrong values here can damage the amps or speakers.
 | 2 | Control-only CS35L41 bring-up (mainline `i2c11`) with those values; no sound card, amps' GLOBAL_EN off. | very low | **done** |
 | 3 | Load the protection firmware and tuning, feed this unit's calibration into the DSP, and confirm protection is running before any sound. | low | **done** |
 | 4 | Machine graph: LPASS TDM port -> 4 amps (port from the downstream DAI links). First sound at about -40 dB, then raise gradually; UCM + PipeWire. | controlled | **done** (4b-4d) |
-| 5 | Microphones (no 3.5 mm jack; likely digital mics via WCD938x or the VA macro). | none | |
+| 5 | Microphones: two digital mics, through the LPASS VA macro. | none | **done** (stage 5 result) |
 
 **Rules throughout:**
 - no audio through an amp unless its protection DSP is confirmed
@@ -555,7 +555,8 @@ range, as on stock.
   autosuspend-0 workaround;
 - why S24 is silent;
 - portrait rotation (L/R stays fixed to the landscape ends);
-- stage 5, microphones.
+- the mic work (stage 5) came after v9, so the next tarball needs the
+  updated UCM and WirePlumber files.
 
 **Rootfs tarball v9 (2026-09-23)** includes all of the above, plus
 alsa-utils and the firmware (`docs/dev-environment-quickref.md`). New:
@@ -563,6 +564,63 @@ alsa-utils and the firmware (`docs/dev-environment-quickref.md`). New:
 within 3 ms of `gts7l-audio-safe` at boot, raced it, and replayed all 1308
 saved controls (analog gain, and the protection DSP's cached tuning
 controls). The safe state and UCM set everything that matters.
+
+### Stage 5 result (2026-09-23): internal microphones
+
+The owner tested it: KDE shows "Internal microphones", and recordings
+through PipeWire sound clear.
+
+**Hardware (stock DT, mixer_paths.xml, boot log):**
+- two digital mics, and **no WCD938x codec**: its node comes from the
+  generic kona base DT, and stock never probes it;
+- main-mic = DMIC1 (dmic01 pins, gpio6/7), sub-mic = DMIC3 (dmic23 pins,
+  gpio8/9);
+- stock routes them through the TX macro: DEC0/DEC1, `TX_AIF1_CAP`,
+  `TX_CODEC_DMA_TX_3`, decimator gain 84-85;
+- the main mic's supply is PM8150L LDO5 (`pm8150a_l5`) at 1.8 V, the TX
+  macro's Samsung-specific `sub-mic-bias` regulator, switched with the
+  DMIC1 widget. Our DTS had called LDO5 the antenna-switch supply
+  (Qualcomm's `kona.dtsi` does list that too); nothing consumed it.
+
+**First try, TX macro as stock: a flat line.** Both channels were
+identical: a high-pass-filter step decaying to exact zeros, meaning the
+data lines were constant. On this LPASS the **DMIC clocks come from the
+VA macro**: stock's `bolero_dmic_clk_enable()` writes
+`VA_TOP_CSR_DMICn_CTL` even for TX-macro DMICs. Mainline's TX macro
+never enables them; it only clocks SoundWire DMICs.
+
+**Working path: the VA macro**, as on RB5, which clocks its own DMIC
+inputs:
+- DTS: `&vamacro` on `dmic01` + a new `dmic23` pin state, with
+  `qcom,dmic-sample-rate = <2400000>` (stock's TX-path rate; 9.6 MHz / 4).
+  `vreg_l5c_1p8` is fixed at 1.8 V and always on: the VA macro's
+  `vdd-micb` supply widget isn't routed, so DAPM never switches it. A
+  MultiMedia2 capture front end, and `mic-dai-link` = `VA_CODEC_DMA_TX_0`
+  -> `<&vamacro 0>`. The TX macro stays disabled.
+- Config: `SND_SOC_LPASS_VA_MACRO`, `SND_SOC_LPASS_MACRO_COMMON`,
+  `PINCTRL_LPASS_LPI` and `PINCTRL_SM8250_LPASS_LPI` built in (`=y`).
+- Patch 0017: no jack setup on the `VA_CODEC_DMA_TX_0` link.
+- UCM `Mic`: VA DMIC MUX0 = DMIC1 and MUX1 = DMIC3, via VA DEC0/1 on
+  `VA_AIF1_CAP`, `VA_DECn Volume` 100 (+16 dB; 84 = 0 dB). The
+  MultiMedia2 route is in the **verb**: PipeWire probes each device's
+  PCM with only the verb applied, and an unrouted capture PCM made it
+  drop the whole HiFi profile, speakers included.
+- WirePlumber: the source is pinned to **S16LE**. With PipeWire's default
+  S24_LE the capture data was garbage (-8 dBFS rms, clipping), just as
+  S24 playback was silent. The S24 front-end path is broken in both
+  directions.
+
+**Levels:**
+- quiet room: -70 dBFS at 0 dB gain, -54 dBFS at +16 dB;
+- speech at about 30 cm: -50 dBFS rms and -30 dBFS peak at 0 dB, so
+  about -34 dBFS with the UCM gain.
+
+Tapping the edges didn't show which mic is where: the chassis carries the
+sound to both about equally.
+
+**Also seen:** once at boot, `lpass-lpi-pinctrl 33c0000.pinctrl:
+__pm_clk_enable: failed to enable clk ... error -110`. It recovered by
+itself and the mics work.
 
 ## Real hardware: a genuinely complex, multi-chip audio topology
 

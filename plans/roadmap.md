@@ -110,6 +110,13 @@ Exit criteria:
       availability not yet checked (not needed until Phase 5).
 
 Progress log:
+- 2026-09-23: **Internal microphones work.**
+  - Two digital mics through the LPASS VA macro, which clocks them
+    (mainline's TX macro can't). KDE shows "Internal microphones", and
+    the owner confirmed recordings sound clear.
+  - The source is pinned to S16 (S24 capture is garbage, as S24 playback
+    is silent).
+  - Details: `../docs/phase3-audio-scoping.md` stage 5.
 - 2026-09-11: Chose the kernel baseline (upstream `sm8250-samsung-common.dtsi`)
   and confirmed the local build toolchain is ready — see
   `../docs/kernel-baseline.md` and `../docs/build-environment.md`. Phase 0 is
@@ -1280,8 +1287,8 @@ Exit criteria:
       were fine the whole time. Enabled the service and installed
       `bluez-utils` (for `bluetoothctl`), baked into
       `work/archroot-build/archroot-rootfs-v4.tar`.
-- [ ] Speakers and microphone(s) working. (Speakers done 2026-09-23 with
-      speaker protection; microphones not started.)
+- [x] Speakers and microphone(s) working (2026-09-23): four speakers with
+      speaker protection, two internal digital mics.
 - [x] Volume/power buttons working. **Done, 2026-09-22** - root-caused,
       not guessed: `pon_pwrkey`/`pon_resin` (compatible
       `qcom,pm8941-pwrkey`/`qcom,pm8941-resin`, children of the real
