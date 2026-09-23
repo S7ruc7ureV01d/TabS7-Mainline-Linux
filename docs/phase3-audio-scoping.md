@@ -188,11 +188,104 @@ match stock on every amp:
 
 The SLPI, ADSP, touch and sensors are unaffected.
 
-**Next, stage 3:** load the Cirrus protection firmware and tuning, and
-feed this unit's calibration into each amp's DSP, still with no audio
-path. Note "Subsystem ID not found": mainline builds the firmware
-filename from a system name, so the stock `cs35l40-spk-dsp1-spk-prot.*`
-files need mapping to the names mainline asks for.
+### Stage 3/4 design (2026-09-22) - for review before anything is built
+
+All of this comes from stock sources: downstream `techpack/audio/asoc/kona.c`,
+`drivers/mfd/cirrus-cal.c`, stock `vendor/etc/mixer_paths.xml`
+(extracted to `work/stock-super/vendor-extract/etc/audio/`), the r07
+overlay, and stock's boot log.
+
+**Speaker map.** Stock's MFD numbers its codec sub-devices in probe order
+(`7-0043` probes first and gets `cs35l41-codec.0`, then `.4`, `.8`,
+`.12`), and `kona_tdm_cirrus_init` names `codec_dais[0..3]` FL/FR/RL/RR:
+
+| Amp | Speaker | Cal suffix | `rdc_cal` |
+|---|---|---|---|
+| `0x43` | FL | `_b` | 8401 |
+| `0x42` | FR | `_br` | 8590 |
+| `0x41` | RL | (none) | 9087 |
+| `0x40` | RR | `_r` | 9144 |
+
+Our `sound-name-prefix` values should become FL/FR/RL/RR so the control
+names match stock's `mixer_paths.xml` one to one.
+
+**Firmware.** Mainline asks for
+`cirrus/cs35l41-dsp1-spk-prot-<system>-<prefix>.wmfw|bin` (lowercased),
+then `...-<system>.wmfw|bin`, then a legacy name. `<system>` comes from
+the DT property `cirrus,subsystem-id` (hence "Subsystem ID not found").
+Plan:
+- set `cirrus,subsystem-id = "gts7l"`;
+- install stock's `cs35l40-spk-dsp1-spk-prot.wmfw` and `.bin` as
+  `cirrus/cs35l41-dsp1-spk-prot-gts7l.wmfw|.bin`. Stock loads that same
+  pair on all four amps.
+
+**Never install `-calib.bin`:** it's the factory calibration-run tuning.
+
+**Calibration** (`cirrus_cal_apply()`, run by stock on every boot). Per
+amp, write these into the protection firmware's DSP memory:
+
+| Register | Value |
+|---|---|
+| `CAL_RDC` 0x02800224 | the amp's `rdc_cal` |
+| `CAL_AMBIENT` 0x02800228 | `temp_cal` (27) |
+| `CAL_STATUS` 0x0280022C | 1 |
+| `CAL_CHECKSUM` 0x02800230 | status + rdc |
+| `VIMON_CAL_STATUS` 0x0280006c | 2 (success; all VSC/ISC files present and in range) |
+| `VIMON_CAL_VSC` / `_ISC` 0x02800070 / 0x02800074 | the stored values |
+
+Mainline's ASoC cs35l41 has no calibration support of its own, so this
+goes through the firmware's coefficient controls (exposed by wm_adsp once
+the firmware loads) from a small userspace step before any stream. Each
+value should be read back to confirm.
+
+**TDM link:**
+- **Port:** stock uses **`PRIMARY_TDM_RX_0`** (AFE 36864), format
+  **DSP_A**, codec bit-clock/frame slave (CBS_CFS), **IB_NF**.
+- **Slots:** `qcom,tdm-max-slots = <4>` x 32-bit slots at 48 kHz, so
+  BCLK = 6.144 MHz. RX slot positions are FL 0, FR 1, RL 2, RR 3 (the
+  `ASPRX1 Slot Position` controls; ASPRX2 is 7 = unused).
+- **Feedback:** the amps' VI feedback goes out on the same slots on TX
+  (`ASP TX1 Source = DSPTX1`). Protection runs on each amp's own DSP from
+  its own VMON/IMON, so the AP-side TX capture isn't needed to be safe.
+
+**Mainline gap:** `sound/soc/qcom/sm8250.c` only handles MI2S. `sdm845.c`
+has a full TDM implementation (`sdm845_tdm_snd_hw_params`: LPASS TDM
+clock, `set_tdm_slot` on CPU and codec DAIs, channel map). Stage 4 ports
+that into sm8250 for `PRIMARY_TDM_RX_0`. The q6afe DT binding already
+has the TDM properties (`qcom,tdm-sync-mode/-sync-src/-data-out/
+-invert-sync/-data-delay/-data-align`); their values need reading from
+the downstream `qcom,msm-dai-tdm-pri-*` nodes.
+
+**Stock's operating values** (`mixer_paths.xml`):
+- **Defaults:** `DSP1 Firmware = Protection`, `DSP1 Preload Switch = 1`,
+  `AMP PCM Gain = 0`, `AMP Enable Switch = 0`, `DSP RX2 Source = ASPRX1`,
+  unmuted.
+- **Speaker path ("spk" plus "speaker"):** `PCM Source = DSP`,
+  `Boost Enable = Enabled`, `AMP Enable Switch = 1`, and on all four amps
+  **`AMP PCM Gain = 17`, `Digital PCM Volume = 817`**. These are the
+  maximum values stock ever runs.
+
+**Hard rules for our UCM/test scripts:**
+1. `PCM Source` must be **DSP** (protection in the signal path) before any
+   stream opens. `ASP` bypasses protection and is never used.
+2. The protection firmware must be confirmed running on all four amps
+   before any stream (`HALO_STATE` 0x02800050 = 0 = CSPL running;
+   `HALO_HEARTBEAT` 0x02800054 incrementing), with calibration written
+   and read back.
+3. Gain ceilings: `AMP PCM Gain` never above 17 and `Digital PCM Volume`
+   never above 817. First sound uses much lower values plus a software
+   cap (about -40 dB).
+4. Boot defaults: amps disabled, gain 0, and no stream until rules 1-2
+   are verified.
+
+**Implementation order:**
+- **3a:** DT prefixes FL/FR/RL/RR, `cirrus,subsystem-id`, firmware files.
+- **3b:** the sm8250 TDM machine-driver patch plus the `&sound` card
+  (PRI TDM RX0 -> 4 amps); build the machine and Q6 drivers in.
+- **3c:** boot with no stream; confirm the firmware loads (preload) and
+  runs on all four; apply calibration and read it back.
+- **4:** first sound under the rules above.
+
 
 ## Real hardware: a genuinely complex, multi-chip audio topology
 
