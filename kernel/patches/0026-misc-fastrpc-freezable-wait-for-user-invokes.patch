@@ -1,0 +1,47 @@
+From: gts7l project
+Subject: [PATCH] misc: fastrpc: freeze user invokes in place instead of
+ interrupting them
+
+fastrpc_internal_invoke() waits for a user invoke with
+wait_for_completion_interruptible(). A system suspend freezes user space
+by sending each task a fake signal, which ends the wait with -ERESTARTSYS
+after the message has already been sent to the DSP. The context is kept,
+and the syscall is then restarted automatically on thaw, sending the same
+invoke to the DSP a second time with a new context.
+
+For a reverse-RPC listener (hexagonrpcd's adsp_listener next2 call),
+that message carries the reply to the DSP's previous request, so the DSP
+receives the same reply twice. On the Galaxy Tab S7 (SM8250) the SLPI's
+sensor_process dies of it at every resume, and even on a freezer-only
+pm_test ("PDM: service 'sensor_process' crash: EX:sensor_process:0x1:
+frpc_dsp:0x75"). remoteproc then restarts the SLPI and every sensor
+client loses its connection.
+
+Wait with TASK_INTERRUPTIBLE | TASK_FREEZABLE instead. The freezer then
+parks the task in the wait (TASK_FROZEN) without a signal, so the
+syscall is neither interrupted nor restarted. A reply that arrives
+meanwhile is kept as an expected wakeup and seen on thaw. A real signal
+still interrupts the wait as before.
+
+diff --git a/drivers/misc/fastrpc.c b/drivers/misc/fastrpc.c
+index eb6c2a78d..5c4913b18 100644
+--- a/drivers/misc/fastrpc.c
++++ b/drivers/misc/fastrpc.c
+@@ -1278,7 +1278,16 @@ static int fastrpc_internal_invoke(struct fastrpc_user *fl,  u32 kernel,
+ 		if (!wait_for_completion_timeout(&ctx->work, 10 * HZ))
+ 			err = -ETIMEDOUT;
+ 	} else {
+-		err = wait_for_completion_interruptible(&ctx->work);
++		/*
++		 * Freezable: the freezer parks the task here instead of
++		 * interrupting the wait. An interrupted invoke returns
++		 * -ERESTARTSYS and the syscall restart sends the same message
++		 * to the DSP again; for a reverse-RPC listener that repeats the
++		 * previous reply, which kills the DSP-side process (SLPI
++		 * sensor_process: "frpc_dsp" fatal error at every resume).
++		 */
++		err = wait_for_completion_state(&ctx->work,
++						TASK_INTERRUPTIBLE | TASK_FREEZABLE);
+ 	}
+ 
+ 	if (err)

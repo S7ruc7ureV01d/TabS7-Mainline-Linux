@@ -1,0 +1,37 @@
+From: gts7l project
+Subject: [PATCH] PCI: qcom: optionally drop the hot-plug slot for soldered
+ endpoints
+
+The qcom Root Ports advertise a hot-plug capable slot (SLTCAP HPC, ABP,
+PCP, MRLSP, ...). pci_bridge_d3_possible() refuses D3 for a hot-plug
+bridge that pciehp doesn't drive (and for pciehp-driven ones on non-x86,
+unless forced), so the Root Port stays in D0 across system suspend.
+pci_host_common_d3cold_possible() then fails and dw_pcie_suspend_noirq()
+returns without sending PME_Turn_Off: the link never goes to L2 and the
+controller is never deinitialised, so its clocks (pcie_0_aux, PHY aux and
+refgen) and with them the CXO vote stay on in s2idle.
+
+On boards whose endpoint is soldered down there is no slot. Add an
+optional "qcom,no-hotplug-slot" controller property that clears the slot
+capabilities, letting the Root Port reach D3 and the link L2 in suspend.
+
+diff --git a/drivers/pci/controller/dwc/pcie-qcom.c b/drivers/pci/controller/dwc/pcie-qcom.c
+index d8eb52857..280dff31d 100644
+--- a/drivers/pci/controller/dwc/pcie-qcom.c
++++ b/drivers/pci/controller/dwc/pcie-qcom.c
+@@ -372,6 +372,15 @@ static void qcom_pcie_set_slot_nccs(struct dw_pcie *pci)
+ 	 */
+ 	val = readl(pci->dbi_base + offset + PCI_EXP_SLTCAP);
+ 	val |= PCI_EXP_SLTCAP_NCCS;
++	/*
++	 * A soldered-down endpoint (e.g. a Wi-Fi chip) sits in no real slot.
++	 * Advertising hot-plug makes the PCI core refuse D3 for the Root Port
++	 * (pci_bridge_d3_possible()), which in turn stops system suspend from
++	 * taking the link to L2 and turning the controller off
++	 * (dw_pcie_suspend_noirq()), leaving its clocks and CXO on.
++	 */
++	if (of_property_read_bool(pci->dev->of_node, "qcom,no-hotplug-slot"))
++		val &= ~(PCIE_CAP_SLOT_VAL | PCI_EXP_SLTCAP_HPC);
+ 	writel(val, pci->dbi_base + offset + PCI_EXP_SLTCAP);
+ 
+ 	dw_pcie_dbi_ro_wr_dis(pci);

@@ -1,0 +1,65 @@
+From: gts7l project
+Subject: [PATCH] serial: qcom-geni: really power the port down in system
+ suspend
+
+qcom_geni_serial_suspend() relies on uart_suspend_port(), which ends in
+uart_change_pm(OFF) -> qcom_geni_serial_pm() -> pm_runtime_put_sync(). In
+system suspend that put never suspends the device: device_prepare() has
+taken a runtime PM reference on every device. A port that is open (here
+the Bluetooth UART, opened by hci_uart through serdev) therefore keeps its
+serial engine clock running through s2idle. That clock comes from GPLL0,
+and GPLL0 keeps the CXO request asserted, which blocks XO shutdown, AOSS
+sleep and CX collapse.
+
+Add late system sleep callbacks that force the runtime suspend (and the
+matching resume) for non-console ports. Console ports stay as they are, so
+no_console_suspend keeps working.
+
+diff --git a/drivers/tty/serial/qcom_geni_serial.c b/drivers/tty/serial/qcom_geni_serial.c
+index 1e39122ec..f123a3ea8 100644
+--- a/drivers/tty/serial/qcom_geni_serial.c
++++ b/drivers/tty/serial/qcom_geni_serial.c
+@@ -2002,6 +2002,34 @@ static int qcom_geni_serial_resume(struct device *dev)
+ 	return ret;
+ }
+ 
++/*
++ * uart_suspend_port() powers the port down with pm_runtime_put_sync(), but
++ * during system suspend the PM core holds a runtime PM reference on every
++ * device, so the put never suspends it and the SE clocks (and GPLL0, and so
++ * CXO) stay on through s2idle. Finish the job in the late phase, when
++ * runtime PM is off anyway. Console ports are left alone: with
++ * no_console_suspend they are kept running on purpose.
++ */
++static int qcom_geni_serial_suspend_late(struct device *dev)
++{
++	struct qcom_geni_serial_port *port = dev_get_drvdata(dev);
++
++	if (uart_console(&port->uport))
++		return 0;
++
++	return pm_runtime_force_suspend(dev);
++}
++
++static int qcom_geni_serial_resume_early(struct device *dev)
++{
++	struct qcom_geni_serial_port *port = dev_get_drvdata(dev);
++
++	if (uart_console(&port->uport))
++		return 0;
++
++	return pm_runtime_force_resume(dev);
++}
++
+ #if IS_ENABLED(CONFIG_SERIAL_QCOM_GENI_CONSOLE)
+ static const struct qcom_geni_device_data qcom_geni_console_data = {
+ 	.console = true,
+@@ -2048,6 +2076,8 @@ static const struct dev_pm_ops qcom_geni_serial_pm_ops = {
+ 	SET_RUNTIME_PM_OPS(qcom_geni_serial_runtime_suspend,
+ 			   qcom_geni_serial_runtime_resume, NULL)
+ 	SYSTEM_SLEEP_PM_OPS(qcom_geni_serial_suspend, qcom_geni_serial_resume)
++	LATE_SYSTEM_SLEEP_PM_OPS(qcom_geni_serial_suspend_late,
++				 qcom_geni_serial_resume_early)
+ };
+ 
+ static const struct of_device_id qcom_geni_serial_match_table[] = {

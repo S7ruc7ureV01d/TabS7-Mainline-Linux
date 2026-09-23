@@ -1696,6 +1696,8 @@
  * regulator is needed since these are already-confirmed-working rails.
  */
 &pcie0 {
+	/* The QCA6390 is soldered down: no hot-plug slot (patch 0030). */
+	qcom,no-hotplug-slot;
 	status = "okay";
 };
 

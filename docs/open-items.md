@@ -6,7 +6,7 @@ first concrete step. Finished work is in `plans/roadmap.md` and the scoping
 docs it links.
 
 **Build state:** the kernel is fully reproducible from the repo. v7.2 plus
-`kernel/patches/0002-0025` (all apply cleanly and reproduce the working tree
+`kernel/patches/0002-0030` (all apply cleanly and reproduce the working tree
 exactly, checked 2026-09-23), `kernel/dts/sm8250-samsung-gts7l.dts` and
 `kernel/config/gts7l.fragment`. The current rootfs tarball is v10
 (`docs/dev-environment-quickref.md`).
@@ -15,7 +15,7 @@ exactly, checked 2026-09-23), `kernel/dts/sm8250-samsung-gts7l.dts` and
 
 | Item | What is known | First step |
 |---|---|---|
-| **Suspend/resume** | Never tested on this port. It bit the S9 Ultra project hard (`docs/resume-recovery.md` there). The audio amps, SLPI/ADSP, Wi-Fi and the MAX77705 USB-C driver all have state to survive. | Try `systemctl suspend` from a shell (not KDE), with a console or `pstore` ready; see what fails to resume. |
+| **Suspend/resume** | In progress (`docs/phase3-suspend-scoping.md`). s2idle suspends and resumes; the SLPI crash (0026) and four drivers holding CXO in sleep (0027-0030) are fixed, and the application CPUs' RPMh sleep votes are now clean. The SoC still never reaches AOSS sleep/CX collapse (`qcom_stats` 0), so the blocker is outside Linux's own votes. | Check the display RSC and the unbooted subsystems; compare with stock Android's sleep stats. |
 | **LTE modem** | In scope (roadmap 2026-09-11 decision), but it has no checklist line and was never scoped. | Scoping pass: which modem subsystem (MPSS on SM8250), its firmware, and mainline's `qcom_q6v5_pas` + QMI/`rmnet` + ModemManager path. |
 | **Cameras** | Not scoped beyond the roadmap line. Mainline SM8250 CAMSS support is partial; the sensors are unknown. | Scoping: identify the sensors from the stock DT (`qcom,cam-sensor*`) and check mainline driver coverage. |
 | **Fingerprint** | Goodix GW3X in the power button. Stock's kernel side is only a TEE shim. | Check `libfprint` support for this sensor; it probably needs the TZ app, which may make it infeasible. |

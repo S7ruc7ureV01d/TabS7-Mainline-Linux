@@ -74,7 +74,14 @@ CONFIG_FB_SIMPLE=y
 # the CPU hard-hang investigation's overhead - the real cause was the
 # DTS memory node's firmware hole (docs/kernel-boot-debugging.md, "CPU
 # hard-hang, root cause found"; mem=2G history there too).
-CONFIG_CMDLINE="console=tty0 loglevel=15 clk_ignore_unused"
+#
+# 2026-09-23: clk_ignore_unused dropped. It never fixed that black screen
+# (Round 33 tested it), and MSM DRM is built in now and claims its clocks.
+# Left in, it kept every bootloader-enabled clock running (GPLL0-fed UFS ICE
+# at 300 MHz, PCIe1/2 refgen, UFS-card AXI, debug UART, ...), which holds
+# the SoC's XO request and blocks CX collapse/AOSS sleep in s2idle
+# (docs/phase3-suspend-scoping.md).
+CONFIG_CMDLINE="console=tty0 loglevel=15"
 CONFIG_CMDLINE_FORCE=y
 
 # Round 24 (2026-09-19, docs/kernel-boot-debugging.md): the memory-node fix
@@ -630,3 +637,27 @@ CONFIG_RTL_CARDS=y
 # =m. Stated explicitly so that a fresh merge and the .config agree.
 # CONFIG_DETECT_HUNG_TASK is not set
 # CONFIG_USB_QCOM_EUD is not set
+
+# 2026-09-23, suspend/resume bring-up (docs/phase3-suspend-scoping.md):
+# QCOM_STATS shows whether s2idle really reaches the RPMh low-power modes
+# (debugfs qcom_stats: aosd, cxsd, ddr); sm8250.dtsi already has the
+# qcom,rpmh-stats node. PM_DEBUG/PM_SLEEP_DEBUG give /sys/power/pm_test (stop
+# suspend at freezer/devices/platform/processors/core) and pm_print_times
+# (per-device timings). No cost unless used.
+CONFIG_QCOM_STATS=y
+CONFIG_PM_DEBUG=y
+CONFIG_PM_SLEEP_DEBUG=y
+# Force sync_state() once boot probing is done, even when a consumer never
+# binds. Without it (strict mode) providers with an unbound consumer never
+# sync: rpmhpd waits on camcc (=m, no modules installed) and clamps every
+# RPMh power domain, CX included, to its top corner; the mc_virt/aggre2
+# interconnects wait on the crypto engine (=m) and hold INT_MAX, pinning DDR
+# at 1555 MHz; gcc/gpucc wait on the GMU, which adreno drives without a
+# driver of its own. Result: s2idle never reached CX collapse (qcom_stats
+# aosd/cxsd/ddr stayed 0).
+CONFIG_FW_DEVLINK_SYNC_STATE_TIMEOUT=y
+# Event tracing, to capture the RPMh sleep/wake votes across s2idle
+# (tools/rootfs/suspend/susptest-trace.sh). Debug only: drop once suspend
+# power is solved (+5.4 MB Image; the boot partition has little headroom).
+CONFIG_FTRACE=y
+CONFIG_ENABLE_DEFAULT_TRACERS=y

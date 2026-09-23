@@ -1,0 +1,98 @@
+From: gts7l project
+Subject: [PATCH] drm/msm/dsi/phy: unprepare the AHB clock in runtime suspend
+
+The DSI PHY manages its "iface" (AHB) clock with pm_clk. pm_clk prepares a
+clock when it's added and only disables it in runtime suspend, so each PHY
+keeps disp_cc_mdss_ahb_clk prepared forever. Preparing that clock prepares
+its parents up to bi_tcxo, and the RPMh bi_tcxo clock casts its CXO vote
+in its prepare op. With two DSI PHYs (a dual-DSI panel), the SoC could
+never reach XO shutdown, AOSS sleep or CX collapse in s2idle, even with
+the display off and every display device runtime suspended.
+
+Handle the clock directly: prepare+enable in runtime resume and
+disable+unprepare in runtime suspend.
+
+That alone is not enough for system suspend: DRM switches the display off
+in its prepare callback, after the PM core took a runtime PM reference on
+the PHY, so the PHY stays runtime active. Force the runtime suspend in the
+late phase, as the DSI host and DPU already do in theirs.
+
+diff --git a/drivers/gpu/drm/msm/dsi/phy/dsi_phy.c b/drivers/gpu/drm/msm/dsi/phy/dsi_phy.c
+index 1fb3899b8..162dca133 100644
+--- a/drivers/gpu/drm/msm/dsi/phy/dsi_phy.c
++++ b/drivers/gpu/drm/msm/dsi/phy/dsi_phy.c
+@@ -5,7 +5,6 @@
+ 
+ #include <linux/clk-provider.h>
+ #include <linux/platform_device.h>
+-#include <linux/pm_clock.h>
+ #include <linux/pm_runtime.h>
+ #include <dt-bindings/phy/phy.h>
+ 
+@@ -687,13 +686,14 @@ static int dsi_phy_driver_probe(struct platform_device *pdev)
+ 	if (ret)
+ 		return ret;
+ 
+-	ret = devm_pm_clk_create(dev);
+-	if (ret)
+-		return ret;
+-
+-	ret = pm_clk_add(dev, "iface");
+-	if (ret < 0)
+-		return dev_err_probe(dev, ret, "Unable to get iface clk\n");
++	/*
++	 * Not pm_clk: it keeps the clock prepared while runtime suspended, and
++	 * a prepared AHB clock holds the RPMh CXO vote (bi_tcxo votes in its
++	 * prepare op), blocking XO shutdown in s2idle even with the display off.
++	 */
++	phy->ahb_clk = devm_clk_get(dev, "iface");
++	if (IS_ERR(phy->ahb_clk))
++		return dev_err_probe(dev, PTR_ERR(phy->ahb_clk), "Unable to get iface clk\n");
+ 
+ 	if (phy->cfg->ops.pll_init) {
+ 		ret = phy->cfg->ops.pll_init(phy);
+@@ -711,8 +711,31 @@ static int dsi_phy_driver_probe(struct platform_device *pdev)
+ 	return 0;
+ }
+ 
++static int dsi_phy_runtime_suspend(struct device *dev)
++{
++	struct msm_dsi_phy *phy = dev_get_drvdata(dev);
++
++	clk_disable_unprepare(phy->ahb_clk);
++
++	return 0;
++}
++
++static int dsi_phy_runtime_resume(struct device *dev)
++{
++	struct msm_dsi_phy *phy = dev_get_drvdata(dev);
++
++	return clk_prepare_enable(phy->ahb_clk);
++}
++
+ static const struct dev_pm_ops dsi_phy_pm_ops = {
+-	SET_RUNTIME_PM_OPS(pm_clk_suspend, pm_clk_resume, NULL)
++	SET_RUNTIME_PM_OPS(dsi_phy_runtime_suspend, dsi_phy_runtime_resume, NULL)
++	/*
++	 * The display is switched off in the DRM prepare callback, after the
++	 * PM core took its runtime PM reference on the PHY, so its runtime
++	 * suspend can't happen by itself during system suspend.
++	 */
++	SET_LATE_SYSTEM_SLEEP_PM_OPS(pm_runtime_force_suspend,
++				     pm_runtime_force_resume)
+ };
+ 
+ static struct platform_driver dsi_phy_platform_driver = {
+diff --git a/drivers/gpu/drm/msm/dsi/phy/dsi_phy.h b/drivers/gpu/drm/msm/dsi/phy/dsi_phy.h
+index 21a59d66e..833dcf17f 100644
+--- a/drivers/gpu/drm/msm/dsi/phy/dsi_phy.h
++++ b/drivers/gpu/drm/msm/dsi/phy/dsi_phy.h
+@@ -107,6 +107,7 @@ struct msm_dsi_phy {
+ 	int id;
+ 
+ 	struct regulator_bulk_data *supplies;
++	struct clk *ahb_clk;
+ 
+ 	struct msm_dsi_dphy_timing timing;
+ 	const struct msm_dsi_phy_cfg *cfg;

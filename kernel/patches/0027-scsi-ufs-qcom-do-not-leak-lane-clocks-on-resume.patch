@@ -1,0 +1,40 @@
+From: gts7l project
+Subject: [PATCH] scsi: ufs: qcom: don't leak lane clock references on resume
+
+ufs_qcom_enable_lane_clks() takes a reference on every clock of the UFS
+node (clk_bulk_prepare_enable) and sets is_lane_clks_enabled, and
+ufs_qcom_disable_lane_clks() drops one only when that flag is set. The
+enable side doesn't check the flag, and system resume calls it twice:
+ufshcd_resume() -> ufs_qcom_setup_clocks(on, PRE_CHANGE) with the link in
+hibern8, then __ufshcd_wl_resume() -> ufs_qcom_resume(). Each
+suspend/resume cycle thus leaks one prepare/enable on core_clk,
+bus_aggr_clk, core_clk_unipro and the rest, measured on SM8250: the
+gated-state prepare count of gcc_ufs_phy_axi_clk equals the number of
+suspends so far.
+
+The leaked references keep GPLL0 running, and GPLL0 keeps the CXO request
+asserted, so from the first suspend on the SoC can no longer reach XO
+shutdown, AOSS sleep or CX collapse in s2idle.
+
+Make the enable idempotent, like the disable.
+
+diff --git a/drivers/ufs/host/ufs-qcom.c b/drivers/ufs/host/ufs-qcom.c
+index 291c43448..c427cc0c9 100644
+--- a/drivers/ufs/host/ufs-qcom.c
++++ b/drivers/ufs/host/ufs-qcom.c
+@@ -356,6 +356,15 @@ static int ufs_qcom_enable_lane_clks(struct ufs_qcom_host *host)
+ {
+ 	int err;
+ 
++	/*
++	 * Resume calls this twice (ufs_qcom_setup_clocks() with the link in
++	 * hibern8, then ufs_qcom_resume()), while disable only drops one
++	 * reference: every suspend cycle leaked a prepare on all UFS clocks,
++	 * keeping GPLL0 and so CXO on in s2idle.
++	 */
++	if (host->is_lane_clks_enabled)
++		return 0;
++
+ 	err = clk_bulk_prepare_enable(host->num_clks, host->clks);
+ 	if (err)
+ 		return err;
