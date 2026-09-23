@@ -555,8 +555,14 @@ range, as on stock.
   autosuspend-0 workaround;
 - why S24 is silent;
 - portrait rotation (L/R stays fixed to the landscape ends);
-- stage 5, microphones;
-- adding these files to the rootfs tarball.
+- stage 5, microphones.
+
+**Rootfs tarball v9 (2026-09-23)** includes all of the above, plus
+alsa-utils and the firmware (`docs/dev-environment-quickref.md`). New:
+`alsa-restore`/`alsa-state` are **masked**. `alsactl restore` started
+within 3 ms of `gts7l-audio-safe` at boot, raced it, and replayed all 1308
+saved controls (analog gain, and the protection DSP's cached tuning
+controls). The safe state and UCM set everything that matters.
 
 ## Real hardware: a genuinely complex, multi-chip audio topology
 

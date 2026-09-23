@@ -23,5 +23,12 @@ inst 644 51-gts7l-speakers.conf               etc/wireplumber/wireplumber.conf.d
 for d in client.conf.d pipewire-pulse.conf.d pipewire.conf.d; do
 	inst 644 50-gts7l-upmix.conf              etc/pipewire/$d/50-gts7l-upmix.conf
 done
+# No ALSA mixer save/restore: alsa-restore raced gts7l-audio-safe at boot and
+# replayed every saved control, including the protection DSP's cached
+# tuning controls. The safe state and UCM set everything that matters.
+mkdir -p "$R/etc/systemd/system"
+ln -sf /dev/null "$R/etc/systemd/system/alsa-restore.service"; echo "  etc/systemd/system/alsa-restore.service -> /dev/null (masked)"
+ln -sf /dev/null "$R/etc/systemd/system/alsa-state.service";   echo "  etc/systemd/system/alsa-state.service -> /dev/null (masked)"
+rm -f "$R/var/lib/alsa/asound.state"
 echo "done"
 echo "optional, per user: copy speaker-id.sh and speaker-id-ch*.wav to ~/speaker-id/"

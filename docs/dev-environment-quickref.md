@@ -59,8 +59,8 @@ alone without asking, and getting this wrong wastes a round-trip):
     `/etc/sudoers.d/10-wheel` (`%wheel ALL=(ALL:ALL) ALL`, password
     required).
   - **Current rootfs tarball:**
-    `work/archroot-build/archroot-rootfs-v8.tar` (2026-09-22, sha256
-    `4fc18503969ddcd421025bdf05eab6568e382d297c6a94df3d392928cb2ec5bc`).
+    `work/archroot-build/archroot-rootfs-v9.tar` (2026-09-23, sha256
+    `75fcdf7fbbce6df6126b3edc858e5e1deca3518cb37af719b0b2a98738052906`).
     Lineage, each step a verified stream-rewrite of the previous one with
     Python's `tarfile` (GNU `tar --delete` corrupted this archive):
     - v5 = v4 + `authorized_keys` owned by root + `/etc/sudoers.d/10-wheel`
@@ -81,12 +81,31 @@ alone without asking, and getting this wrong wastes a round-trip):
 
       The build tools (base-devel/meson/git) used on the live install
       are *not* included.
+    - v9 = v8 + the speaker audio setup as running live
+      (`docs/phase3-audio-scoping.md` stages 4-4d):
+      - `alsa-utils` (package files plus its pacman db entry; every
+        dependency was already in v8);
+      - firmware: `cirrus/cs35l41-dsp1-spk-prot-gts7l.{wmfw,bin}` (stock
+        protection firmware) and `qcom/sm8250/samsung/gts7l/adsp.*`;
+      - everything `tools/rootfs/audio/install.sh` installs: the gate,
+        autosuspend and safe-state udev rules, `gts7l-audio-safe` plus
+        its unit, the UCM profile, the WirePlumber sink rule and the
+        PipeWire upmix;
+      - `alsa-restore`/`alsa-state` masked, and no `asound.state`;
+      - the current `slpi-start.service` (v8's didn't boot the ADSP).
+
+      The owner's own apps installed since v8 (Krita, Telegram, Prism
+      Launcher, dev tools, ...) are *not* included. Verified: 183431
+      entries = v8 - 1 replaced + 134 added; the 6 capability xattrs are
+      identical; all 124 new files match the device; GNU tar and bsdtar
+      both read it cleanly.
 
     File capabilities (`kwin_wayland`, `newuidmap`, ...) are preserved
     byte-for-byte. Python tags two entries with a `hdrcharset=BINARY` pax
     keyword, which GNU tar ignores with a warning and bsdtar handles
-    cleanly. TWRP's own tar hasn't been tried on v5+ yet. Only v8 and
-    `ArchLinuxARM-aarch64-latest.tar.gz` (the upstream base) are kept.
+    cleanly. TWRP's own tar hasn't been tried on v5+ yet. Only the current
+    tarball and `ArchLinuxARM-aarch64-latest.tar.gz` (the upstream base)
+    are kept.
   - Internet access on-device works via NAT: the host does
     `iptables -t nat -A POSTROUTING -s 172.16.42.0/24 -o wlan0 -j MASQUERADE`
     plus `ip_forward=1`, and the device gets a default route via
