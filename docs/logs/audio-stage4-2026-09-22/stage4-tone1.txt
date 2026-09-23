@@ -1,0 +1,15 @@
+during FL CSPL_STATE=0x00,0x00,0x00,0x00 HALO=0x00,0x00,0x00,0x02 TEMP=0x00,0x05,0xc0,0x00
+during FR CSPL_STATE=0x00,0x00,0x00,0x00 HALO=0x00,0x00,0x00,0x02 TEMP=0x00,0x05,0xc0,0x00
+during RL CSPL_STATE=0x00,0x00,0x00,0x00 HALO=0x00,0x00,0x00,0x02 TEMP=0x00,0x05,0xc0,0x00
+during RR CSPL_STATE=0x00,0x00,0x00,0x00 HALO=0x00,0x00,0x00,0x02 TEMP=0x00,0x05,0xc0,0x00
+aplay exit=0
+PCM: closed
+== kernel log
+[  133.396375] cs35l41 11-0043: Failed to set mailbox cmd 2 (status 1)
+[  133.396391] snd-sm8250 sound: ASoC: POST_PMU: FL DSP1 event failed: -42
+[  133.409047] cs35l41 11-0042: Failed to set mailbox cmd 2 (status 1)
+[  133.409069] snd-sm8250 sound: ASoC: POST_PMU: FR DSP1 event failed: -42
+[  133.421597] cs35l41 11-0041: Failed to set mailbox cmd 2 (status 1)
+[  133.421622] snd-sm8250 sound: ASoC: POST_PMU: RL DSP1 event failed: -42
+[  133.430922] cs35l41 11-0040: Failed to set mailbox cmd 2 (status 1)
+[  133.430951] snd-sm8250 sound: ASoC: POST_PMU: RR DSP1 event failed: -42

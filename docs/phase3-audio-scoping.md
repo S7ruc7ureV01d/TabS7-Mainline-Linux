@@ -15,7 +15,7 @@ following the same methodology as every other Phase 2/3 scoping doc
 (real sources cited, nothing assumed).
 
 
-## Status and plan (2026-09-22, night) - stage 0 done; speaker safety gates next
+## Status and plan (2026-09-22, night) - stages 0-4 done: first protected sound
 
 ### Corrections to the scoping below, found against real hardware and the stock dumps
 
@@ -56,8 +56,8 @@ Wrong values here can damage the amps or speakers.
 | 0 | Move the ADSP carveout to stock's placement and boot the ADSP (`QCOM_APR=y` only; all sound drivers stay unbuilt). | none | **done** |
 | 1 | Read the CS35L41 boost-converter registers read-only (done from TWRP, which runs Samsung's kernel), and derive the real inductor/capacitor values. | none | **done** |
 | 2 | Control-only CS35L41 bring-up (mainline `i2c11`) with those values; no sound card, amps' GLOBAL_EN off. | very low | **done** |
-| 3 | Load the protection firmware and tuning, feed this unit's calibration into the DSP, and confirm protection is running before any sound. | low | |
-| 4 | Machine graph: LPASS TDM port -> 4 amps (port from the downstream DAI links). First sound at about -40 dB with a UCM software volume cap, then raise gradually. | controlled | |
+| 3 | Load the protection firmware and tuning, feed this unit's calibration into the DSP, and confirm protection is running before any sound. | low | **done** |
+| 4 | Machine graph: LPASS TDM port -> 4 amps (port from the downstream DAI links). First sound at about -40 dB with a UCM software volume cap, then raise gradually. | controlled | **first tone done**; volume cap/UCM pending |
 | 5 | Microphones (no 3.5 mm jack; likely digital mics via WCD938x or the VA macro). | none | |
 
 **Rules throughout:**
@@ -345,6 +345,64 @@ non-zero signal):
    gain still at its minimum). Stop at the first anomaly.
 
 
+
+### Stage 4 result (2026-09-22): calibration in the firmware, first protected tone
+
+Logs: `docs/logs/audio-stage4-2026-09-22/`. Scripts:
+`tools/rootfs/audio/stage4-silence-calibrate.sh` (verify only) and
+`stage4-tone.sh`.
+
+- **Step 3 as planned doesn't work.** Once the protection firmware
+  runs, it clears `CAL_R`, `CAL_STATUS` and `CAL_CHECKSUM` within
+  milliseconds of a write, in any order and even in one batched `amixer
+  -s`. It reads them only at start-up. `CAL_SET_STATUS` (0x2800234) is
+  its verdict: 1 = DEFAULT (built-in values), 2 = SET (the same values
+  as mainline cs35l56). Until then it ran on its defaults. Writing
+  `CSPL_COMMAND = 3` did nothing. `CSPL_COMMAND` is a cached control, so
+  it had to be put back to 0, or it would be re-sent at the next DSP
+  start.
+- **Fix: kernel patch 0018.** The cs35l41 driver writes the calibration
+  from wm_adsp's `pre_run`, after the firmware loads and before the core
+  starts. Values come from new per-amp DT properties (`cirrus,cal-r`,
+  `cirrus,cal-ambient`, `cirrus,vimon-cal-vsc`, `cirrus,vimon-cal-isc`)
+  holding this unit's /efs values. The amp-to-file map is stock DT's
+  `cirrus,mfd-suffix`: 0x43 `_b`, 0x42 `_br`, 0x41 none, 0x40 `_r`.
+  Status 1 and checksum = R + 1 match stock `cirrus_cal_apply()`.
+  About 2 s after the first run, the driver logs every word read back
+  from DSP memory:
+  `Calibration applied: CAL_SET_STATUS=2 R=8401 ambient=27 status=1
+  checksum=8402 vimon=2 ...`, with R 8401/8590/9087/9144 for
+  FL/FR/RL/RR.
+- **Readback traps:**
+  - regmap debugfs shows the regmap cache for DSP memory, not the DSP's
+    contents;
+  - a cached (non-volatile) control such as `CAL_AMBIENT` reads back
+    its kernel cache. A raw write left that cache at 0 while the DSP
+    held 27, so 0018 writes cached controls through
+    `cs_dsp_coeff_write_ctrl()`;
+  - `amixer cget name=` walks about 1,500 controls, so each read takes
+    about 0.5 s and a status dump can outlast a short stream.
+- **Protection verified running on all four** with silence:
+  - `HALO_STATE` = 2;
+  - `HALO_HEARTBEAT` about +1010/s;
+  - `CSPL_STATE` = 0;
+  - `CSPL_TEMPERATURE` 0x5c000 = 23.0 °C (radix 14).
+- **Mainline mailbox bug:** a stream that starts within 3 s of the last
+  one, before runtime PM hibernates the amps, fails RESUME on every amp:
+  "Failed to set mailbox cmd 2 (status 1)", then "DSP1 event failed:
+  -42". The DSP stays PAUSED, and because PCM Source = DSP the output is
+  silence, so the failure is safe. It reproduces every time (gaps of
+  0 s and 1 s fail; 5 s works). Workaround: set
+  `/sys/bus/i2c/devices/11-004[0-3]/power/autosuspend_delay_ms` to 0,
+  so every stream starts from hibernation; back-to-back streams then
+  work. It isn't persistent yet, and the kernel fix still needs finding.
+  Stock sends RESUME from the main-amp PMU after GLOBAL_EN and waits
+  for the DSP's ack IRQ.
+- **First tone:** 1 kHz at -40 dBFS for 2 s, analog gain 0, through the
+  protection DSP. No kernel errors, protection running throughout. The
+  owner heard it, quiet, apparently from all four speakers. Per-speaker
+  channel mapping isn't verified yet (the stream is stereo; the 4-slot
+  mapping is done in the ADSP).
 
 ## Real hardware: a genuinely complex, multi-chip audio topology
 

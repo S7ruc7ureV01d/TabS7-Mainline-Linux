@@ -1,0 +1,13 @@
+t=1 aplay=up 43:active 42:active 41:active 40:active FLst=0x00,0x00,0x00,0x00
+t=2 aplay=up 43:active 42:active 41:active 40:active FLst=0x00,0x00,0x00,0x00
+t=3 aplay=up 43:active 42:active 41:active 40:active FLst=0x00,0x00,0x00,0x00
+t=4 aplay=up 43:active 42:active 41:active 40:active FLst=0x00,0x00,0x00,0x00
+t=5 aplay=up 43:active 42:active 41:active 40:active FLst=0x00,0x00,0x00,0x00
+t=6 aplay=up 43:active 42:active 41:active 40:active FLst=0x00,0x00,0x00,0x00
+t=7 aplay=up 43:active 42:active 41:active 40:active FLst=0x00,0x00,0x00,0x00
+t=8 aplay=up 43:active 42:active 41:active 40:active FLst=0x00,0x00,0x00,0x00
+t=9 aplay=up 43:active 42:active 41:active 40:active FLst=0x00,0x00,0x00,0x00
+t=10 aplay=up 43:active 42:active 41:active 40:active FLst=0x00,0x00,0x00,0x00
+== pcm status
+closed
+== dmesg

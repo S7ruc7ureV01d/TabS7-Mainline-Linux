@@ -1,0 +1,61 @@
+== step 1: minimum gain, protection in path
+FL: analog=0 src=1 preload=on
+FR: analog=0 src=1 preload=on
+RL: analog=0 src=1 preload=on
+RR: analog=0 src=1 preload=on
+== step 2: digital silence stream
+FL GLOBAL_EN=00000001
+FR GLOBAL_EN=00000001
+RL GLOBAL_EN=00000001
+RR GLOBAL_EN=00000001
+== step 3: calibration
+FL MISMATCH: got R=00000000 AMB=0000001b ST=00000000 CK=00000000 VIMON=00000002 VSC=00ffe2c5 ISC=00fffdc6 / want R=000020d1 AMB=0000001b ST=00000001 CK=000020d2 VIMON=00000002 VSC=00ffe2c5 ISC=00fffdc6
+amixer: Cannot read the given element from control sysdefault:0
+
+amixer: Cannot read the given element from control sysdefault:0
+
+amixer: Cannot read the given element from control sysdefault:0
+
+amixer: Cannot read the given element from control sysdefault:0
+
+amixer: Cannot read the given element from control sysdefault:0
+
+amixer: Cannot read the given element from control sysdefault:0
+
+FR MISMATCH: got R=XXXXXXXX AMB=XXXXXXXX ST=XXXXXXXX CK=XXXXXXXX VIMON=XXXXXXXX VSC=XXXXXXXX ISC=XXXXXXXX / want R=0000218e AMB=0000001b ST=00000001 CK=0000218f VIMON=00000002 VSC=00002588 ISC=00000899
+amixer: Cannot read the given element from control sysdefault:0
+
+amixer: Cannot read the given element from control sysdefault:0
+
+amixer: Cannot read the given element from control sysdefault:0
+
+amixer: Cannot read the given element from control sysdefault:0
+
+amixer: Cannot read the given element from control sysdefault:0
+
+amixer: Cannot read the given element from control sysdefault:0
+
+RL MISMATCH: got R=XXXXXXXX AMB=XXXXXXXX ST=XXXXXXXX CK=XXXXXXXX VIMON=XXXXXXXX VSC=XXXXXXXX ISC=XXXXXXXX / want R=0000237f AMB=0000001b ST=00000001 CK=00002380 VIMON=00000002 VSC=00ffbf5d ISC=00fffeab
+amixer: Cannot read the given element from control sysdefault:0
+
+amixer: Cannot read the given element from control sysdefault:0
+
+amixer: Cannot read the given element from control sysdefault:0
+
+amixer: Cannot read the given element from control sysdefault:0
+
+amixer: Cannot read the given element from control sysdefault:0
+
+amixer: Cannot read the given element from control sysdefault:0
+
+RR MISMATCH: got R=XXXXXXXX AMB=XXXXXXXX ST=XXXXXXXX CK=XXXXXXXX VIMON=XXXXXXXX VSC=XXXXXXXX ISC=XXXXXXXX / want R=000023b8 AMB=0000001b ST=00000001 CK=000023b9 VIMON=00000002 VSC=00002558 ISC=00fff96e
+== step 4: protection running?
+FL HALO_STATE=XXXXXXXX HEARTBEAT XXXXXXXX -> XXXXXXXX CSPL_STATE=
+FR HALO_STATE=XXXXXXXX HEARTBEAT XXXXXXXX -> XXXXXXXX CSPL_STATE=
+RL HALO_STATE=XXXXXXXX HEARTBEAT XXXXXXXX -> XXXXXXXX CSPL_STATE=
+RR HALO_STATE=XXXXXXXX HEARTBEAT XXXXXXXX -> XXXXXXXX CSPL_STATE=
+FL GLOBAL_EN after stop=00000000
+FR GLOBAL_EN after stop=00000000
+RL GLOBAL_EN after stop=00000000
+RR GLOBAL_EN after stop=00000000
+RESULT: FAILED - do not proceed to a tone

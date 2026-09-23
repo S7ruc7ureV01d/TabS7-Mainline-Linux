@@ -1913,6 +1913,11 @@
  *    owns it and releases it, the rest get -EBUSY and log "assuming shared
  *    reset". If probe fails, the error path drives it low again, holding
  *    all four silently in reset.
+ *  - Calibration (cirrus,cal-* / cirrus,vimon-cal-*, patch 0018): THIS
+ *    UNIT's factory values from its /efs (rdc_cal*, temp_cal, vsc_cal*,
+ *    isc_cal*), mapped per amp by stock's cirrus,mfd-suffix (0x43 "_b",
+ *    0x42 "_br", 0x41 "", 0x40 "_r"). Another tablet needs its own values;
+ *    without them the protection firmware falls back to its defaults.
  */
 &gpi_dma1 {
 	status = "okay";
@@ -1947,6 +1952,10 @@
 		cirrus,asp-sdout-hiz = <3>;
 		cirrus,gpio2-src-select = <2>;
 		cirrus,gpio2-output-enable;
+		cirrus,cal-r = <9144>;
+		cirrus,cal-ambient = <27>;
+		cirrus,vimon-cal-vsc = <9560>;
+		cirrus,vimon-cal-isc = <16775534>;
 	};
 
 	cs35l41_41: amplifier@41 {
@@ -1964,6 +1973,10 @@
 		cirrus,asp-sdout-hiz = <3>;
 		cirrus,gpio2-src-select = <2>;
 		cirrus,gpio2-output-enable;
+		cirrus,cal-r = <9087>;
+		cirrus,cal-ambient = <27>;
+		cirrus,vimon-cal-vsc = <16760669>;
+		cirrus,vimon-cal-isc = <16776875>;
 	};
 
 	cs35l41_42: amplifier@42 {
@@ -1981,6 +1994,10 @@
 		cirrus,asp-sdout-hiz = <3>;
 		cirrus,gpio2-src-select = <2>;
 		cirrus,gpio2-output-enable;
+		cirrus,cal-r = <8590>;
+		cirrus,cal-ambient = <27>;
+		cirrus,vimon-cal-vsc = <9608>;
+		cirrus,vimon-cal-isc = <2201>;
 	};
 
 	cs35l41_43: amplifier@43 {
@@ -1998,6 +2015,10 @@
 		cirrus,asp-sdout-hiz = <3>;
 		cirrus,gpio2-src-select = <2>;
 		cirrus,gpio2-output-enable;
+		cirrus,cal-r = <8401>;
+		cirrus,cal-ambient = <27>;
+		cirrus,vimon-cal-vsc = <16769733>;
+		cirrus,vimon-cal-isc = <16776646>;
 	};
 };
 

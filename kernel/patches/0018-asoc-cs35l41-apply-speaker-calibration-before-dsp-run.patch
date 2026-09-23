@@ -1,0 +1,272 @@
+From: gts7l project
+Subject: [PATCH] ASoC: cs35l41: apply per-unit speaker calibration before
+ the protection firmware starts
+
+Samsung's driver writes each amp's factory calibration (CAL_R,
+CAL_AMBIENT, CAL_STATUS, CAL_CHECKSUM, and VIMON_CAL/VSC/ISC) into the
+protection firmware on every DSP power-up (cirrus_cal_apply()). Mainline
+ASoC cs35l41 has no calibration support, so the firmware ran with its
+built-in defaults: CAL_SET_STATUS = 1 (DEFAULT) instead of 2 (SET).
+
+Writing the inputs from userspace does not work: once the firmware runs
+it clears CAL_R/CAL_STATUS/CAL_CHECKSUM within milliseconds, whatever the
+order, and only reads them at start-up.
+
+Take the values from new per-amp DT properties (cirrus,cal-r,
+cirrus,cal-ambient, cirrus,vimon-cal-vsc, cirrus,vimon-cal-isc) and write
+them from wm_adsp's pre_run hook, where the firmware is loaded but the
+core is not started yet. CAL_STATUS is 1 and CAL_CHECKSUM is R + status,
+exactly as stock does. Volatile controls refuse writes while the DSP is
+not running, so those words go through cs_dsp_write_data_word() at the
+named control's address. Cached controls (CAL_AMBIENT) go through
+cs_dsp_coeff_write_ctrl(), so cs_dsp writes them just before the core
+starts and the ALSA control reads back the real value; a raw write would
+leave its cache at the image's 0.
+
+Two seconds after the first run, read every word back from DSP memory
+and log it with CAL_SET_STATUS, which the firmware only reports once
+audio flows. A failure never blocks the run; the firmware then keeps
+its defaults, as before this patch.
+
+--- a/sound/soc/codecs/cs35l41.c
++++ b/sound/soc/codecs/cs35l41.c
+@@ -210,6 +210,8 @@ static int cs35l41_dsp_preload_ev(struct snd_soc_dapm_widget *w,
+ 	}
+ }
+ 
++static void cs35l41_report_calibration(struct cs35l41_private *cs35l41);
++
+ static int cs35l41_dsp_audio_ev(struct snd_soc_dapm_widget *w,
+ 				struct snd_kcontrol *kcontrol, int event)
+ {
+@@ -220,8 +222,12 @@ static int cs35l41_dsp_audio_ev(struct snd_soc_dapm_widget *w,
+ 
+ 	switch (event) {
+ 	case SND_SOC_DAPM_POST_PMU:
+-		if (!cs35l41->dsp.cs_dsp.running)
+-			return wm_adsp_event(w, kcontrol, event);
++		if (!cs35l41->dsp.cs_dsp.running) {
++			ret = wm_adsp_event(w, kcontrol, event);
++			if (!ret)
++				cs35l41_report_calibration(cs35l41);
++			return ret;
++		}
+ 
+ 		ret = regmap_read(cs35l41->regmap, CS35L41_DSP_MBOX_2, &fw_status);
+ 		if (ret < 0) {
+@@ -1079,6 +1085,172 @@ static int cs35l41_handle_pdata(struct device *dev, struct cs35l41_hw_cfg *hw_cf
+ 	return 0;
+ }
+ 
++#define CS35L41_CAL_ALG_ID		0xcd
++#define CS35L41_VIMON_ALG_ID		0x400a4
++#define CS35L41_CAL_STATUS_SUCCESS	1
++#define CS35L41_VIMON_CAL_SUCCESS	2
++#define CS35L41_CAL_SET_STATUS_SET	2
++
++static void cs35l41_read_calibration(struct cs35l41_private *cs35l41)
++{
++	struct device *dev = cs35l41->dev;
++
++	if (!device_property_read_u32(dev, "cirrus,cal-r", &cs35l41->cal_r) &&
++	    !device_property_read_u32(dev, "cirrus,cal-ambient", &cs35l41->cal_ambient)) {
++		/* The firmware takes 24-bit words; a zero R is "no calibration" */
++		if (cs35l41->cal_r && cs35l41->cal_r < 0x800000 &&
++		    cs35l41->cal_ambient < 0x800000)
++			cs35l41->cal_valid = true;
++		else
++			dev_warn(dev, "Ignoring out-of-range calibration R=%u ambient=%u\n",
++				 cs35l41->cal_r, cs35l41->cal_ambient);
++	}
++
++	if (!device_property_read_u32(dev, "cirrus,vimon-cal-vsc", &cs35l41->vimon_vsc) &&
++	    !device_property_read_u32(dev, "cirrus,vimon-cal-isc", &cs35l41->vimon_isc)) {
++		if (cs35l41->vimon_vsc < 0x1000000 && cs35l41->vimon_isc < 0x1000000)
++			cs35l41->vimon_cal_valid = true;
++		else
++			dev_warn(dev, "Ignoring out-of-range VIMON calibration\n");
++	}
++}
++
++static int cs35l41_write_cal_word(struct cs_dsp *dsp, const char *name,
++				  unsigned int alg, u32 val)
++{
++	struct cs_dsp_coeff_ctl *ctl;
++	__be32 be_val = cpu_to_be32(val);
++	int ret;
++
++	ctl = cs_dsp_get_ctl(dsp, name, WMFW_ADSP2_XM, alg);
++	if (!ctl)
++		return -ENOENT;
++
++	/* Volatile controls refuse writes until the DSP runs: go direct */
++	if (ctl->flags & WMFW_CTL_FLAG_VOLATILE)
++		return cs_dsp_write_data_word(dsp, WMFW_ADSP2_XM,
++					      ctl->alg_region.base + ctl->offset, val);
++
++	/*
++	 * Cached controls: update the cache, which cs_dsp writes to the DSP
++	 * right after pre_run, and which is what reads of the control return.
++	 */
++	ret = cs_dsp_coeff_write_ctrl(ctl, 0, &be_val, sizeof(be_val));
++
++	return ret < 0 ? ret : 0;
++}
++
++static int cs35l41_read_cal_word(struct cs_dsp *dsp, const char *name,
++				 unsigned int alg, u32 *val)
++{
++	struct cs_dsp_coeff_ctl *ctl;
++
++	ctl = cs_dsp_get_ctl(dsp, name, WMFW_ADSP2_XM, alg);
++	if (!ctl)
++		return -ENOENT;
++
++	return cs_dsp_read_data_word(dsp, WMFW_ADSP2_XM,
++				     ctl->alg_region.base + ctl->offset, val);
++}
++
++/*
++ * The protection firmware reads its calibration once, when it starts, and
++ * clears the CAL_R/STATUS/CHECKSUM inputs if they are written while it
++ * runs. Samsung's driver writes them right after starting the core
++ * (cirrus_cal_apply()); write them just before it instead, from pre_run,
++ * where the firmware is loaded but not yet running.
++ */
++static int cs35l41_dsp_pre_run(struct wm_adsp *dsp)
++{
++	struct cs35l41_private *cs35l41 = container_of(dsp, struct cs35l41_private, dsp);
++	struct cs_dsp *cs_dsp = &dsp->cs_dsp;
++	int ret;
++
++	if (cs35l41->cal_valid) {
++		ret = cs35l41_write_cal_word(cs_dsp, "CAL_R", CS35L41_CAL_ALG_ID,
++					     cs35l41->cal_r);
++		if (!ret)
++			ret = cs35l41_write_cal_word(cs_dsp, "CAL_AMBIENT", CS35L41_CAL_ALG_ID,
++						     cs35l41->cal_ambient);
++		if (!ret)
++			ret = cs35l41_write_cal_word(cs_dsp, "CAL_STATUS", CS35L41_CAL_ALG_ID,
++						     CS35L41_CAL_STATUS_SUCCESS);
++		if (!ret)
++			ret = cs35l41_write_cal_word(cs_dsp, "CAL_CHECKSUM", CS35L41_CAL_ALG_ID,
++						     cs35l41->cal_r + CS35L41_CAL_STATUS_SUCCESS);
++		if (ret)
++			dev_warn(cs35l41->dev, "Failed to write calibration: %d\n", ret);
++	}
++
++	if (cs35l41->vimon_cal_valid) {
++		ret = cs35l41_write_cal_word(cs_dsp, "VIMON_CAL", CS35L41_VIMON_ALG_ID,
++					     CS35L41_VIMON_CAL_SUCCESS);
++		if (!ret)
++			ret = cs35l41_write_cal_word(cs_dsp, "VSC", CS35L41_VIMON_ALG_ID,
++						     cs35l41->vimon_vsc);
++		if (!ret)
++			ret = cs35l41_write_cal_word(cs_dsp, "ISC", CS35L41_VIMON_ALG_ID,
++						     cs35l41->vimon_isc);
++		if (ret)
++			dev_warn(cs35l41->dev, "Failed to write VIMON calibration: %d\n", ret);
++	}
++
++	/* Never fail the run over calibration: the firmware then uses defaults */
++	return 0;
++}
++
++/*
++ * Log what the firmware actually holds, read from DSP memory, a moment
++ * after its first run: CAL_SET_STATUS is only reported once audio is
++ * flowing, and cached controls read back their cache, not the DSP.
++ */
++static void cs35l41_cal_report_work(struct work_struct *work)
++{
++	struct cs35l41_private *cs35l41 = container_of(to_delayed_work(work),
++						       struct cs35l41_private,
++						       cal_report_work);
++	struct cs_dsp *cs_dsp = &cs35l41->dsp.cs_dsp;
++	u32 r = 0, amb = 0, st = 0, ck = 0, set = 0, vimon = 0, vsc = 0, isc = 0;
++	int ret;
++
++	ret = pm_runtime_resume_and_get(cs35l41->dev);
++	if (ret < 0)
++		return;
++
++	scoped_guard(mutex, &cs_dsp->pwr_lock) {
++		if (!cs_dsp->running || cs_dsp->hibernating) {
++			ret = -EPERM;
++			break;
++		}
++		ret = cs35l41_read_cal_word(cs_dsp, "CAL_R", CS35L41_CAL_ALG_ID, &r) ?:
++		      cs35l41_read_cal_word(cs_dsp, "CAL_AMBIENT", CS35L41_CAL_ALG_ID, &amb) ?:
++		      cs35l41_read_cal_word(cs_dsp, "CAL_STATUS", CS35L41_CAL_ALG_ID, &st) ?:
++		      cs35l41_read_cal_word(cs_dsp, "CAL_CHECKSUM", CS35L41_CAL_ALG_ID, &ck) ?:
++		      cs35l41_read_cal_word(cs_dsp, "CAL_SET_STATUS", CS35L41_CAL_ALG_ID, &set) ?:
++		      cs35l41_read_cal_word(cs_dsp, "VIMON_CAL", CS35L41_VIMON_ALG_ID, &vimon) ?:
++		      cs35l41_read_cal_word(cs_dsp, "VSC", CS35L41_VIMON_ALG_ID, &vsc) ?:
++		      cs35l41_read_cal_word(cs_dsp, "ISC", CS35L41_VIMON_ALG_ID, &isc);
++	}
++
++	pm_runtime_put_autosuspend(cs35l41->dev);
++
++	if (ret < 0) {
++		dev_warn(cs35l41->dev, "Cannot read back calibration: %d\n", ret);
++		return;
++	}
++
++	dev_info(cs35l41->dev,
++		 "Calibration %s: CAL_SET_STATUS=%u R=%u ambient=%u status=%u checksum=%u vimon=%u vsc=%#x isc=%#x\n",
++		 set == CS35L41_CAL_SET_STATUS_SET ? "applied" : "NOT applied",
++		 set, r, amb, st, ck, vimon, vsc, isc);
++}
++
++static void cs35l41_report_calibration(struct cs35l41_private *cs35l41)
++{
++	if (cs35l41->cal_valid || cs35l41->vimon_cal_valid)
++		schedule_delayed_work(&cs35l41->cal_report_work, msecs_to_jiffies(2000));
++}
++
+ static int cs35l41_dsp_init(struct cs35l41_private *cs35l41)
+ {
+ 	struct wm_adsp *dsp;
+@@ -1089,6 +1261,7 @@ static int cs35l41_dsp_init(struct cs35l41_private *cs35l41)
+ 	dsp->part = "cs35l41";
+ 	dsp->fw = 9; /* 9 is WM_ADSP_FW_SPK_PROT in wm_adsp.c */
+ 	dsp->toggle_preload = true;
++	dsp->pre_run = cs35l41_dsp_pre_run;
+ 
+ 	cs35l41_configure_cs_dsp(cs35l41->dev, cs35l41->regmap, &dsp->cs_dsp);
+ 
+@@ -1333,6 +1506,9 @@ int cs35l41_probe(struct cs35l41_private *cs35l41, const struct cs35l41_hw_cfg *
+ 	if (ret < 0)
+ 		goto err;
+ 
++	cs35l41_read_calibration(cs35l41);
++	INIT_DELAYED_WORK(&cs35l41->cal_report_work, cs35l41_cal_report_work);
++
+ 	ret = cs35l41_dsp_init(cs35l41);
+ 	if (ret < 0)
+ 		goto err;
+@@ -1375,6 +1551,7 @@ EXPORT_SYMBOL_GPL(cs35l41_probe);
+ 
+ void cs35l41_remove(struct cs35l41_private *cs35l41)
+ {
++	cancel_delayed_work_sync(&cs35l41->cal_report_work);
+ 	pm_runtime_get_sync(cs35l41->dev);
+ 	pm_runtime_dont_use_autosuspend(cs35l41->dev);
+ 	pm_runtime_disable(cs35l41->dev);
+--- a/sound/soc/codecs/cs35l41.h
++++ b/sound/soc/codecs/cs35l41.h
+@@ -33,6 +33,14 @@ struct cs35l41_private {
+ 	int irq;
+ 	/* GPIO for /RST */
+ 	struct gpio_desc *reset_gpio;
++	/* Per-unit speaker calibration for the protection firmware */
++	bool cal_valid;
++	u32 cal_r;
++	u32 cal_ambient;
++	bool vimon_cal_valid;
++	u32 vimon_vsc;
++	u32 vimon_isc;
++	struct delayed_work cal_report_work;
+ };
+ 
+ int cs35l41_probe(struct cs35l41_private *cs35l41, const struct cs35l41_hw_cfg *hw_cfg);
