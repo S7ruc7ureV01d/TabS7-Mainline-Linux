@@ -554,8 +554,8 @@ range, as on stock.
 - ~~a real kernel fix for the mailbox RESUME/PAUSE bug~~: done, patch 0023;
 - why S24 is silent;
 - portrait rotation (L/R stays fixed to the landscape ends);
-- the mic work (stage 5) came after v9, so the next tarball needs the
-  updated UCM and WirePlumber files.
+- the mic work (stage 5) and the removal of the autosuspend rule are in
+  rootfs tarball v10.
 
 **Rootfs tarball v9 (2026-09-23)** includes all of the above, plus
 alsa-utils and the firmware (`docs/dev-environment-quickref.md`). New:

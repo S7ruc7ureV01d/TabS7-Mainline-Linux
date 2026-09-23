@@ -59,8 +59,8 @@ alone without asking, and getting this wrong wastes a round-trip):
     `/etc/sudoers.d/10-wheel` (`%wheel ALL=(ALL:ALL) ALL`, password
     required).
   - **Current rootfs tarball:**
-    `work/archroot-build/archroot-rootfs-v9.tar` (2026-09-23, sha256
-    `75fcdf7fbbce6df6126b3edc858e5e1deca3518cb37af719b0b2a98738052906`).
+    `work/archroot-build/archroot-rootfs-v10.tar` (2026-09-23, sha256
+    `fd30218fbacbe65ac88f6779cff664ff9e8ab8ffa7678e2c45250fd2f9fe0fed`).
     Lineage, each step a verified stream-rewrite of the previous one with
     Python's `tarfile` (GNU `tar --delete` corrupted this archive):
     - v5 = v4 + `authorized_keys` owned by root + `/etc/sudoers.d/10-wheel`
@@ -99,6 +99,16 @@ alone without asking, and getting this wrong wastes a round-trip):
       entries = v8 - 1 replaced + 134 added; the 6 capability xattrs are
       identical; all 124 new files match the device; GNU tar and bsdtar
       both read it cleanly.
+    - v10 = v9 with the audio changes made after v9:
+      - the UCM `Mic` device (`usr/share/alsa/ucm2/Samsung/gts7l/HiFi.conf`)
+        and the WirePlumber rule pinning the mic source to S16
+        (`51-gts7l-speakers.conf`), for the internal microphones (stage 5);
+      - no `73-gts7l-cs35l41-autosuspend.rules`: kernel patch 0023 fixed
+        the mailbox bug it worked around.
+
+      Verified: 183430 entries = v9 - 1; capabilities identical; both
+      files match the repo; GNU tar and bsdtar read it cleanly. It needs
+      a kernel with patches 0018-0023 and the stage-5 DTS/config.
 
     File capabilities (`kwin_wayland`, `newuidmap`, ...) are preserved
     byte-for-byte. Python tags two entries with a `hdrcharset=BINARY` pax
