@@ -1524,7 +1524,7 @@ Exit criteria:
       digitizer over I2C** (`../docs/hardware-inventory.md`; reference driver
       at `references/gts7l/drivers/input/wacom/wacom_i2c.c`), no BLE — scope
       confirmed, not just assumed.
-- [ ] Cameras (front/rear) working via V4L2, to whatever extent the ISP allows
+- [ ] Cameras (front/rear) working via V4L2, to whatever extent the ISP allows — scoped 2026-09-23: `docs/phase4-camera-scoping.md` (S5K3M5 rear main has a mainline driver; S5K5E9 and S5K4HA need new drivers)
       under mainline.
 - [ ] Fingerprint reader: **confirmed present** (2026-09-20, correcting an
       earlier kernel-source-only check that wrongly concluded absent) — a
