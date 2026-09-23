@@ -7236,3 +7236,38 @@ Steps, in the order the problems showed up:
   ambient-light code at all, so automatic brightness would also need a
   small daemon: iio-sensor-proxy's `net.hadess.SensorProxy`
   `LightLevel` -> PowerDevil's brightness D-Bus API.
+
+**Ambient light, continued (2026-09-22, later): the request side is
+ruled out.** Disassembly of stock `sensors.ssc.so`:
+- `ambient_light::activate()` only sets a handler-state field
+  (`+0x2a8 = 3`) and calls the generic `ssc_sensor::activate()`.
+- The constructor's `set_nowk_msgid(0x300)` pushes 768 onto the HAL's
+  list of *non-wakeup event* IDs; it doesn't choose a request ID. 768 is
+  `SNS_STD_SENSOR_PHYSICAL_CONFIG_EVENT`.
+
+That corrects the earlier reading. The accelerometer's 768 x3 are two
+SUID lookups plus a physical-config event on start; the light sensor's
+768 x2 are just the two lookups. **The light sensor never starts at
+all.**
+
+Tried through temporary switches in the test libssc build
+(`SSC_ENABLE_MSGID`, `SSC_FORCE_CONTINUOUS`, `SSC_NO_WAKEUP`,
+`SSC_DATA_TYPE`; `/root/libssc` on the device, not installed):
+- enable request IDs 513, 514 and 768;
+- continuous at 5 Hz;
+- non-wakeup delivery (libssc hardcodes `SSC_SUSPEND_MODE_WAKEUP`;
+  stock registers this sensor as non-wakeup);
+- `light_cct_v` ("VEML3235 Light CCT", continuous 1 Hz), alone or with
+  `ambient_light_v` enabled at the same time.
+
+None produced a physical-config event or any data, and the SLPI never
+crashed. So the VEML3235 driver registers (the chip answered its probe)
+but never starts sampling.
+
+Remaining suspects are below the request protocol: a supply the driver
+needs at stream start (it has two rails, `sensor_vdd` + `sensor_vddio`),
+its timer/interrupt resources (`is_dri=1` with no `dri_irq_num` in its
+platform config; `is_dri=0` didn't help, but may not have been picked up
+without a registry regeneration), or state stock's stack sets up
+elsewhere. Seeing the reason needs DSP-side logs (SSC diag), which
+mainline has no path to yet.
