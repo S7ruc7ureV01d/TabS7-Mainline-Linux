@@ -1,13 +1,7 @@
-# SAFETY GATE for the Galaxy Tab S7's CS35L41 speaker amps
-# (docs/phase3-audio-scoping.md, "Stage 3/4 design", hard rules).
-#
-# Opening a playback stream powers the amps through DAPM regardless of any
-# mixer setting, and each amp's "PCM Source" resets to ASP - speaker
-# protection bypassed. Until protection firmware + calibration are verified
-# on all four amps, no user process (PipeWire/WirePlumber, KDE) may open the
-# sound devices: root-only 0600, and no uaccess ACL. Must sort before
-# 73-seat-late.rules, which applies uaccess.
-#
-# Remove this file only once the verified-safe setup (UCM with PCM Source =
-# DSP and the gain ceilings) is in place.
+# Audio gate for the Galaxy Tab S7's speaker amps (docs/phase3-audio-scoping.md).
+# Only root may use the sound card, unless gts7l-audio-safe has verified
+# this boot that all four amps are in their safe state (protection DSP
+# in the path). It re-triggers these devices once it has, and then the
+# seat user gets them through the usual uaccess ACL.
 SUBSYSTEM=="sound", KERNEL=="pcmC*|controlC*|comprC*|hwC*", TAG-="uaccess", OWNER="root", GROUP="root", MODE="0600"
+SUBSYSTEM=="sound", KERNEL=="pcmC*|controlC*|comprC*|hwC*", TEST=="/run/gts7l-audio-safe.ok", GROUP="audio", MODE="0660", TAG+="uaccess"

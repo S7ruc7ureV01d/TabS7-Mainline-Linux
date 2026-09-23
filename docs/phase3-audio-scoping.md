@@ -15,7 +15,7 @@ following the same methodology as every other Phase 2/3 scoping doc
 (real sources cited, nothing assumed).
 
 
-## Status and plan (2026-09-22, night) - stages 0-4 done: first protected sound
+## Status and plan (2026-09-23) - speakers done: protected desktop audio on all four; microphones next
 
 ### Corrections to the scoping below, found against real hardware and the stock dumps
 
@@ -57,7 +57,7 @@ Wrong values here can damage the amps or speakers.
 | 1 | Read the CS35L41 boost-converter registers read-only (done from TWRP, which runs Samsung's kernel), and derive the real inductor/capacitor values. | none | **done** |
 | 2 | Control-only CS35L41 bring-up (mainline `i2c11`) with those values; no sound card, amps' GLOBAL_EN off. | very low | **done** |
 | 3 | Load the protection firmware and tuning, feed this unit's calibration into the DSP, and confirm protection is running before any sound. | low | **done** |
-| 4 | Machine graph: LPASS TDM port -> 4 amps (port from the downstream DAI links). First sound at about -40 dB with a UCM software volume cap, then raise gradually. | controlled | **first tone done**; volume cap/UCM pending |
+| 4 | Machine graph: LPASS TDM port -> 4 amps (port from the downstream DAI links). First sound at about -40 dB, then raise gradually; UCM + PipeWire. | controlled | **done** (4b-4d) |
 | 5 | Microphones (no 3.5 mm jack; likely digital mics via WCD938x or the VA macro). | none | |
 
 **Rules throughout:**
@@ -488,6 +488,57 @@ Protection was running (CSPL_STATE 0, HALO_STATE 2) and there were no
 amp errors at every step. Coil temperatures moved by at most 1.7 C. The
 ramp stops at -12 dBFS; beyond that, levels are left to the protection
 firmware with real programme material (step C: UCM/desktop audio).
+
+### Stage 4d (2026-09-23): desktop audio (step C)
+
+The owner confirmed it works: KDE/PipeWire plays through all four
+speakers, with left on the left end and right on the right end.
+
+**Files** (`tools/rootfs/audio/`, installed by `install.sh [ROOT]`):
+
+| File | Installed as | Role |
+|---|---|---|
+| `72-gts7l-audio-gate.rules` | `/etc/udev/rules.d/` | card is root-only unless `/run/gts7l-audio-safe.ok` exists; then the seat user gets it (uaccess) |
+| `73-gts7l-cs35l41-autosuspend.rules` | `/etc/udev/rules.d/` | autosuspend 0 (mailbox RESUME workaround) |
+| `74-gts7l-audio-safe.rules`, `gts7l-audio-safe(.service)` | udev, `/usr/local/sbin`, `/etc/systemd/system` | at card add: DSP source, Protection firmware, preload, gain 0; verify; write the `.ok` file; re-trigger udev to open the gate |
+| `ucm2/.../Samsung-GTS7L-CS35L41-Speakers.conf`, `ucm2/Samsung/gts7l/HiFi.conf` | `/usr/share/alsa/ucm2/` | UCM: verb re-asserts the DSP source/firmware/preload and routes MultiMedia1 -> PRIMARY_TDM_RX_0; Speaker device sets stock gains (analog 17, digital 817), and back to analog 0 on disable. 4 channels, software volume |
+| `51-gts7l-speakers.conf` | `/etc/wireplumber/wireplumber.conf.d/` | sink: S16LE, positions `FR RR FL RL` |
+| `50-gts7l-upmix.conf` | `/etc/pipewire/{client,pipewire-pulse,pipewire}.conf.d/` | client streams: simple upmix (front copied to rear) |
+
+**Volume:** software only, so 100% is stock's maximum (analog 17,
+digital 0 dB, full-scale signal). The protection firmware manages that
+range, as on stock.
+
+**Found on the way:**
+- **UCM lookup:** `conf.d/<CardDriver>/<CardLongName>.conf`, so
+  `conf.d/sm8250/Samsung-GTS7L-CS35L41-Speakers.conf`. (`alsaucm -c`
+  needs `hw:0`, not the card id.)
+- **S24_LE is silent:** PipeWire first opened the front end as S24_LE,
+  4 channels. The PCM ran and the amp DSPs ran, but nothing came out.
+  S16LE works, as on stock and in every other test. The S24 path
+  (q6asm -> ADM 16-bit) isn't understood yet, so the sink is pinned to
+  S16LE.
+- **Upmix in PipeWire is per client stream:** it happens in the client
+  stream's converter, so `channelmix.*` on the sink does nothing. The
+  default `psd` upmix left the rear-labelled speakers (top left/right)
+  silent for one-sided content. Hence `50-gts7l-upmix.conf` with
+  `simple`.
+- **WirePlumber's probe can hit the mailbox bug:** when a stream ends,
+  PAUSE can fail ("Failed to set mailbox cmd 1 (status 0)",
+  PRE_PMD -42). This was seen once, while the route was off, with no
+  audible effect.
+
+**To close the gate immediately (no audio for users):**
+`rm /run/gts7l-audio-safe.ok; udevadm trigger --action=change
+--subsystem-match=sound` (as root), then restart WirePlumber.
+
+**Open items:**
+- a real kernel fix for the mailbox RESUME/PAUSE bug, replacing the
+  autosuspend-0 workaround;
+- why S24 is silent;
+- portrait rotation (L/R stays fixed to the landscape ends);
+- stage 5, microphones;
+- adding these files to the rootfs tarball.
 
 ## Real hardware: a genuinely complex, multi-chip audio topology
 

@@ -44,3 +44,5 @@ done
 [ $fail = 0 ] || exit 1
 touch "$OK"
 echo "all four amps in the safe state"
+# Open the audio gate (72-gts7l-audio-gate.rules) now that it's safe.
+udevadm trigger --action=change --subsystem-match=sound

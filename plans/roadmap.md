@@ -1280,7 +1280,8 @@ Exit criteria:
       were fine the whole time. Enabled the service and installed
       `bluez-utils` (for `bluetoothctl`), baked into
       `work/archroot-build/archroot-rootfs-v4.tar`.
-- [ ] Speakers and microphone(s) working.
+- [ ] Speakers and microphone(s) working. (Speakers done 2026-09-23 with
+      speaker protection; microphones not started.)
 - [x] Volume/power buttons working. **Done, 2026-09-22** - root-caused,
       not guessed: `pon_pwrkey`/`pon_resin` (compatible
       `qcom,pm8941-pwrkey`/`qcom,pm8941-resin`, children of the real
@@ -1336,6 +1337,19 @@ Exit criteria:
       real time for this).
 
 Progress log:
+- 2026-09-23: **Speakers work on the desktop, with speaker protection.**
+  - All four CS35L41s run Cirrus protection with this unit's factory
+    calibration (patch 0018, values in the DTS).
+  - The TDM link matches stock: slot width, framing and bit clock
+    (patches 0017, 0019-0022). All four channels play clean up to
+    -12 dBFS at stock gain (step-by-step test).
+  - A boot service puts the amps on the protection DSP and only then
+    opens the audio gate. A UCM profile, a WirePlumber sink and a
+    PipeWire upmix give KDE a stereo speaker device on all four
+    speakers, and the owner confirmed it works.
+  - Details: `../docs/phase3-audio-scoping.md` stages 4-4d. Next:
+    microphones (stage 5), a kernel fix for the mailbox RESUME bug,
+    and a tarball update.
 - 2026-09-22 (night): **Audio stages 1-2 done.**
   - Boost values read from real hardware: 1.0 uH, 0-19 uF, 4100 mA.
   - All four CS35L41s probe on mainline and configure exactly like stock,
