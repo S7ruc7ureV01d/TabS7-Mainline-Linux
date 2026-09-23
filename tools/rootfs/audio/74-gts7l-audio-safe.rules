@@ -1,0 +1,3 @@
+# When the Galaxy Tab S7 speaker card appears, put its amps in the safe
+# state before anything can use it (gts7l-audio-safe.service).
+ACTION=="add", SUBSYSTEM=="sound", KERNEL=="controlC*", ATTRS{id}=="SamsungGTS7LCS3", TAG+="systemd", ENV{SYSTEMD_WANTS}+="gts7l-audio-safe.service"

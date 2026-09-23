@@ -1,0 +1,9 @@
+[Unit]
+Description=Put the speaker amps in their safe state (protection DSP in path, minimum gain)
+Documentation=https://github.com/S7ruc7ureV01d/tabs7-mainlinelinux/blob/main/docs/phase3-audio-scoping.md
+# Started by 74-gts7l-audio-safe.rules when the sound card appears.
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/gts7l-audio-safe

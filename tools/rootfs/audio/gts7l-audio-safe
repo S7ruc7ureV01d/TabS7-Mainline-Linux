@@ -1,0 +1,46 @@
+#!/bin/sh
+# Put the Galaxy Tab S7's four CS35L41 speaker amps into their safe state
+# at boot (docs/phase3-audio-scoping.md): protection DSP in the path, stock
+# protection firmware, analog gain at its minimum. The amps come up with
+# PCM Source = ASP, which bypasses speaker protection.
+#
+# Run by gts7l-audio-safe.service when the sound card appears. It verifies
+# every value and, on success only, writes /run/gts7l-audio-safe.ok, which
+# later steps (UCM, the audio gate) must require.
+set -u
+C=SamsungGTS7LCS3
+OK=/run/gts7l-audio-safe.ok
+rm -f "$OK"
+
+get() { amixer -c "$C" cget name="$1" 2>/dev/null | sed -n 's/^  : values=//p'; }
+set_ctl() { amixer -q -c "$C" cset name="$1" "$2" 2>/dev/null; }
+
+# The amps' controls appear with the card; allow them a few seconds.
+i=0
+while [ -z "$(get 'RR PCM Source')" ]; do
+	i=$((i + 1))
+	[ $i -gt 30 ] && { echo "amp controls never appeared"; exit 1; }
+	sleep 1
+done
+
+fail=0
+for n in FL FR RL RR; do
+	set_ctl "$n Analog PCM Volume" 0
+	set_ctl "$n DSP1 Firmware" Protection
+	set_ctl "$n DSP1 Preload Switch" on
+	set_ctl "$n PCM Source" DSP
+
+	gain=$(get "$n Analog PCM Volume"); fw=$(get "$n DSP1 Firmware")
+	pre=$(get "$n DSP1 Preload Switch"); src=$(get "$n PCM Source")
+	# Protection = item 9, DSP = item 1
+	if [ "$gain" = 0 ] && [ "$fw" = 9 ] && [ "$pre" = on ] && [ "$src" = 1 ]; then
+		echo "$n: safe (gain 0, Protection firmware, preload on, PCM Source DSP)"
+	else
+		echo "$n: NOT SAFE: gain=$gain fw=$fw preload=$pre src=$src"
+		fail=1
+	fi
+done
+
+[ $fail = 0 ] || exit 1
+touch "$OK"
+echo "all four amps in the safe state"
