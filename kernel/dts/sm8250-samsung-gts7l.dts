@@ -1465,6 +1465,23 @@
 		 * Tab S8 Ultra port's equivalent fix. 1.8V is an exact
 		 * pmic5_pldo_lv step (1.504V + 37 * 8mV).
 		 */
+		/*
+		 * Audio stage 2 (2026-09-22): stock's overlay pins pm8150a_l4 to a
+		 * fixed 1.8V with regulator-always-on and no consumer, and it's
+		 * enabled in TWRP (Samsung's kernel) while the CS35L41 amps answer
+		 * there. The amps' VA (1.8V logic supply) is modelled on stock as
+		 * a "dummy_vreg", i.e. an always-on board rail - this one. Without
+		 * it, all four amps NACK their I2C address under mainline ("Failed
+		 * waiting for OTP_BOOT_DONE", -ENXIO). 1.8V is an exact pmic5_pldo
+		 * step (1.504V + 37 * 8mV).
+		 */
+		vreg_l4c_1p8: ldo4 {
+			regulator-name = "vreg_l4c_1p8";
+			regulator-min-microvolt = <1800000>;
+			regulator-max-microvolt = <1800000>;
+			regulator-always-on;
+		};
+
 		vreg_l8c_1p8: ldo8 {
 			regulator-name = "vreg_l8c_1p8";
 			regulator-min-microvolt = <1800000>;
@@ -1858,5 +1875,123 @@
 		 * exactly instead of guessing. See docs/phase4-spen-scoping.md.
 		 */
 		flash-mode-gpios = <&tlmm 6 GPIO_ACTIVE_HIGH>;
+	};
+};
+
+/*
+ * Audio stage 2 (2026-09-22, docs/phase3-audio-scoping.md): the four
+ * Cirrus CS35L41 speaker amps, CONTROL ONLY. No machine driver or sound
+ * card is built, so there is no audio path, no DSP/protection firmware is
+ * loaded, and nothing sets an amp's GLOBAL_EN: at probe the driver only
+ * resets each chip, applies its errata/OTP and programs the config below.
+ *
+ * Every value is taken from real hardware or stock's DT, none guessed:
+ *  - bus: stock "i2c-7" = the controller at 0xa8c000 = mainline i2c11,
+ *    gpio60/61 qup11 (same pins as downstream). Downstream runs it on GPI
+ *    DMA via gpi_dma1, whose TrustZone EE offset is 0x6000
+ *    (references/gts7l/.../kona.dtsi gpi_dma1). 400 kHz as stock's
+ *    i2c-geni default.
+ *  - boost: read read-only from all four amps in TWRP (Samsung kernel):
+ *    BSTCVRT_COEFF 0x2424 and SLOPE_LBST 0x7500. Downstream never changes
+ *    them; in mainline's cs35l41-lib tables that is exactly
+ *    lbst_val 0 = 1.0 uH and cap range 0 (0-19 uF). Peak current is
+ *    stock DT's cirrus,boost-peak-milliamp = <4100>. See
+ *    docs/logs/audio-stage1-2026-09-22/.
+ *  - asp-sdout-hiz = 3 as stock (all four share the TDM data line).
+ *  - VA/VP: stock wires them to a dummy regulator (rails always on in
+ *    hardware), so no supply properties.
+ *  - IRQ: all four share gpio84. Stock sets GPIO2 to push-pull INTB on
+ *    every amp, which on one shared line could drive against each other;
+ *    open-drain INTB (src 2) with a SoC-side pull-up is the electrically
+ *    safe equivalent (same active-low line, nothing can contend).
+ *  - reset: one line, gpio69, shared by all four. Downstream declares it on
+ *    cs35l41@43 only (`reset-gpios = <&tlmm 69 0>`, active-high = run);
+ *    without it the chips sit in reset (gpio69 idles low with a pull-down)
+ *    and NACK every address. It's on all four nodes here because mainline
+ *    cs35l41 supports a shared reset that way: the first amp to probe
+ *    owns it and releases it, the rest get -EBUSY and log "assuming shared
+ *    reset". If probe fails, the error path drives it low again, holding
+ *    all four silently in reset.
+ */
+&gpi_dma1 {
+	status = "okay";
+	qcom,gpi-ee-offset = <0x6000>;
+};
+
+&tlmm {
+	cs35l41_irq_default: cs35l41-irq-state {
+		pins = "gpio84";
+		function = "gpio";
+		bias-pull-up;
+	};
+};
+
+&i2c11 {
+	clock-frequency = <400000>;
+	pinctrl-0 = <&qup_i2c11_default>, <&cs35l41_irq_default>;
+	status = "okay";
+
+	cs35l41_40: amplifier@40 {
+		compatible = "cirrus,cs35l41";
+		reg = <0x40>;
+		#sound-dai-cells = <1>;
+		sound-name-prefix = "AMP40";
+		interrupt-parent = <&tlmm>;
+		reset-gpios = <&tlmm 69 GPIO_ACTIVE_HIGH>;
+		interrupts = <84 IRQ_TYPE_LEVEL_LOW>;
+		cirrus,boost-peak-milliamp = <4100>;
+		cirrus,boost-ind-nanohenry = <1000>;
+		cirrus,boost-cap-microfarad = <10>;
+		cirrus,asp-sdout-hiz = <3>;
+		cirrus,gpio2-src-select = <2>;
+		cirrus,gpio2-output-enable;
+	};
+
+	cs35l41_41: amplifier@41 {
+		compatible = "cirrus,cs35l41";
+		reg = <0x41>;
+		#sound-dai-cells = <1>;
+		sound-name-prefix = "AMP41";
+		interrupt-parent = <&tlmm>;
+		reset-gpios = <&tlmm 69 GPIO_ACTIVE_HIGH>;
+		interrupts = <84 IRQ_TYPE_LEVEL_LOW>;
+		cirrus,boost-peak-milliamp = <4100>;
+		cirrus,boost-ind-nanohenry = <1000>;
+		cirrus,boost-cap-microfarad = <10>;
+		cirrus,asp-sdout-hiz = <3>;
+		cirrus,gpio2-src-select = <2>;
+		cirrus,gpio2-output-enable;
+	};
+
+	cs35l41_42: amplifier@42 {
+		compatible = "cirrus,cs35l41";
+		reg = <0x42>;
+		#sound-dai-cells = <1>;
+		sound-name-prefix = "AMP42";
+		interrupt-parent = <&tlmm>;
+		reset-gpios = <&tlmm 69 GPIO_ACTIVE_HIGH>;
+		interrupts = <84 IRQ_TYPE_LEVEL_LOW>;
+		cirrus,boost-peak-milliamp = <4100>;
+		cirrus,boost-ind-nanohenry = <1000>;
+		cirrus,boost-cap-microfarad = <10>;
+		cirrus,asp-sdout-hiz = <3>;
+		cirrus,gpio2-src-select = <2>;
+		cirrus,gpio2-output-enable;
+	};
+
+	cs35l41_43: amplifier@43 {
+		compatible = "cirrus,cs35l41";
+		reg = <0x43>;
+		#sound-dai-cells = <1>;
+		sound-name-prefix = "AMP43";
+		interrupt-parent = <&tlmm>;
+		reset-gpios = <&tlmm 69 GPIO_ACTIVE_HIGH>;
+		interrupts = <84 IRQ_TYPE_LEVEL_LOW>;
+		cirrus,boost-peak-milliamp = <4100>;
+		cirrus,boost-ind-nanohenry = <1000>;
+		cirrus,boost-cap-microfarad = <10>;
+		cirrus,asp-sdout-hiz = <3>;
+		cirrus,gpio2-src-select = <2>;
+		cirrus,gpio2-output-enable;
 	};
 };

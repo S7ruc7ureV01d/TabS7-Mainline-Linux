@@ -1,0 +1,459 @@
+=== regulators (enabled)
+regulator-dummy state= uV= users=1c00000.qcom,pcie-vreg-3p3,1c10000.qcom,pcie-vreg-3p3,ae94400.qcom,mdss_dsi_phy0-gdsc,ae96400.qcom,mdss_dsi_phy1-gdsc,soc:usb_nop_phy-vcc,
+pm8150a_s3_level state=enabled uV=256 users=3d90000.qcom,gpucc-vdd_mx,abf0000.qcom,videocc-vdd_mx,ad00000.qcom,camcc-vdd_mx,
+pm8150_l2 state=enabled uV=3072000 users=88e3000.hsphy-vdda33,88e4000.hsphy-vdda33,ae90000.qcom,dp_display-aux-pullup,
+pm8150_l3 state=disabled uV=928000 users=
+pm8150_l4_level state=disabled uV=16 users=17300000.qcom,lpass-vdd_mx,5c00000.qcom,ssc-vdd_mx,
+pm8150_l5 state=enabled uV=880000 users=1c00000.qcom,pcie-vreg-0p9,1c10000.qcom,pcie-vreg-0p9,1d87000.ufsphy_mem-vdda-phy,88e3000.hsphy-vdd,88e4000.hsphy-vdd,ae94400.qcom,mdss_dsi_phy0-vdda-0p9,ae96400.qcom,mdss_dsi_phy1-vdda-0p9,
+pm8150_l5_ao state=enabled uV=880000 users=18591000.qcom,cpufreq-hw:qcom,limits-dcvs-isens_vref_0p8,
+pm8150_l5_so state=disabled uV=880000 users=
+pm8150_l6 state=enabled uV=1200000 users=1d84000.ufshc-qcom,vddp-ref-clk,1d84000.ufshc-vccq,
+pm8150_l7 state=disabled uV=1704000 users=
+pm8150_l9 state=enabled uV=1200000 users=1c00000.qcom,pcie-vreg-1p8,1c10000.qcom,pcie-vreg-1p8,1d87000.ufsphy_mem-vdda-pll,88e8000.ssphy-core,ae90000.qcom,dp_display-vdda-1p2,ae94000.qcom,mdss_dsi_ctrl0-vdda-1p2,ae96000.qcom,mdss_dsi_ctrl1-vdda-1p2,
+pm8150_l10 state=enabled uV=2900000 users=
+pm8150a_s3_level_ao state=enabled uV=128 users=
+pm8150_l11_level state=disabled uV=16 users=17300000.qcom,lpass-vdd_cx,5c00000.qcom,ssc-vdd_cx,
+pm8150_l12 state=enabled uV=1800000 users=88e3000.hsphy-vdda18,88e4000.hsphy-vdda18,
+pm8150_l12_ao state=enabled uV=1800000 users=18591000.qcom,cpufreq-hw:qcom,limits-dcvs-isens_vref_1p8,
+pm8150_l12_so state=disabled uV=1800000 users=
+pm8150_l13 state=enabled uV=3300000 users=10-0056-pm8150_l13,
+pm8150_l14 state=disabled uV=1800000 users=
+pm8150_l15 state=disabled uV=1800000 users=
+pm8150_l16 state=disabled uV=3024000 users=
+pm8150_l17 state=enabled uV=2504000 users=1d84000.ufshc-vcc,
+pm8150_l18 state=enabled uV=912000 users=88e8000.ssphy-vdd,ae90000.qcom,dp_display-vdda-0p9,
+pm8150a_s3_mmcx_sup_level state=enabled uV=256 users=
+pm8150a_s1_level state=disabled uV=48 users=3d9100c.qcom,gdsc-vdd_parent,
+pm8150a_s4_level state=enabled uV=256 users=100000.qcom,gcc-vdd_mm,abf0000.qcom,videocc-vdd_mm,abf0bf8.qcom,gdsc-vdd_parent,abf0c98.qcom,gdsc-vdd_parent,abf0d18.qcom,gdsc-vdd_parent,abf0d98.qcom,gdsc-vdd_parent,ad00000.qcom,camcc-vdd_mm,ad07004.qcom,gdsc-vdd_parent,ad08004.qcom,gdsc-vdd_parent,ad09004.qcom,gdsc-vdd_parent,ad0a004.qcom,gdsc-vdd_parent,ad0b004.qcom,gdsc-vdd_parent,ad0c144.qcom,gdsc-vdd_parent,ae00000.qcom,mdss_mdp-mmcx,af00000.qcom,dispcc-vdd_mm,af03000.qcom,gdsc-vdd_parent,slv-qhs-camera-cfg-mmcx,slv-qhs-display-cfg-mmcx,slv-qhs-venus-cfg-mmcx,
+pm8150a_s4_level_ao state=disabled uV=64 users=
+pm8150a_s4_level_so state=disabled uV=64 users=
+pm8150a_s6_level state=disabled uV=16 users=
+pm8150a_s7 state=disabled uV=348000 users=
+pm8150a_s8 state=disabled uV=1200000 users=1d84000.ufshc-qcom,vccq-parent,b0000000.qcom,cnss-qca6490-vdd-wlan-rfa2,
+pm8150a_l1 state=disabled uV=1800000 users=
+pm8150a_l2 state=disabled uV=1200000 users=
+pm8150a_l3 state=disabled uV=800000 users=
+pm8150_s3_level state=enabled uV=256 users=100000.qcom,gcc-vdd_cx,188101c.qcom,spss-vdd_cx,1c00000.qcom,pcie-vreg-cx,1c10000.qcom,pcie-vreg-cx,3d90000.qcom,gpucc-vdd_cx,3d9106c.qcom,gdsc-vdd_parent,8300000.qcom,turing-vdd_cx,9900000.qcom,msm_npu-vdd_cx,9980000.qcom,npucc-vdd_cx,
+pm8150a_l4 state=enabled uV=1800000 users=
+pm8150a_l5 state=disabled uV=1800000 users=b0000000.qcom,cnss-qca6490-wlan-ant-switch,
+pm8150a_l6 state=enabled uV=2960000 users=8804000.sdhci-vdd-io,
+pm8150a_l7 state=disabled uV=3000000 users=soc:msm_vibrator-vibr_vdd,
+pm8150a_l8 state=disabled uV=1800000 users=5c00000.qcom,ssc-sensor_vdd,
+pm8150a_l9 state=enabled uV=2960000 users=8804000.sdhci-vdd,
+pm8150a_l10 state=disabled uV=1800000 users=
+pm8150a_l11 state=disabled uV=3104000 users=
+pm8150a_bob state=disabled uV=3312000 users=
+pm8150a_bob_ao state=disabled uV=3008000 users=
+pm8150_s3_level_ao state=enabled uV=64 users=100000.qcom,gcc-vdd_cx_ao,
+refgen state=enabled uV= users=ac6a000.qcom,csiphy-refgen,ac6c000.qcom,csiphy-refgen,ac6e000.qcom,csiphy-refgen,ac70000.qcom,csiphy-refgen,ac72000.qcom,csiphy-refgen,ac74000.qcom,csiphy-refgen,ae90000.qcom,dp_display-refgen,ae94000.qcom,mdss_dsi_ctrl0-refgen,ae96000.qcom,mdss_dsi_ctrl1-refgen,
+pcie_0_gdsc state=disabled uV= users=1c00000.qcom,pcie-gdsc-vdd,
+pcie_1_gdsc state=disabled uV= users=
+pcie_2_gdsc state=disabled uV= users=1c10000.qcom,pcie-gdsc-vdd,
+ufs_phy_gdsc state=disabled uV= users=1d84000.ufshc-vdd-hba,
+usb30_prim_gdsc state=enabled uV= users=a600000.ssusb-USB3_GDSC,
+usb30_sec_gdsc state=disabled uV= users=
+hlos1_vote_mmnoc_mmu_tbu_hf0_gdsc state=disabled uV= users=1518d000.mnoc_hf_0_tbu-vdd,
+hlos1_vote_mmnoc_mmu_tbu_hf1_gdsc state=disabled uV= users=15191000.mnoc_hf_1_tbu-vdd,
+hlos1_vote_mmnoc_mmu_tbu_sf0_gdsc state=disabled uV= users=151a5000.mnoc_sf_0_tbu-vdd,
+pm8150_s3_mmcx_sup_level state=enabled uV=64 users=regulator.3-SUPPLY,
+hlos1_vote_mmnoc_mmu_tbu_sf1_gdsc state=disabled uV= users=151a9000.mnoc_sf_1_tbu-vdd,
+gpu_cx_gdsc state=disabled uV= users=3d00000.qcom,kgsl-3d0-vddcx,3d6a000.qcom,gmu-vddcx,3da0000.kgsl-smmu-vdd,
+gpu_gx_gdsc state=disabled uV= users=3d00000.qcom,kgsl-3d0-vdd,3d6a000.qcom,gmu-vdd,
+dummy_vreg state= uV= users=7-0040-VA,7-0040-VP,7-0041-VA,7-0041-VP,7-0042-VA,7-0042-VP,7-0043-VA,7-0043-VP,
+pogo_kbd_ldo_en_3.3v state=disabled uV=3300000 users=6-002a-stm32_vddo,
+lcd-vdd state=enabled uV= users=soc:qcom,dsi-display-primary-vddlcd,
+lcd-buck state=enabled uV= users=soc:qcom,dsi-display-primary-buck,
+bps_gdsc state=disabled uV= users=ac7a000.qcom,bps-bps-vdd,
+ife_0_gdsc state=disabled uV= users=acb4000.qcom,ife0-ife0,acb5200.qcom,csid0-ife0,
+ife_1_gdsc state=disabled uV= users=acc3000.qcom,ife1-ife1,acc4200.qcom,csid1-ife1,
+pm8150_s4 state=enabled uV=1800000 users=1d84000.ufshc-vccq2,b0000000.qcom,cnss-qca6490-vdd-wlan-io,
+ipe_0_gdsc state=disabled uV= users=ac9a000.qcom,ipe0-ipe0-vdd,
+sbi_gdsc state=disabled uV= users=
+titan_top_gdsc state=disabled uV= users=ac00000.qcom,a5-camss-vdd,ac40000.qcom,cam-cpas-camss-vdd,ac4d000.qcom,cpas-cdm0-camss,ac4f000.qcom,cci-gdscr,ac50000.qcom,cci-gdscr,ac53000.qcom,jpegenc-camss-vdd,ac57000.qcom,jpegdma-camss-vdd,ac5f000.qcom,fd-camss-vdd,ac6a000.qcom,csiphy-gdscr,ac6c000.qcom,csiphy-gdscr,ac6e000.qcom,csiphy-gdscr,ac70000.qcom,csiphy-gdscr,ac72000.qcom,csiphy-gdscr,ac74000.qcom,csiphy-gdscr,acb4000.qcom,ife0-camss,acb5200.qcom,csid0-camss,acc3000.qcom,ife1-camss,acc4200.qcom,csid1-camss,acd9000.qcom,ife-lite0-camss,acd9200.qcom,csid-lite0-camss,acdb200.qcom,ife-lite1-camss,acdb400.qcom,csid-lite1-camss,
+mdss_core_gdsc state=disabled uV= users=af20000.qcom,sde_rscc-vdd,
+npu_core_gdsc state=disabled uV= users=9900000.qcom,msm_npu-vdd,
+mvs0_gdsc state=disabled uV= users=
+mvs0c_gdsc state=disabled uV= users=aab0000.qcom,venus-vdd,
+mvs1_gdsc state=disabled uV= users=
+mvs1c_gdsc state=disabled uV= users=
+hsphy@88e3000 state=disabled uV= users=a600000.ssusb-dpdm,
+pm8150_s5 state=disabled uV=2040000 users=b0000000.qcom,cnss-qca6490-vdd-wlan-rfa1,
+hsphy@88e4000 state=disabled uV= users=
+pm8150_s6 state=disabled uV=600000 users=b0000000.qcom,cnss-qca6490-vdd-wlan-aon,b0000000.qcom,cnss-qca6490-vdd-wlan-dig,
+=== gpio
+gpiochip2: GPIOs 1085-1093, parent: platform/c440000.qcom,spmi:qcom,pm8150l@4:pinctrl@c000, c440000.qcom,spmi:qcom,pm8150l@4:pinctrl@c000:
+ gpio1 : in   normal  vin-0 pull-down 10uA              push-pull  low  high    atest-1 dtest-0
+ gpio3 : in   normal  vin-0 pull-up 30uA                push-pull  high medium  atest-1 dtest-0
+ gpio4 : in   normal  vin-0 pull-down 10uA              push-pull  low  high    atest-1 dtest-0
+ gpio5 : ---
+ gpio6 : ---
+ gpio7 : out  normal  vin-0 no pull                     push-pull  low  high    atest-1 dtest-0
+ gpio8 : in   normal  vin-0 pull-down 10uA              push-pull  low  high    atest-1 dtest-0
+ gpio10: in   normal  vin-0 pull-down 10uA              push-pull  low  high    atest-1 dtest-0
+ gpio11: in   normal  vin-1 pull-up 30uA                push-pull  high high    atest-1 dtest-0
+
+gpiochip1: GPIOs 1094-1099, parent: platform/c440000.qcom,spmi:qcom,pm8150@0:pinctrl@c000, c440000.qcom,spmi:qcom,pm8150@0:pinctrl@c000:
+ gpio1 : in   normal  vin-0 pull-down 10uA              push-pull  low  high    atest-1 dtest-0
+ gpio3 : out  func1   vin-0 pull-down 10uA              push-pull  high high    atest-1 dtest-0
+ gpio6 : in   normal  vin-1 pull-up 30uA                push-pull  high high    atest-1 dtest-0
+ gpio7 : out  normal  vin-1 pull-down 10uA              push-pull  high high    atest-1 dtest-0
+ gpio9 : in   normal  vin-0 pull-down 10uA              push-pull  low  high    atest-1 dtest-0
+ gpio10: in   normal  vin-0 pull-down 10uA              push-pull  low  high    atest-1 dtest-0
+gpiochip0: GPIOs 1100-1279, parent: platform/f000000.pinctrl, f000000.pinctrl:
+ gpio0   : in  low  func0 2mA pull down wakeup-enabled
+
+ gpio1   : in  low  func0 8mA no pull wakeup-enabled
+
+ gpio2   : in  low  func0 2mA pull down wakeup-enabled
+
+ gpio3   : in  low  func0 8mA no pull wakeup-enabled
+
+ gpio4   : in  high func0 2mA no pull wakeup-disabled
+
+ gpio5   : in  high func0 2mA no pull wakeup-none
+
+ gpio6   : out low  func0 2mA pull down wakeup-none
+
+ gpio7   : in  low  func0 2mA no pull wakeup-enabled
+
+ gpio8   : in  low  func0 2mA pull down wakeup-none
+
+ gpio9   : in  low  func0 2mA pull down wakeup-none
+
+ gpio10  : out high func0 2mA no pull wakeup-none
+
+ gpio11  : in  low  func0 2mA pull down wakeup-disabled
+
+ gpio12  : in  high func0 2mA no pull wakeup-none
+
+ gpio13  : in  high func0 2mA no pull wakeup-none
+
+ gpio14  : in  low  func0 2mA pull down wakeup-disabled
+
+ gpio15  : in  low  func0 2mA no pull wakeup-enabled
+
+ gpio16  : in  high func0 2mA no pull wakeup-none
+
+ gpio17  : in  low  func0 2mA pull down wakeup-none
+
+ gpio18  : in  high func0 2mA pull up wakeup-none
+
+ gpio19  : in  low  func0 2mA pull down wakeup-enabled
+
+ gpio24  : out high func0 2mA no pull wakeup-disabled
+
+ gpio25  : out high func0 2mA no pull wakeup-none
+
+ gpio26  : in  low  func0 2mA pull down wakeup-none
+
+ gpio27  : in  low  func0 2mA pull down wakeup-disabled
+
+ gpio28  : in  high func0 2mA no pull wakeup-disabled
+
+ gpio29  : in  high func0 2mA no pull wakeup-none
+
+ gpio30  : in  low  func0 2mA pull down wakeup-none
+
+ gpio31  : in  high func0 2mA no pull wakeup-enabled
+
+ gpio32  : in  low  func0 2mA pull down wakeup-none
+
+ gpio33  : in  low  func0 2mA pull down wakeup-none
+
+ gpio34  : out low  func1 2mA pull up wakeup-none
+
+ gpio35  : in  low  func1 2mA pull down wakeup-enabled
+
+ gpio36  : in  low  func0 2mA pull down wakeup-none
+
+ gpio37  : in  low  func0 2mA pull down wakeup-none
+
+ gpio38  : in  low  func0 2mA pull down wakeup-none
+
+ gpio39  : in  low  func0 2mA pull down wakeup-enabled
+
+ gpio40  : in  high func0 2mA no pull wakeup-disabled
+
+ gpio41  : in  high func0 2mA no pull wakeup-none
+
+ gpio42  : out low  func0 2mA pull down wakeup-none
+
+ gpio43  : in  low  func0 2mA no pull wakeup-enabled
+
+ gpio44  : in  high func0 2mA no pull wakeup-none
+
+ gpio45  : in  high func0 2mA no pull wakeup-disabled
+
+ gpio46  : in  low  func0 2mA no pull wakeup-none
+
+ gpio47  : out low  func0 2mA pull down wakeup-enabled
+
+ gpio48  : in  low  func0 2mA pull down wakeup-none
+
+ gpio49  : in  low  func0 2mA pull down wakeup-none
+
+ gpio50  : in  low  func0 2mA pull down wakeup-none
+
+ gpio51  : in  high func0 2mA no pull wakeup-enabled
+
+ gpio52  : in  high func0 2mA no pull wakeup-none
+
+ gpio53  : in  high func0 2mA no pull wakeup-none
+
+ gpio54  : in  low  func0 2mA pull down wakeup-none
+
+ gpio55  : in  low  func0 2mA pull down wakeup-enabled
+
+ gpio56  : out low  func0 16mA no pull wakeup-none
+
+ gpio57  : out low  func0 16mA no pull wakeup-none
+
+ gpio58  : in  low  func0 2mA pull down wakeup-none
+
+ gpio59  : in  low  func0 2mA pull down wakeup-disabled
+
+ gpio60  : in  high func0 2mA no pull wakeup-none
+
+ gpio61  : in  high func0 2mA no pull wakeup-none
+
+ gpio62  : in  low  func0 2mA pull down wakeup-none
+
+ gpio63  : in  low  func0 2mA pull down wakeup-enabled
+
+ gpio64  : out high func0 2mA no pull wakeup-enabled
+
+ gpio65  : in  low  func0 2mA pull down wakeup-enabled
+
+ gpio66  : in  low  func0 8mA no pull wakeup-enabled
+
+ gpio67  : in  low  func0 2mA pull down wakeup-enabled
+
+ gpio68  : in  high func0 2mA pull up wakeup-enabled
+
+ gpio69  : out high func0 2mA no pull wakeup-none
+
+ gpio70  : out low  func0 2mA no pull wakeup-enabled
+
+ gpio71  : in  low  func0 2mA pull down wakeup-none
+
+ gpio72  : in  low  func0 2mA pull down wakeup-none
+
+ gpio73  : in  low  func0 2mA pull down wakeup-none
+
+ gpio74  : in  low  func0 2mA pull down wakeup-none
+
+ gpio75  : out high func0 2mA no pull wakeup-none
+
+ gpio76  : out low  func0 2mA pull down wakeup-none
+
+ gpio77  : in  low  func0 2mA no pull wakeup-enabled
+
+ gpio78  : in  low  func0 2mA pull down wakeup-none
+
+ gpio79  : out low  func0 2mA pull down wakeup-none
+
+ gpio80  : in  high func0 2mA pull up wakeup-enabled
+
+ gpio81  : in  high func0 2mA pull up wakeup-enabled
+
+ gpio82  : out high func0 8mA no pull wakeup-none
+
+ gpio83  : in  high func0 2mA pull up wakeup-disabled
+
+ gpio84  : in  high func0 2mA no pull wakeup-enabled
+
+ gpio85  : out low  func0 2mA pull down wakeup-none
+
+ gpio86  : in  low  func1 2mA pull up wakeup-enabled
+
+ gpio87  : in  low  func0 2mA pull up wakeup-enabled
+
+ gpio88  : in  low  func0 2mA pull down wakeup-enabled
+
+ gpio89  : in  low  func0 2mA pull down wakeup-enabled
+
+ gpio90  : out low  func0 2mA pull down wakeup-none
+
+ gpio91  : in  low  func0 2mA pull down wakeup-none
+
+ gpio92  : in  low  func0 2mA pull down wakeup-disabled
+
+ gpio93  : out high func0 8mA no pull wakeup-enabled
+
+ gpio94  : in  low  func0 2mA pull down wakeup-none
+
+ gpio95  : in  low  func0 2mA pull down wakeup-none
+
+ gpio96  : in  low  func0 2mA pull down wakeup-none
+
+ gpio97  : in  low  func0 2mA pull down wakeup-none
+
+ gpio98  : in  low  func0 2mA pull down wakeup-none
+
+ gpio99  : in  low  func0 2mA pull down wakeup-none
+
+ gpio100 : in  low  func0 2mA pull down wakeup-disabled
+
+ gpio101 : in  low  func0 2mA pull down wakeup-none
+
+ gpio102 : in  low  func0 2mA pull down wakeup-none
+
+ gpio103 : in  low  func0 2mA pull down wakeup-disabled
+
+ gpio104 : in  low  func0 2mA pull down wakeup-disabled
+
+ gpio105 : in  low  func0 2mA pull down wakeup-none
+
+ gpio106 : in  low  func0 2mA pull down wakeup-none
+
+ gpio107 : in  low  func0 2mA pull down wakeup-none
+
+ gpio108 : in  low  func0 2mA pull down wakeup-disabled
+
+ gpio109 : in  low  func0 2mA pull down wakeup-disabled
+
+ gpio110 : in  high func0 2mA no pull wakeup-enabled
+
+ gpio111 : in  high func0 2mA no pull wakeup-enabled
+
+ gpio112 : in  high func0 2mA no pull wakeup-disabled
+
+ gpio113 : in  high func0 2mA no pull wakeup-disabled
+
+ gpio114 : in  low  func0 2mA pull down wakeup-none
+
+ gpio115 : in  low  func0 2mA pull down wakeup-none
+
+ gpio116 : in  low  func0 2mA pull down wakeup-none
+
+ gpio117 : out low  func0 2mA pull down wakeup-none
+
+ gpio118 : in  low  func0 2mA pull down wakeup-disabled
+
+ gpio119 : in  low  func0 2mA pull down wakeup-none
+
+ gpio120 : in  low  func0 2mA pull down wakeup-none
+
+ gpio121 : in  low  func0 2mA pull down wakeup-enabled
+
+ gpio122 : in  low  func0 2mA pull down wakeup-enabled
+
+ gpio123 : in  low  func0 2mA pull down wakeup-enabled
+
+ gpio124 : in  low  func0 2mA pull down wakeup-disabled
+
+ gpio125 : in  high func0 2mA no pull wakeup-none
+
+ gpio126 : in  high func0 2mA no pull wakeup-disabled
+
+ gpio127 : out low  func0 2mA pull down wakeup-none
+
+ gpio128 : in  low  func0 2mA pull down wakeup-disabled
+
+ gpio129 : in  low  func0 2mA pull down wakeup-disabled
+
+ gpio130 : in  low  func0 2mA no pull wakeup-none
+
+ gpio131 : in  low  func0 2mA pull down wakeup-none
+
+ gpio132 : in  low  func0 2mA pull down wakeup-enabled
+
+ gpio133 : in  low  func0 2mA pull down wakeup-enabled
+
+ gpio134 : in  high func0 2mA no pull wakeup-enabled
+
+ gpio135 : out high func0 8mA no pull wakeup-none
+
+ gpio136 : in  high func0 2mA no pull wakeup-enabled
+
+ gpio137 : in  low  func0 2mA pull down wakeup-enabled
+
+ gpio138 : in  low  func1 2mA no pull wakeup-enabled
+
+ gpio139 : in  low  func1 2mA no pull wakeup-none
+
+ gpio140 : in  low  func1 2mA no pull wakeup-none
+
+ gpio141 : in  low  func1 2mA no pull wakeup-none
+
+ gpio142 : in  low  func0 2mA pull down wakeup-enabled
+
+ gpio143 : in  low  func0 2mA pull down wakeup-enabled
+
+ gpio144 : in  low  func0 2mA pull down wakeup-none
+
+ gpio145 : in  low  func0 2mA pull down wakeup-none
+
+ gpio146 : in  low  func0 2mA no pull wakeup-none
+
+ gpio147 : in  low  func0 2mA pull down wakeup-disabled
+
+ gpio148 : in  low  func0 2mA pull down wakeup-none
+
+ gpio149 : in  low  func0 2mA pull down wakeup-none
+
+ gpio150 : in  low  func0 2mA pull down wakeup-disabled
+
+ gpio151 : in  low  func0 2mA pull down wakeup-none
+
+ gpio152 : in  low  func0 2mA pull down wakeup-none
+
+ gpio153 : in  low  func0 2mA pull down wakeup-none
+
+ gpio154 : in  low  func0 2mA pull down wakeup-none
+
+ gpio155 : in  low  func0 2mA pull down wakeup-none
+
+ gpio156 : in  low  func0 2mA pull down wakeup-none
+
+ gpio157 : in  high func0 2mA no pull wakeup-enabled
+
+ gpio158 : in  low  func0 2mA pull down wakeup-disabled
+
+ gpio159 : in  low  func0 2mA pull down wakeup-none
+
+ gpio160 : in  low  func0 2mA pull down wakeup-disabled
+
+ gpio161 : in  low  func0 2mA pull down wakeup-none
+
+ gpio162 : in  low  func0 2mA pull down wakeup-disabled
+
+ gpio163 : in  low  func0 2mA pull down wakeup-none
+
+ gpio164 : in  low  func0 2mA pull down wakeup-disabled
+
+ gpio165 : in  low  func0 2mA pull down wakeup-none
+
+ gpio166 : in  low  func0 2mA pull down wakeup-disabled
+
+ gpio167 : in  low  func0 2mA pull down wakeup-disabled
+
+ gpio168 : in  low  func0 2mA pull down wakeup-none
+
+ gpio169 : in  low  func0 2mA pull down wakeup-none
+
+ gpio170 : in  low  func0 2mA pull down wakeup-none
+
+ gpio171 : in  low  func0 2mA pull down wakeup-none
+
+ gpio172 : out low  func0 2mA no pull wakeup-none
+
+ gpio173 : out low  func0 2mA pull down wakeup-none
+
+ gpio174 : out high func0 2mA no pull wakeup-none
+
+ gpio175 : in  high func0 2mA pull down wakeup-enabled
+
+ gpio176 : in  high func0 2mA pull down wakeup-none
+
+ gpio177 : in  high func0 2mA pull down wakeup-enabled
+
+ gpio178 : in  low  func0 2mA pull down wakeup-none
+
+ gpio179 : in  low  func0 2mA pull down wakeup-disabled
+
+=== amp id
+/sys/kernel/debug/regmap/7-0040/registers:0000000: 00035a40
+/sys/kernel/debug/regmap/7-0041/registers:0000000: 00035a40
+/sys/kernel/debug/regmap/7-0042/registers:0000000: 00035a40
+/sys/kernel/debug/regmap/7-0043/registers:0000000: 00035a40

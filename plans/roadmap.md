@@ -1336,6 +1336,14 @@ Exit criteria:
       real time for this).
 
 Progress log:
+- 2026-09-22 (night): **Audio stages 1-2 done.**
+  - Boost values read from real hardware: 1.0 uH, 0-19 uF, 4100 mA.
+  - All four CS35L41s probe on mainline and configure exactly like stock,
+    with output off, a sound-free boot and no IRQ storm.
+  - It needed PM8150L LDO4 always-on, the shared reset on gpio69, and
+    `GPIO_SHARED_PROXY=y`.
+  - Details: `../docs/phase3-audio-scoping.md`. Next is stage 3:
+    protection firmware and calibration.
 - 2026-09-22 (night): **Audio stage 0 done: the ADSP boots on mainline.**
   Its carveout is moved to stock's placement, and the APR audio services
   (q6core/afe/asm/adm) register. The CS35L41 amps turned out to be

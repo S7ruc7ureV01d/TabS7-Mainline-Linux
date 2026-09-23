@@ -559,3 +559,20 @@ CONFIG_RPMSG_CTRL=y
 # (with no /lib/modules they cannot load) until the CS35L41 safety gates
 # in the scoping doc are done - nothing here can drive the speaker amps.
 CONFIG_QCOM_APR=y
+
+# 2026-09-22, audio stage 2 (docs/phase3-audio-scoping.md): the CS35L41
+# speaker-amp driver, control only. SOUND must be raised too, or SND/SND_SOC
+# stay capped at =m (tristate ceiling). The machine driver, Q6/LPASS audio
+# drivers and SoundWire deliberately stay =m (not loadable - no
+# /lib/modules), so no sound card and no audio path can exist yet.
+CONFIG_SOUND=y
+CONFIG_SND=y
+CONFIG_SND_SOC=y
+CONFIG_SND_SOC_CS35L41_I2C=y
+# The four CS35L41s share one reset line (gpio69). Since 7.x gpiolib
+# (GPIO_SHARED=y) claims any GPIO referenced by several DT nodes and serves
+# consumers through a proxy - which defaults to =m and so never loaded:
+# every amp deferred forever ("Failed to get reset GPIO"). The proxy votes:
+# the line only returns to its default (reset asserted) when the LAST
+# consumer drops its vote, so one amp can't reset the others mid-use.
+CONFIG_GPIO_SHARED_PROXY=y

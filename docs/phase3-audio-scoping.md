@@ -55,7 +55,7 @@ Wrong values here can damage the amps or speakers.
 |---|---|---|---|
 | 0 | Move the ADSP carveout to stock's placement and boot the ADSP (`QCOM_APR=y` only; all sound drivers stay unbuilt). | none | **done** |
 | 1 | Read the CS35L41 boost-converter registers read-only (done from TWRP, which runs Samsung's kernel), and derive the real inductor/capacitor values. | none | **done** |
-| 2 | Control-only CS35L41 bring-up on I2C7 with those values; amps stay in shutdown, PCM muted. | very low | |
+| 2 | Control-only CS35L41 bring-up (mainline `i2c11`) with those values; no sound card, amps' GLOBAL_EN off. | very low | **done** |
 | 3 | Load the protection firmware and tuning, feed this unit's calibration into the DSP, and confirm protection is running before any sound. | low | |
 | 4 | Machine graph: LPASS TDM port -> 4 amps (port from the downstream DAI links). First sound at about -40 dB with a UCM software volume cap, then raise gradually. | controlled | |
 | 5 | Microphones (no 3.5 mm jack; likely digital mics via WCD938x or the VA macro). | none | |
@@ -135,7 +135,64 @@ guessed):
   always on in hardware).
 - **IRQ:** one line, gpio84, shared by all four amps (idles high, so
   active-low). Mainline requests it `IRQF_SHARED`.
-- **Reset:** no reset GPIO in the downstream nodes.
+- **Reset:** see stage 2. One node *does* carry it: `cs35l41@43` has
+  `reset-gpios = <&tlmm 69 0>`, shared by all four amps.
+
+### Stage 2 result: all four amps probe, and configure exactly like stock
+
+It took three fixes, each found by comparing live state against TWRP.
+All three are in the DTS/fragment with comments.
+
+1. **PM8150L LDO4, 1.8V always-on** (`vreg_l4c_1p8`). Stock's overlay
+   pins `pm8150a_l4` to a fixed 1.8V with `regulator-always-on` and no
+   consumer, and it's enabled in TWRP. That fits the amps' VA, which
+   stock models as a "dummy" always-on rail. Mainline never defined it.
+2. **The shared reset, gpio69.** Downstream declares it on only one of
+   the four nodes, so it was missed at first. gpio69 idles low with a
+   pull-down, which held all four chips in reset: every address NACKed
+   (`Failed waiting for OTP_BOOT_DONE`, -ENXIO). It's now `reset-gpios =
+   <&tlmm 69 GPIO_ACTIVE_HIGH>` on all four nodes.
+3. **`CONFIG_GPIO_SHARED_PROXY=y`.** In 7.x, gpiolib (`GPIO_SHARED=y`)
+   claims any GPIO referenced by several DT nodes and routes consumers
+   through a proxy driver, which defaults to `=m` and so never loaded.
+   Every amp deferred ("Failed to get reset GPIO"; `gpioinfo` showed
+   line 69 as `consumer="shared"`). The proxy votes: the line only
+   returns to its default (reset asserted) when the *last* consumer
+   drops its vote, so one amp's error or shutdown can't reset the
+   others.
+
+**One deliberate deviation from stock:** GPIO2 (the IRQ output) is
+open-drain INTB (`src 2`) with a SoC-side pull-up on gpio84, not stock's
+push-pull INTB. All four amps share that line, and push-pull outputs
+could contend on it; open-drain can't. The driver still sees the same
+active-low interrupt.
+
+**Result on real hardware:**
+- all four probe: "Cirrus Logic CS35L41 (35a40), Revision: A0", the
+  same as stock;
+- no speaker pops or noise at any boot;
+- the shared gpio84 IRQ at 0 events.
+
+Registers after probe
+(`docs/logs/audio-stage2-2026-09-22/mainline-cs35l41-registers-after-probe.txt`)
+match stock on every amp:
+
+| Register | Value |
+|---|---|
+| `PEAK_CUR` | `0x42` (4100 mA) |
+| `COEFF` | `0x2424` |
+| `SLOPE_LBST` | `0x7500` |
+| `SW_FREQ` | `0x01008000` |
+| `OVERVOLT` | `0x130` |
+| `GLOBAL_EN` | 0 (output off) |
+
+The SLPI, ADSP, touch and sensors are unaffected.
+
+**Next, stage 3:** load the Cirrus protection firmware and tuning, and
+feed this unit's calibration into each amp's DSP, still with no audio
+path. Note "Subsystem ID not found": mainline builds the firmware
+filename from a system name, so the stock `cs35l40-spk-dsp1-spk-prot.*`
+files need mapping to the names mainline asks for.
 
 ## Real hardware: a genuinely complex, multi-chip audio topology
 
