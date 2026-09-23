@@ -91,7 +91,11 @@ CONFIG_CMDLINE_FORCE=y
 # needed. watchdog_thresh=5 shortens the default ~20s soft-lockup
 # detection window for faster iteration.
 CONFIG_SOFTLOCKUP_DETECTOR=y
-CONFIG_BOOTPARAM_SOFTLOCKUP_PANIC=y
+# 2026-09-23: since 6.x this is an int ("panic after N x 20 s"), not a
+# bool. The old =y was rejected as invalid, so every build actually had 0 (no
+# panic on soft lockups). The effective value is written down here; enabling
+# it (1) would be a separate, tested change.
+CONFIG_BOOTPARAM_SOFTLOCKUP_PANIC=0
 CONFIG_HARDLOCKUP_DETECTOR=y
 CONFIG_BOOTPARAM_HARDLOCKUP_PANIC=y
 CONFIG_PANIC_ON_OOPS=y
@@ -611,3 +615,18 @@ CONFIG_CHARGER_MAX77705_USBC_ILIM=y
 # driver above uses for the charging temperature bands.
 CONFIG_QCOM_VADC_COMMON=y
 CONFIG_QCOM_SPMI_ADC5=y
+
+# 2026-09-23: pinned. These were =y in every known-good build but not in
+# this fragment, and a fresh defconfig merge gives them =m. With no
+# /lib/modules that silently loses the QCA6390 Wi-Fi's PCIe PHY and the USB
+# PHY. RTL_CARDS only gates the Realtek Wi-Fi driver menu; it is pinned so a
+# fresh merge matches the tested .config exactly.
+CONFIG_PHY_QCOM_QMP_PCIE_8996=y
+CONFIG_PHY_QCOM_QMP_USB=y
+CONFIG_RTL_CARDS=y
+# 2026-09-23: the debug options removed on 2026-09-22 (block above) were only
+# deleted from this fragment. The build's .config was edited in place and
+# kept DETECT_HUNG_TASK, and a fresh defconfig brings USB_QCOM_EUD back as
+# =m. Stated explicitly so that a fresh merge and the .config agree.
+# CONFIG_DETECT_HUNG_TASK is not set
+# CONFIG_USB_QCOM_EUD is not set

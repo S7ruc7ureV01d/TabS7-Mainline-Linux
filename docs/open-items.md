@@ -75,14 +75,16 @@ the libssc enable.
 | 24-bit audio front end: S24 playback is silent and S24 capture is garbage. PipeWire is pinned to S16 for both (as stock). | same |
 | Speaker left/right stays fixed to the landscape ends when rotated to portrait. It would need a small service to swap WirePlumber positions on rotation. | same |
 | SLPI "Handover signaled, but it already happened" log spam, tracking the accelerometer stream. Cosmetic. | `docs/dev-environment-quickref.md` |
+| `CONFIG_BOOTPARAM_SOFTLOCKUP_PANIC` is 0, so there is no panic on soft lockups. It was always 0: the old `=y` is invalid since it became an int. Set 1 if crash capture on soft lockups is wanted again. | `kernel/config/gts7l.fragment` |
 | `CONFIG_CMDLINE` still has `loglevel=15 clk_ignore_unused` from bring-up. `clk_ignore_unused` is still needed (display); `loglevel=15` could drop. The owner said to skip this for now. | `kernel/config/gts7l.fragment` |
 
 ## Housekeeping
 
-- **Three config options are not pinned in the fragment.**
-  `PHY_QCOM_QMP_PCIE_8996`, `PHY_QCOM_QMP_USB` and `RTL_CARDS` are `=y` in
-  the working `.config`, but a fresh defconfig merge makes them `=m`. That
-  would silently lose Wi-Fi PCIe and USB. Add all three to the fragment.
+- ~~Three config options not pinned in the fragment~~: **fixed
+  2026-09-23.** A fresh defconfig plus fragment merge now reproduces the
+  working `.config` exactly. The kernel currently flashed still has
+  `DETECT_HUNG_TASK=y` (harmless); the next flashed build drops it, as
+  the 2026-09-22 debug clean-up intended.
 - **Host-side USB network:** the host's NetworkManager profile
   `gts7l-debug` (172.16.42.2) is now bound to `enp0s20f0u1`, the USB port
   used since 2026-09-23. Moving the cable back to the old port needs

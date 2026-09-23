@@ -234,12 +234,17 @@ Round-trip, used identically every time a kernel/DTS change needs testing:
    unrelated-looking parent Kconfig dependency (documented at length in
    `docs/kernel-config-notes.md` and throughout `kernel-boot-debugging.md`).
    Don't trust `olddefconfig`'s silence as confirmation.
-   **Also diff the result against the previous build's `.config`**: as of
-   2026-09-22 a fresh fragment merge gives `PHY_QCOM_QMP_PCIE_8996`,
-   `PHY_QCOM_QMP_USB` and `RTL_CARDS` as `=m`, while the last known-good
-   build had them `=y` (not set by the fragment - origin unknown). Until
-   they're pinned in the fragment, keep the old `.config` for DTS-only
-   rounds.
+   **Also diff the result against the previous build's `.config`.** Since
+   2026-09-23 a fresh defconfig plus fragment merge reproduces the
+   working `.config` exactly (0 differing lines, "is not set" entries
+   included). `PHY_QCOM_QMP_PCIE_8996`, `PHY_QCOM_QMP_USB` and `RTL_CARDS`
+   (which a fresh merge used to make `=m`), `DETECT_HUNG_TASK` and
+   `USB_QCOM_EUD` are pinned. To check without touching the tree's
+   `.config`:
+   `make ARCH=arm64 KCONFIG_CONFIG=/tmp/x/def.config defconfig`, then
+   `scripts/kconfig/merge_config.sh -m -O /tmp/x /tmp/x/def.config
+   ../../kernel/config/gts7l.fragment`, then
+   `make ARCH=arm64 KCONFIG_CONFIG=/tmp/x/.config olddefconfig`, and diff.
 4. If the DTS changed:
    ```
    make -j20 ARCH=arm64 LLVM=1 LLVM_IAS=1 dtbs
