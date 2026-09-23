@@ -1,0 +1,60 @@
+From: gts7l project
+Subject: [PATCH] ASoC: cs35l41: give the protection firmware time to answer
+ mailbox commands
+
+cs35l41_set_cspl_mbox_cmd() polled the firmware's mailbox status for 5 ms.
+On the Galaxy Tab S7 (Cirrus protection firmware 400a4 v0.0.1) that is
+too short. Measured over back-to-back streams:
+- RESUME took 27-31 ms when a stream started within the 3 s autosuspend
+  window, before the amp hibernated;
+- PAUSE took 5-6 ms.
+RESUME therefore failed every time ("Failed to set mailbox cmd 2 (status
+1)", DSP1 POST_PMU -42). The firmware stayed PAUSED, so the stream played
+silence. PAUSE failed now and then as well. Until now the workaround was
+autosuspend_delay_ms = 0, so that every stream started from hibernation.
+
+Poll for up to 100 ms. OUT_OF_HIBERNATE keeps 5 polls, since
+cs35l41_exit_hibernate() already retries it 20 x 5 times.
+
+--- a/sound/soc/codecs/cs35l41-lib.c
++++ b/sound/soc/codecs/cs35l41-lib.c
+@@ -1455,7 +1455,7 @@
+ int cs35l41_set_cspl_mbox_cmd(struct device *dev, struct regmap *regmap,
+ 			      enum cs35l41_cspl_mbox_cmd cmd)
+ {
+-	unsigned int sts = 0, i;
++	unsigned int sts = 0, i, max_polls;
+ 	int ret;
+ 
+ 	// Set mailbox cmd
+@@ -1467,7 +1467,14 @@
+ 	}
+ 
+ 	// Read mailbox status and verify it is appropriate for the given cmd
+-	for (i = 0; i < 5; i++) {
++	/*
++	 * The protection firmware can take ~30 ms to act on RESUME when the
++	 * previous stream ended only just before (seen on the Galaxy Tab S7),
++	 * and ~6 ms for PAUSE; 5 ms was not enough. Allow up to 100 ms, except
++	 * for OUT_OF_HIBERNATE, whose caller retries it in its own loop.
++	 */
++	max_polls = cmd == CSPL_MBOX_CMD_OUT_OF_HIBERNATE ? 5 : 100;
++	for (i = 0; i < max_polls; i++) {
+ 		usleep_range(1000, 1100);
+ 
+ 		ret = regmap_read(regmap, CS35L41_DSP_MBOX_2, &sts);
+@@ -1481,10 +1488,12 @@
+ 			return -EINVAL;
+ 		}
+ 
+-		if (!cs35l41_check_cspl_mbox_sts(cmd, sts))
++		if (!cs35l41_check_cspl_mbox_sts(cmd, sts)) {
+ 			dev_dbg(dev, "[%u] cmd %u returned invalid sts %u", i, cmd, sts);
+-		else
++		} else {
++			dev_dbg(dev, "mailbox cmd %u done after %u polls\n", cmd, i + 1);
+ 			return 0;
++		}
+ 	}
+ 
+ 	if (cmd != CSPL_MBOX_CMD_OUT_OF_HIBERNATE)

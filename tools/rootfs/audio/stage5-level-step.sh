@@ -19,7 +19,6 @@ for c in 1 2 3 4; do [ -e /root/lvl-m$LEVEL-ch$c.wav ] || { echo "ABORT: no tone
 for n in FL FR RL RR; do
 	[ "$(get "$n PCM Source")" = 1 ] && [ "$(get "$n DSP1 Firmware")" = 9 ] || { echo "ABORT: $n not on the protection DSP"; exit 1; }
 done
-for a in 40 41 42 43; do [ "$(cat /sys/bus/i2c/devices/11-00$a/power/autosuspend_delay_ms)" = 0 ] || { echo "ABORT: autosuspend not 0"; exit 1; }; done
 
 gain_all "$GAIN"
 for n in FL FR RL RR; do [ "$(get "$n Analog PCM Volume")" = "$GAIN" ] || { echo "ABORT: $n gain did not take"; exit 1; }; done
@@ -31,8 +30,7 @@ for c in 1 2 3 4; do
 	n=$(echo "FL FR RL RR" | cut -d' ' -f$c)
 	printf "Press Enter to play channel %s (%s, 3 s)... " $c $n; read _ </dev/tty
 	aplay -q -D hw:$C,0 /root/lvl-m$LEVEL-ch$c.wav & AP=$!
-	# Read mid-beep: the amps hibernate as soon as the stream ends
-	# (autosuspend 0), and a hibernated DSP's controls can't be read.
+	# Read mid-beep: a hibernated DSP's controls can't be read.
 	sleep 1.2
 	P="$n DSP1 Protection"
 	st=$(get "$P cd CSPL_STATE"); halo=$(get "$P 400a4 HALO_STATE"); t=$(get "$P cd CSPL_TEMPERATURE")

@@ -10,9 +10,11 @@ D=$(dirname "$0")
 inst() { install -D -m "$1" "$D/$2" "$R/$3"; echo "  $3"; }
 
 echo "installing into $R:"
-# Safety: gate (root-only until verified), safe state at boot, autosuspend workaround
+# Safety: gate (root-only until verified), safe state at boot
 inst 644 72-gts7l-audio-gate.rules            etc/udev/rules.d/72-gts7l-audio-gate.rules
-inst 644 73-gts7l-cs35l41-autosuspend.rules   etc/udev/rules.d/73-gts7l-cs35l41-autosuspend.rules
+# (73-gts7l-cs35l41-autosuspend.rules is gone: kernel patch 0023 fixed the
+# mailbox RESUME timeout it worked around. Remove it from older installs.)
+rm -f "$R/etc/udev/rules.d/73-gts7l-cs35l41-autosuspend.rules"
 inst 644 74-gts7l-audio-safe.rules            etc/udev/rules.d/74-gts7l-audio-safe.rules
 inst 755 gts7l-audio-safe                     usr/local/sbin/gts7l-audio-safe
 inst 644 gts7l-audio-safe.service             etc/systemd/system/gts7l-audio-safe.service

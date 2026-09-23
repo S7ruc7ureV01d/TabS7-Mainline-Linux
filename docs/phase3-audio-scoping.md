@@ -499,7 +499,7 @@ speakers, with left on the left end and right on the right end.
 | File | Installed as | Role |
 |---|---|---|
 | `72-gts7l-audio-gate.rules` | `/etc/udev/rules.d/` | card is root-only unless `/run/gts7l-audio-safe.ok` exists; then the seat user gets it (uaccess) |
-| `73-gts7l-cs35l41-autosuspend.rules` | `/etc/udev/rules.d/` | autosuspend 0 (mailbox RESUME workaround) |
+| ~~`73-gts7l-cs35l41-autosuspend.rules`~~ | removed | the autosuspend-0 mailbox workaround; patch 0023 fixed the bug |
 | `74-gts7l-audio-safe.rules`, `gts7l-audio-safe(.service)` | udev, `/usr/local/sbin`, `/etc/systemd/system` | at card add: DSP source, Protection firmware, preload, gain 0; verify; write the `.ok` file; re-trigger udev to open the gate |
 | `ucm2/.../Samsung-GTS7L-CS35L41-Speakers.conf`, `ucm2/Samsung/gts7l/HiFi.conf` | `/usr/share/alsa/ucm2/` | UCM: verb re-asserts the DSP source/firmware/preload and routes MultiMedia1 -> PRIMARY_TDM_RX_0; Speaker device sets stock gains (analog 17, digital 817), and back to analog 0 on disable. 4 channels, software volume |
 | `51-gts7l-speakers.conf` | `/etc/wireplumber/wireplumber.conf.d/` | sink: S16LE, positions `RR FR RL FL` (channels 1-4) |
@@ -551,8 +551,7 @@ range, as on stock.
 --subsystem-match=sound` (as root), then restart WirePlumber.
 
 **Open items:**
-- a real kernel fix for the mailbox RESUME/PAUSE bug, replacing the
-  autosuspend-0 workaround;
+- ~~a real kernel fix for the mailbox RESUME/PAUSE bug~~: done, patch 0023;
 - why S24 is silent;
 - portrait rotation (L/R stays fixed to the landscape ends);
 - the mic work (stage 5) came after v9, so the next tarball needs the
@@ -621,6 +620,39 @@ sound to both about equally.
 **Also seen:** once at boot, `lpass-lpi-pinctrl 33c0000.pinctrl:
 __pm_clk_enable: failed to enable clk ... error -110`. It recovered by
 itself and the mics work.
+
+### Mailbox RESUME bug fixed (2026-09-23, patch 0023)
+
+The autosuspend-0 workaround (stage 4) is gone. A diagnostic build polled
+up to 100 ms and logged how long each command took. The protection
+firmware needs:
+- **27-31 ms for RESUME** when a stream starts within the 3 s autosuspend
+  window, before the amp hibernates;
+- **5-6 ms for PAUSE**.
+
+Mainline polled for only 5 ms, so RESUME always failed and PAUSE
+sometimes did. It was never a sequencing problem.
+
+Patch 0023 lets `cs35l41_set_cspl_mbox_cmd()` poll for up to 100 ms.
+OUT_OF_HIBERNATE keeps 5 polls, since `cs35l41_exit_hibernate()` retries
+it 20 x 5 times already. Verified at the default autosuspend of 3000 ms:
+- 8 back-to-back silence streams with 0-2 s gaps: no mailbox errors;
+- a reboot without `73-gts7l-cs35l41-autosuspend.rules`: 0 errors;
+- the owner ran `speaker-id.sh` twice and music straight after: all fine.
+
+`install.sh` now deletes the old rule.
+
+### Boot warning: LPASS LPI pinctrl vote timeout (harmless)
+
+Once per boot: `qcom-q6afe ...: AFE failed to vote (3)`, then
+`lpass-lpi-pinctrl 33c0000.pinctrl: __pm_clk_enable: failed to enable
+clk ..., error -110`. The "(3)" is the hardware block
+(`Q6AFE_LPASS_CORE_HW_MACRO_BLOCK`), not an error code. It is the first
+AFE command of the boot, sent about 150 ms after the ADSP's audio PD
+comes up (25.23 s), and the ADSP doesn't answer it within q6afe's 3 s
+`TIMEOUT_MS`. Every later AFE command works. The VA macro holds the same
+MACRO and DCODEC votes for as long as the card exists (enable count 2
+each), so the LPASS block stays powered either way. Left as is.
 
 ## Real hardware: a genuinely complex, multi-chip audio topology
 
