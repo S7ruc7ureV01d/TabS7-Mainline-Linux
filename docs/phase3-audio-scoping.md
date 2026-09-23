@@ -54,7 +54,7 @@ Wrong values here can damage the amps or speakers.
 | Stage | Work | Speaker risk | Status |
 |---|---|---|---|
 | 0 | Move the ADSP carveout to stock's placement and boot the ADSP (`QCOM_APR=y` only; all sound drivers stay unbuilt). | none | **done** |
-| 1 | Read the CS35L41 boost-converter registers read-only from **stock Android** (it configures them at runtime), and derive the real inductor/capacitor values. | none | next |
+| 1 | Read the CS35L41 boost-converter registers read-only (done from TWRP, which runs Samsung's kernel), and derive the real inductor/capacitor values. | none | **done** |
 | 2 | Control-only CS35L41 bring-up on I2C7 with those values; amps stay in shutdown, PCM muted. | very low | |
 | 3 | Load the protection firmware and tuning, feed this unit's calibration into the DSP, and confirm protection is running before any sound. | low | |
 | 4 | Machine graph: LPASS TDM port -> 4 amps (port from the downstream DAI links). First sound at about -40 dB with a UCM software volume cap, then raise gradually. | controlled | |
@@ -95,6 +95,47 @@ there).
 (The SLPI's recurring `Handover signaled, but it already happened`
 tracks the accelerometer stream: it stops when iio-sensor-proxy stops.
 It's cosmetic and unrelated to audio.)
+
+### Stage 1 result: boost values from real hardware
+
+Read-only regmap reads from TWRP (Samsung's own kernel binds all four
+amps; debugfs regmap). Raw capture:
+`docs/logs/audio-stage1-2026-09-22/cs35l41-boost-registers-twrp.txt`.
+
+All four amps read identically (chip ID `0x35a40`):
+
+| Register | Value | Meaning |
+|---|---|---|
+| `BSTCVRT_COEFF` 0x3810 | `0x2424` | K1 = 0x24, K2 = 0x24 |
+| `BSTCVRT_SLOPE_LBST` 0x3814 | `0x7500` | slope 0x75, LBST 0 |
+| `BSTCVRT_PEAK_CUR` 0x3808 | `0x4a` | 4500 mA (the reset default; see below) |
+
+Downstream never writes K1/K2/slope/LBST, so stock runs with these
+power-on values. In mainline's `cs35l41-lib.c` tables they match exactly
+one inductor: `lbst_val 0` = **1.0 uH** (`slope_table[0]` = 0x75), with
+K1/K2 = 0x24 = **capacitor range 0 (0-19 uF)**.
+
+Peak current is the exception: downstream only writes `bst_ipk` when the
+sound card comes up (not in TWRP), so 0x4a is the reset default, and
+stock's DT value (`cirrus,boost-peak-milliamp = <4100>`, 0x42) is what
+it actually runs.
+
+**Mainline DT values** (these reproduce stock's register state; none are
+guessed):
+- `cirrus,boost-ind-nanohenry = <1000>`
+- `cirrus,boost-cap-microfarad` = any value in 1-19 (same registers)
+- `cirrus,boost-peak-milliamp = <4100>`
+
+**Other stage 2 inputs (TWRP sysfs and downstream DT):**
+- **Bus:** stock "i2c-7" is the controller at `0xa8c000` = mainline
+  `&i2c11`. Pins are gpio60/61 `qup11`, the same in both DTs.
+  Downstream uses GPI DMA on `gpi_dma1`, whose `qcom,gpi-ee-offset` is
+  `0x6000`; our DTS doesn't enable `gpi_dma1` yet.
+- **Supplies:** VA/VP go to a `dummy_vreg` on stock (the rails are
+  always on in hardware).
+- **IRQ:** one line, gpio84, shared by all four amps (idles high, so
+  active-low). Mainline requests it `IRQF_SHARED`.
+- **Reset:** no reset GPIO in the downstream nodes.
 
 ## Real hardware: a genuinely complex, multi-chip audio topology
 
