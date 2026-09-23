@@ -160,6 +160,37 @@ VCM driver), torch/flash via `leds-qcom-flash` (the only piece with a
 safety angle: keep flash current and timeout at stock's limits), EEPROM
 calibration (optional).
 
+## Result: stages 0-2 done (2026-09-23), rear main camera delivers images
+
+- **Stage 0**: media stack, CAMSS, CCI, camcc and `VIDEO_S5K3M5` built in
+  (`kernel/config/gts7l.fragment`). The kernel grew 1.2 MB.
+- **Stage 1**: the S5K3M5 probes on CCI0 master 0 at 0x2d (chip ID 0x30d5
+  read back) and registers as a media entity linked to CSIPHY0. `vddd` has
+  no rail in the DT (dummy regulator); the sensor works without one, so the
+  module generates its core supply itself or from VANA.
+- **Stage 2**: raw frames. The first attempt streamed nothing: the sensor
+  was streaming (frame counter at 0x0005 advancing, MCLK0 exactly 24 MHz),
+  and the CSID test pattern proved CSID -> VFE -> video worked, but the CSID
+  saw SOT/EOT on all four lanes with only ECC errors and no long packets
+  (RX IRQ status 0x00d040ff). A debug build with a runtime lane-assign
+  override swept all 24 permutations (`tools/rootfs/camera/lanesweep.sh`):
+  only **0x0123** works. **The board routes the data lanes to CSIPHY0 in
+  reverse**, now `data-lanes = <3 2 1 0>` on the CSIPHY0 endpoint.
+- Patch **0031**: `s5k3m5` reported the crop height as the width (a
+  4208x4208 crop for the 4208x3120 mode).
+- Tools: `tools/rootfs/camera/rawcap.sh` (on the tablet; 2104x1184 10-bit
+  GRBG through CSIPHY0 -> CSID0 -> VFE0 RDI0 -> `/dev/video0`) and
+  `tools/camera/raw2png.py` (host-side preview debayer).
+
+The first real image (a desk scene) is recognisable and correctly coloured
+after gray-world white balance: slightly soft (the AF actuator isn't
+driven, so the lens rests at its default position) and dark (no
+auto-exposure; captures used the maximum 1620 lines). Both belong to later
+stages: AE/AWB come with libcamera's software ISP (stage 3), focus with
+the actuator (stage 5).
+
+Next: stage 3, libcamera `simple` pipeline + software ISP, then PipeWire.
+
 ## To grab during the stock boot (planned anyway for the suspend work)
 
 - `/vendor/lib64/camera/com.qti.sensormodule.*.bin` and

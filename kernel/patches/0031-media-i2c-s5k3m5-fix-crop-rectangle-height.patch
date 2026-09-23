@@ -1,0 +1,20 @@
+From: gts7l project
+Subject: [PATCH] media: i2c: s5k3m5: fix the crop rectangle's height
+
+s5k3m5_get_selection() reports the mode's width as the height of the
+crop and crop-bounds rectangles, so the 4208x3120 mode claims a
+4208x4208 crop. Report the height.
+
+diff --git a/drivers/media/i2c/s5k3m5.c b/drivers/media/i2c/s5k3m5.c
+index c591b580d..fe040302c 100644
+--- a/drivers/media/i2c/s5k3m5.c
++++ b/drivers/media/i2c/s5k3m5.c
+@@ -1052,7 +1052,7 @@ static int s5k3m5_get_selection(struct v4l2_subdev *sd,
+ 		sel->r.left = 0;
+ 		sel->r.top = 0;
+ 		sel->r.width = s5k3m5->mode->width;
+-		sel->r.height = s5k3m5->mode->width;
++		sel->r.height = s5k3m5->mode->height;
+ 		return 0;
+ 	default:
+ 		return -EINVAL;
