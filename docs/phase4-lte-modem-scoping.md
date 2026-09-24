@@ -1,0 +1,137 @@
+# Phase 4: LTE modem scoping (2026-09-24)
+
+Scoping only; nothing implemented yet. SIM is in the tablet.
+
+## What the modem is
+
+SM8250 has **no integrated modem**. The SM-T875 uses an external
+**Qualcomm SDX55 (X55)**, stock DT `mdm0: qcom,mdm0 { compatible =
+"qcom,ext-sdx55m"; }` (`kona.dtsi`), attached over **PCIe2** and driven by
+MHI (`kona-mhi.dtsi`: `&pcie2_rp`, `mhi,name = "esoc0"`, 111 channels,
+channel 2/3 = SAHARA). It is **flashless**: the host powers it, pushes its
+first-stage loader over PCIe, then serves every other image with the
+Sahara protocol. (M.2 X55 modules, which mainline supports, boot from
+their own flash instead.)
+
+### Wiring (stock DT, gts7l r07 overlay)
+
+| Signal | Where |
+|---|---|
+| PCIe | PCIe2 (`pcie@1c10000`): PERST gpio85, CLKREQ gpio86, WAKE gpio87; PHY supplies L9A 1.2 V, L5A 0.88 V |
+| MDM2AP errfatal / status | TLMM gpio1 / gpio3 (interrupts) |
+| AP2MDM errfatal / status | TLMM gpio57 / gpio56 |
+| AP2MDM errfatal2 (Samsung) | PM8150L gpio7 |
+| Soft reset GPIO | none on this board (`qcom,ap2mdm-soft-reset-gpio = [00]`) |
+| Modem power/reset | the X55's own PMIC **PMX55 ("pmxprairie") on the SoC's SPMI bus, SID 8**, PON at 0x800 with `qcom,modem-reset` |
+
+Stock power-on (`drivers/esoc/esoc-mdm-pon.c`, `sdx55m_toggle_soft_reset()`
+-> `qpnp_pon_modem_pwr_off(PON_POWER_OFF_WARM_RESET)`): write PMX55 PON
+0x863 = 0, 0x862 = reset type (warm), 0x863 = 0x80 (RESET_EN), 0x864 =
+0xA5 (GO); wait 150 ms; AP2MDM_STATUS (gpio56) = 1. The X55 PBL then
+brings up PCIe (device 17cb:0306). No PBLRDY GPIO: the esoc driver asks
+userspace (`mdm_helper`) to confirm the link.
+
+State on mainline today: MDM2AP status/errfatal low (X55 off), PCIe2
+unused, and the PMX55 is not in our DT (mainline sees SPMI SIDs 0/1/4/5/
+0xa/0xb only).
+
+### Firmware and storage (all on the tablet already)
+
+- **`modem` partition** (sda20, vfat, 204 MB) `image/sdx55m/`: `sbl1.mbn`,
+  `aop.mbn`, `tz.mbn`, `hyp.mbn`, `devcfg.mbn`, `xbl_cfg.elf`, `apdp.mbn`,
+  `sec.elf`, `multi_image_qti.mbn`, `apps.mbn` (the X55's own Linux),
+  `qdsp6sw.mbn` (84 MB, modem DSP), `acdb.mbn`, `mdmddr.mbn`, `modemr.jsn`,
+  512-byte `efs1/2/3.bin` placeholders; `image/modem_pr/mcfg` (carrier
+  configs); `image/sdx55/qdsp6m.qdb`. Build IDs in `verinfo/`
+  (e.g. `BOOT.SBL.4.1-00138-SDX55MAAAAANAZB-2`).
+- **EFS (per-device NV: IMEI, RF calibration):** `mdm1m9kefs1/2/3` (2 MB
+  each), `mdm1m9kefsc` (32 KB); `mdmddr` (DDR training, 1 MB). The
+  modem stack **writes back** to these at runtime (EFS sync).
+- **Backups (2026-09-24):** `work/backup-modem-2026-09-24/` on the PC:
+  the four `mdm1m9kefs*`, `mdmddr`, `modemst1/2`, `fsg`, `fsc`, `efs`,
+  `sec_efs`, sha256 in `SHA256SUMS`, verified against the device. **Not in
+  git** (IMEI/calibration). Never write these partitions without a fresh
+  backup.
+
+## Boot chain (downstream Android)
+
+1. esoc driver: PMX55 warm reset, AP2MDM_STATUS = 1.
+2. PCIe link up, 17cb:0306; MHI BHI/BHIe pushes `sdx55m/sbl1.mbn`.
+3. SBL pulls the rest via **Sahara** over MHI channels 2/3; on Android
+   served by userspace `ks` through `/dev/mhi_0306_02.01.00_pipe_2`.
+   Image IDs (from the Mi 10T port's kernel client): 6 apps, 23 aop,
+   16/17/20 efs1/2/3, 34 multi_image, 25 tz, 29 acdb, 33 hyp, 40 apdp,
+   41 devcfg, 42 sec.elf, else qdsp6sw.
+4. `mdm_helper`: esoc ioctl handshake, BOOT_DONE.
+5. Runtime: EFS sync back to `mdm1m9kefs*` via Sahara memory-debug mode on
+   MHI channel 10 (`ks -m -p ..._pipe_10 ... -g mdm1`), an RFS/TFTP server
+   over QRTR (instance 3), QMI over QRTR (IPCR channel), data on MHI
+   IP_HW0.
+
+## Mainline status (7.3-rc4)
+
+- `pci_generic` knows 17cb:0306 as `qcom/sdx55m/sbl1.mbn` + EDL, for M.2
+  modules: SBL only, no Sahara client for modems, no esoc/GPIO/PMIC
+  sequencing, no flashless channel map.
+- In-tree Sahara: only `drivers/accel/qaic/sahara.c` (AIC100). Qualcomm's
+  "Sahara protocol enhancements" series (v6, 2026-07) moves it to
+  `drivers/bus/mhi/host/clients` on the generic SAHARA channel, no SDX55
+  table, not merged. Foxconn SAHARA channel declarations (676f19e7) are
+  for ramdumps only.
+- No upstream DT for any SM8250 device's embedded modem.
+- Data path pieces are mainline: `MHI_NET`, `MHI_WWAN_CTRL`, `QRTR_MHI`,
+  `RMNET`.
+
+## Prior art: Xiaomi Mi 10T "apollo" (royka1, postmarketOS, kernel 7.1)
+
+Same SoC and modem; **registers on LTE/5G, voice both ways, SMS, data**.
+- Kernel: gitlab.postmarketos.org/royka1/linux, branch `apollo-7.1`
+  (tag `apollo-7.1.0-r12`). Large imports: `deb1e9af` (MHI SDX55: Sahara
+  v2 client on channels 2/3 with `request_firmware("sdx55m/...")`, a
+  `qcom-sdx55m-fusion` pci_generic variant with the downstream channel map,
+  BL logger, keepalive, MHI satellite for ADSP voice), `9b6d2e0e` (esoc
+  framework import, ~5k lines), `fb67694f` (IPA MHI proxy, for the offload
+  path), plus PCIe relink/L23, QRTR-over-MHI, sysmon/PDR as `esoc0`,
+  q6voice over MHI.
+- Userspace (github.com/royka1/Xiaomi-Apollo-pmOS-packages):
+  `mdm_helper_native`, `pm_service_native` (Peripheral Manager QMI, needed
+  before the modem touches secure NV), `mhi_efs_sync`, `tqftpserv-sdx55`
+  (QRTR instance 3, retry on EAGAIN, else ERRFATAL), EFS extraction,
+  ModemManager patches (qcom-soc plugin accepting `mhi_net`; WDS bind to
+  the PCIe endpoint) and `--test-multiplex-requested` (raw IP wedges
+  after ~10 MB).
+- Quirks: without real NV the modem ERRFATALs ~15 s into mission mode;
+  AUDIO_VOICE_0 start ERRFATALs; runtime PM/M3 must stay off; don't let
+  MM probe the EFS port with AT (ERRFATAL).
+- OnePlus 8T "kebab" reuses it: Sahara boot, mission mode and SIM work,
+  stuck at MCFG apply (no radio).
+
+## Plan (stages, each testable)
+
+1. **Power and link:** PMX55 PON node (SID 8) or a minimal reset helper,
+   AP2MDM/MDM2AP GPIOs, PCIe2 + PHY enabled. Goal: 17cb:0306 enumerates
+   and mainline pci_generic loads `sbl1.mbn` (SBL then waits for Sahara:
+   harmless).
+2. **Sahara:** port apollo's Sahara client and fusion channel map, images
+   from the `modem` partition (`/lib/firmware/qcom/sdx55m` or a mount).
+   Goal: X55 reaches mission mode (AMSS).
+3. **Control:** QRTR over MHI, pd-mapper/sysmon, `tqftpserv` (instance 3),
+   `pm_service`, EFS served **read-only first** (from the backups), then
+   decide on write-back. Goal: stable mission mode, QMI answers, SIM seen.
+4. **Data:** `mhi_net` on IP_HW0, rmnet/QMAP, ModemManager with apollo's
+   patches. Goal: LTE data.
+5. **Later:** SMS, voice (ADSP/q6voice over MHI), GPS; power management.
+
+## Risks and open questions
+
+- EFS/NV: IMEI and calibration live there. Keep write-back off until the
+  stack is stable; backups exist.
+- Samsung differences from the Xiaomi build: Samsung firmware image set is
+  the same Qualcomm layout (no `multi_image.mbn`, only
+  `multi_image_qti.mbn`: check Sahara ID 34), Samsung may add its own QMI
+  services or NV checks (secure NV via `pm_service`?).
+- The esoc framework import is large; a smaller dedicated power/boot
+  driver may be enough for our needs.
+- No stock-boot capture needed so far. Nice to have in the stock pass:
+  logcat of `mdm_helper`/`ks`/`pm-service` and the esoc/mhi kernel log, as
+  a reference sequence for this exact firmware.
