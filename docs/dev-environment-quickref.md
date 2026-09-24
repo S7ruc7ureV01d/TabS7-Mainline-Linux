@@ -59,8 +59,8 @@ alone without asking, and getting this wrong wastes a round-trip):
     `/etc/sudoers.d/10-wheel` (`%wheel ALL=(ALL:ALL) ALL`, password
     required).
   - **Current rootfs tarball:**
-    `work/archroot-build/archroot-rootfs-v10.tar` (2026-09-23, sha256
-    `fd30218fbacbe65ac88f6779cff664ff9e8ab8ffa7678e2c45250fd2f9fe0fed`).
+    `work/archroot-build/archroot-rootfs-v11.tar` (2026-09-24, sha256
+    `74b39489b76f7d847795fc392221a1b19a975152e2a9a5b693fc4631b62fb947`).
     Lineage, each step a verified stream-rewrite of the previous one with
     Python's `tarfile` (GNU `tar --delete` corrupted this archive):
     - v5 = v4 + `authorized_keys` owned by root + `/etc/sudoers.d/10-wheel`
@@ -109,6 +109,14 @@ alone without asking, and getting this wrong wastes a round-trip):
       Verified: 183430 entries = v9 - 1; capabilities identical; both
       files match the repo; GNU tar and bsdtar read it cleanly. It needs
       a kernel with patches 0018-0023 and the stage-5 DTS/config.
+
+    - v11 = v10 + an 8 GiB swap file service (`tools/rootfs/swap/`,
+      `gts7l-swapfile.service`, enabled): it creates `/swapfile` with
+      `mkswap --file --size 8G` on first boot (not shipped in the tarball)
+      and activates it. v11 does not yet include the camera, USB and
+      microSD userspace installed live since v10 (libcamera stack, Kamoso,
+      GStreamer PipeWire plugins, dosfstools/exfatprogs,
+      `tools/rootfs/camera/`).
 
     File capabilities (`kwin_wayland`, `newuidmap`, ...) are preserved
     byte-for-byte. Python tags two entries with a `hdrcharset=BINARY` pax
