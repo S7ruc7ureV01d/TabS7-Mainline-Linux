@@ -1,0 +1,12 @@
+[Unit]
+Description=Boot the SDX55 modem: firmware (read-only) + MHI rebind (gts7l)
+After=local-fs.target
+Requires=local-fs.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/bin/sdx55-boot.sh
+
+[Install]
+WantedBy=multi-user.target

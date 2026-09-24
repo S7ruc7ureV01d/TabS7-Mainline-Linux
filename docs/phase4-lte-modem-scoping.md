@@ -1,6 +1,6 @@
 # Phase 4: LTE modem scoping (2026-09-24)
 
-Stage 1 done (SBL runs on the X55). SIM is in the tablet.
+Stage 1 done (SBL runs on the X55); stage 2 in progress (Sahara session starts, SBL waits at TRDATA). SIM is in the tablet.
 
 ## What the modem is
 
@@ -132,6 +132,65 @@ Same SoC and modem; **registers on LTE/5G, voice both ways, SMS, data**.
 - The Mi 10T kernel source (apollo-7.1.0-r12) is in
   `references/apollo-linux/` (`drivers/bus/mhi/host/sahara.c`,
   `mhi_bl.c`, `satellite.c`, `mhi_chan_keepalive.c`, their `pci_generic`).
+
+## Stage 2 (in progress, 2026-09-24): Sahara session starts, SBL waits
+
+Work in progress, not in the patch series: `kernel/patches-wip/lte-stage2-wip.patch`
+(MHI core, pci_generic, Sahara client, SBL log reader) and
+`tools/rootfs/modem/` (boot helper, not enabled).
+
+What was needed so far, in order:
+
+1. **Flashless profile** (`qcom-sdx55m-flashless` in pci_generic): the
+   downstream channel map as trimmed by the Mi 10T port - SAHARA 2/3 and
+   BL 25 in SBL; DIAG, EFS, QMI/QMI1, IP_CTRL, IPCR, IP_SW0, IP_HW0 in
+   mission mode. No DSP offload channels.
+2. **Firmware at runtime:** `tools/rootfs/modem/sdx55-boot.sh` bind-mounts
+   the `modem` partition's `image/sdx55m` read-only as
+   `/lib/firmware/qcom/sdx55m`, puts read-only RAM copies of
+   `mdm1m9kefs1/2/3` at `qcom/sdx55m-efs/efsN.bin` (the partition only has
+   512-byte placeholders; nothing writes the real partitions), and
+   rebinds `mhi-pci-generic` (the probe at 0.8 s is before the rootfs).
+3. **Events are polled:** the X55's MSIs never reach the CPU (SMMU faults
+   at the MSI target, the host bridge's `cfg0_base`; the SMMU sits in front
+   of the DWC iMSI-RX). Identity-mapping that page (Mi 10T approach) made
+   the tablet hang ~20 s later - dropped. Instead `mhi_poll_events()`
+   (MHI core) runs every 2 ms from a pci_generic timer, only for this
+   profile.
+4. **30-bit DMA:** the firmware only reaches IOVAs up to `0x3fffffff`
+   (downstream DT pool 0x20000000 + 0x1fffffff). With 32 bits the IOMMU
+   put the rings near the top of the 4 GB range and SBL never wrote an
+   event. `dma_data_width = 30` bounds the DMA mask and the advertised
+   `iova_stop`.
+5. **SBL entry from the register:** SBL sends no EE event; after READY the
+   core now reads the EE register and queues the SBL transition itself
+   (`sbl_ee_from_reg`, as the Mi 10T port does). This creates the SAHARA
+   and BL channel devices.
+6. **Polled rings:** handled event elements are zeroed (`ev_polled`) so a
+   stale element can't be reprocessed on the next lap. The device does
+   skip one element early on (a real all-zero element, logged "Unhandled
+   event type: 0"); **don't** stop at zero elements - that lost the
+   channel-start command completion.
+7. **SBL boot log** (`mhi_bl_logger` on channel 25, from the Mi 10T port):
+   SBL prints its log there (~3.3 KB, `\r\n` lines).
+
+Current state:
+
+- Sahara HELLO (v2, compatible 1, max 0x400, mode 0 = image transfer)
+  arrives; our HELLO_RESP is delivered (TX completion, 48 bytes). One run
+  got BAD_TRE (completion code 0x11) for the same reply, so descriptor
+  delivery is not fully reliable yet.
+- SBL log ends at **`TRDATA Image Load, Start`** and SBL sends no
+  READ_DATA; BHI shows SBL, no error code. SBL image
+  `BOOT.SBL.4.1-00157`, boot interface PCIe.
+- Experiment in the tree right now: `&pcie2` without `dma-coherent`
+  (testing whether the intermittent BAD_TRE is a coherency effect). The
+  committed DTS keeps it coherent. No difference seen yet.
+
+Next: find what SBL expects for "TRDATA" (probably DDR training data -
+related to `mdmddr`/`mdmddr.mbn`) and whether a step is missing before its
+first READ_DATA; compare with the Mi 10T port's userspace and the
+downstream kickstart flow.
 
 ## Plan (stages, each testable)
 

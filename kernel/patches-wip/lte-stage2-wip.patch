@@ -1,0 +1,1015 @@
+LTE modem stage 2 - WORK IN PROGRESS, NOT IN THE SERIES
+(2026-09-24, docs/phase4-lte-modem-scoping.md "Stage 2")
+
+Applies on top of kernel/patches/00*. Contents:
+- pci_generic: qcom-sdx55m-flashless profile (channel map, 30-bit DMA),
+  2 ms event polling timer (MSIs are lost), sets sbl_ee_from_reg and
+  ev_polled.
+- MHI core: mhi_poll_events(); SBL entry picked up from the EE register
+  (sbl_ee_from_reg); handled event elements zeroed when polled; temporary
+  "poll:" event logging.
+- mhi_sahara_modem (sahara-modem.c) and mhi_bl_logger (mhi-bl.c), from
+  the Xiaomi Mi 10T postmarketOS port, adapted (image map, EFS from
+  qcom/sdx55m-efs/, per-packet debug logging).
+- Kconfig: MHI_BUS_SAHARA_MODEM, MHI_BUS_BL_LOGGER (both =y in the
+  fragment).
+
+Status: HELLO/HELLO_RESP done, SBL waits at "TRDATA Image Load".
+
+ drivers/bus/mhi/host/sahara-modem.c | 510 ++++++++++++++++++++++++++++++++++++
+ include/linux/mhi.h                 |  12 +
+ 8 files changed, 830 insertions(+), 1 deletion(-)
+diff --git a/drivers/bus/mhi/host/Kconfig b/drivers/bus/mhi/host/Kconfig
+index da5cd0c9f..44c7d181a 100644
+--- a/drivers/bus/mhi/host/Kconfig
++++ b/drivers/bus/mhi/host/Kconfig
+@@ -21,6 +21,22 @@ config MHI_BUS_DEBUG
+ 	  reading and/or modifying some values within the MHI controller
+ 	  for debug and test purposes.
+ 
++config MHI_BUS_SAHARA_MODEM
++	tristate "MHI Sahara firmware loader for flashless modems"
++	depends on MHI_BUS
++	help
++	  Serves the images a flashless Qualcomm modem (e.g. an SDX55 soldered
++	  next to an SM8250) requests over the MHI SAHARA channel once its SBL
++	  runs, from the firmware directory.
++
++config MHI_BUS_BL_LOGGER
++	tristate "MHI SBL boot log reader"
++	depends on MHI_BUS
++	help
++	  Reads the boot log a flashless Qualcomm modem's SBL writes to the
++	  MHI "BL" channel and prints it to the kernel log, keeping the
++	  channel drained.
++
+ config MHI_BUS_PCI_GENERIC
+ 	tristate "MHI PCI controller driver"
+ 	depends on MHI_BUS
+diff --git a/drivers/bus/mhi/host/Makefile b/drivers/bus/mhi/host/Makefile
+index 859c2f384..15e676d38 100644
+--- a/drivers/bus/mhi/host/Makefile
++++ b/drivers/bus/mhi/host/Makefile
+@@ -4,3 +4,9 @@ mhi-$(CONFIG_MHI_BUS_DEBUG) += debugfs.o
+ 
+ obj-$(CONFIG_MHI_BUS_PCI_GENERIC) += mhi_pci_generic.o
+ mhi_pci_generic-y += pci_generic.o
++
++obj-$(CONFIG_MHI_BUS_SAHARA_MODEM) += mhi_sahara_modem.o
++mhi_sahara_modem-y += sahara-modem.o
++
++obj-$(CONFIG_MHI_BUS_BL_LOGGER) += mhi_bl_logger.o
++mhi_bl_logger-y += mhi-bl.o
+diff --git a/drivers/bus/mhi/host/boot.c b/drivers/bus/mhi/host/boot.c
+index 19c84913c..05bb4cbbc 100644
+--- a/drivers/bus/mhi/host/boot.c
++++ b/drivers/bus/mhi/host/boot.c
+@@ -597,6 +597,20 @@ void mhi_fw_load_handler(struct mhi_controller *mhi_cntrl)
+ 		goto error_ready_state;
+ 	}
+ 
++	/*
++	 * A flashless SDX55 is already running SBL by now and sends no EE
++	 * event for it: take the EE from the register (as the Xiaomi Mi 10T
++	 * postmarketOS port does), so the SBL channels (SAHARA) get created.
++	 */
++	if (mhi_cntrl->sbl_ee_from_reg) {
++		enum mhi_ee_type cur_ee = mhi_get_exec_env(mhi_cntrl);
++
++		if (cur_ee == MHI_EE_SBL)
++			mhi_queue_state_transition(mhi_cntrl, DEV_ST_TRANSITION_SBL);
++		else if (MHI_IN_MISSION_MODE(cur_ee))
++			mhi_queue_state_transition(mhi_cntrl, DEV_ST_TRANSITION_MISSION_MODE);
++	}
++
+ 	dev_info(dev, "Wait for device to enter SBL or Mission mode\n");
+ 	return;
+ 
+diff --git a/drivers/bus/mhi/host/main.c b/drivers/bus/mhi/host/main.c
+index 53c0ffe30..7a50291ac 100644
+--- a/drivers/bus/mhi/host/main.c
++++ b/drivers/bus/mhi/host/main.c
+@@ -535,6 +535,35 @@ irqreturn_t mhi_intvec_threaded_handler(int irq_number, void *priv)
+ 	return IRQ_HANDLED;
+ }
+ 
++/**
++ * mhi_poll_events - poll every MHI event ring and wake state waiters
++ * @mhi_cntrl: MHI controller
++ *
++ * For a controller whose device MSIs do not reach the host: on SM8250 an
++ * embedded (flashless) SDX55's MSIs fault in the SMMU, which sits in front
++ * of the DWC iMSI-RX block. Called periodically from a timer, this does
++ * what the interrupts would. After the Xiaomi Mi 10T (apollo) postmarketOS
++ * port's mhi_poll_events().
++ */
++void mhi_poll_events(struct mhi_controller *mhi_cntrl)
++{
++	struct mhi_event *mhi_event;
++	int i;
++
++	wake_up_all(&mhi_cntrl->state_event);
++
++	if (!mhi_cntrl->mhi_ctxt || !mhi_cntrl->mhi_event)
++		return;
++
++	mhi_event = mhi_cntrl->mhi_event;
++	for (i = 0; i < mhi_cntrl->total_ev_rings; i++, mhi_event++) {
++		if (mhi_event->offload_ev)
++			continue;
++		mhi_irq_handler(0, mhi_event);
++	}
++}
++EXPORT_SYMBOL_GPL(mhi_poll_events);
++
+ irqreturn_t mhi_intvec_handler(int irq_number, void *dev)
+ {
+ 	struct mhi_controller *mhi_cntrl = dev;
+@@ -830,6 +859,10 @@ int mhi_process_ctrl_ev_ring(struct mhi_controller *mhi_cntrl,
+ 	while (dev_rp != local_rp) {
+ 		enum mhi_pkt_type type = MHI_TRE_GET_EV_TYPE(local_rp);
+ 
++		if (mhi_cntrl->ev_polled)
++			dev_info(dev, "poll: ctrl ev type 0x%x d0 %08x d1 %08x\n", type,
++				 le32_to_cpu(local_rp->dword[0]), le32_to_cpu(local_rp->dword[1]));
++
+ 		trace_mhi_ctrl_event(mhi_cntrl, local_rp);
+ 
+ 		switch (type) {
+@@ -945,6 +978,9 @@ int mhi_process_ctrl_ev_ring(struct mhi_controller *mhi_cntrl,
+ 			break;
+ 		}
+ 
++		/* Polled: clear it, so an unwritten element reads as type 0 */
++		if (mhi_cntrl->ev_polled)
++			memset(local_rp, 0, sizeof(*local_rp));
+ 		mhi_recycle_ev_ring_element(mhi_cntrl, ev_ring);
+ 		local_rp = ev_ring->rp;
+ 
+@@ -997,6 +1033,12 @@ int mhi_process_data_event_ring(struct mhi_controller *mhi_cntrl,
+ 	while (dev_rp != local_rp && event_quota > 0) {
+ 		enum mhi_pkt_type type = MHI_TRE_GET_EV_TYPE(local_rp);
+ 
++		if (mhi_cntrl->ev_polled)
++			dev_info(&mhi_cntrl->mhi_dev->dev,
++				 "poll: er %u ev type 0x%x chan %lu d0 %08x d1 %08x\n",
++				 mhi_event->er_index, type, MHI_TRE_GET_EV_CHID(local_rp),
++				 le32_to_cpu(local_rp->dword[0]), le32_to_cpu(local_rp->dword[1]));
++
+ 		trace_mhi_data_event(mhi_cntrl, local_rp);
+ 
+ 		chan = MHI_TRE_GET_EV_CHID(local_rp);
+@@ -1020,6 +1062,9 @@ int mhi_process_data_event_ring(struct mhi_controller *mhi_cntrl,
+ 			}
+ 		}
+ 
++		/* Polled: clear it, so an unwritten element reads as type 0 */
++		if (mhi_cntrl->ev_polled)
++			memset(local_rp, 0, sizeof(*local_rp));
+ 		mhi_recycle_ev_ring_element(mhi_cntrl, ev_ring);
+ 		local_rp = ev_ring->rp;
+ 
+diff --git a/drivers/bus/mhi/host/mhi-bl.c b/drivers/bus/mhi/host/mhi-bl.c
+new file mode 100644
+index 000000000..699f13d53
+--- /dev/null
++++ b/drivers/bus/mhi/host/mhi-bl.c
+@@ -0,0 +1,124 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * Minimal MHI boot logger client for Qualcomm modem SBL boot messages.
++ *
++ * Some SDX55 fusion setups expose a DL-only "BL" channel in SBL EE in
++ * parallel with SAHARA. Vendor kernels bind a small consumer to drain that
++ * traffic. Keep the channel serviced even if the messages themselves are only
++ * used for debug.
++ *
++ * From the Xiaomi Mi 10T (apollo) postmarketOS port (royka1, linux
++ * apollo-7.1), used for the Galaxy Tab S7's embedded SDX55.
++ */
++
++#include <linux/device.h>
++#include <linux/mhi.h>
++#include <linux/mod_devicetable.h>
++#include <linux/module.h>
++#include <linux/slab.h>
++#include <linux/string.h>
++
++#define MHI_BL_RX_SIZE 0x1000
++
++struct mhi_bl_dev {
++	struct mhi_device *mhi_dev;
++	u8 *rx_buf;
++};
++
++static int mhi_bl_queue_rx(struct mhi_bl_dev *bdev)
++{
++	return mhi_queue_buf(bdev->mhi_dev, DMA_FROM_DEVICE, bdev->rx_buf,
++			     MHI_BL_RX_SIZE, MHI_EOT);
++}
++
++static int mhi_bl_probe(struct mhi_device *mhi_dev,
++			const struct mhi_device_id *id)
++{
++	struct mhi_bl_dev *bdev;
++	int ret;
++
++	bdev = devm_kzalloc(&mhi_dev->dev, sizeof(*bdev), GFP_KERNEL);
++	if (!bdev)
++		return -ENOMEM;
++
++	bdev->rx_buf = devm_kzalloc(&mhi_dev->dev, MHI_BL_RX_SIZE, GFP_KERNEL);
++	if (!bdev->rx_buf)
++		return -ENOMEM;
++
++	bdev->mhi_dev = mhi_dev;
++	dev_set_drvdata(&mhi_dev->dev, bdev);
++
++	ret = mhi_prepare_for_transfer(mhi_dev);
++	if (ret)
++		return ret;
++
++	ret = mhi_bl_queue_rx(bdev);
++	if (ret) {
++		mhi_unprepare_from_transfer(mhi_dev);
++		return ret;
++	}
++
++	dev_info(&mhi_dev->dev, "BL: boot logger channel ready\n");
++	return 0;
++}
++
++static void mhi_bl_remove(struct mhi_device *mhi_dev)
++{
++	mhi_unprepare_from_transfer(mhi_dev);
++}
++
++static void mhi_bl_dl_xfer_cb(struct mhi_device *mhi_dev,
++			      struct mhi_result *result)
++{
++	struct mhi_bl_dev *bdev = dev_get_drvdata(&mhi_dev->dev);
++	size_t n;
++
++	if (result->transaction_status || !result->bytes_xferd)
++		return;
++
++	n = min_t(size_t, result->bytes_xferd, MHI_BL_RX_SIZE - 1);
++	bdev->rx_buf[n] = '\0';
++
++	/* SBL boot log: "\r\n"-separated text lines */
++	{
++		char *p = (char *)bdev->rx_buf, *line;
++
++		while ((line = strsep(&p, "\n"))) {
++			size_t len = strlen(line);
++
++			if (len && line[len - 1] == '\r')
++				line[--len] = '\0';
++			if (len)
++				dev_info(&mhi_dev->dev, "BL: %s\n", line);
++		}
++	}
++
++	if (mhi_bl_queue_rx(bdev))
++		dev_err(&mhi_dev->dev, "BL: failed to requeue RX buffer\n");
++}
++
++static void mhi_bl_ul_xfer_cb(struct mhi_device *mhi_dev,
++			      struct mhi_result *result)
++{
++}
++
++static const struct mhi_device_id mhi_bl_match_table[] = {
++	{ .chan = "BL" },
++	{}
++};
++MODULE_DEVICE_TABLE(mhi, mhi_bl_match_table);
++
++static struct mhi_driver mhi_bl_driver = {
++	.id_table = mhi_bl_match_table,
++	.probe = mhi_bl_probe,
++	.remove = mhi_bl_remove,
++	.ul_xfer_cb = mhi_bl_ul_xfer_cb,
++	.dl_xfer_cb = mhi_bl_dl_xfer_cb,
++	.driver = {
++		.name = "mhi_bl_logger",
++	},
++};
++module_mhi_driver(mhi_bl_driver);
++
++MODULE_DESCRIPTION("MHI SBL boot logger client");
++MODULE_LICENSE("GPL");
+diff --git a/drivers/bus/mhi/host/pci_generic.c b/drivers/bus/mhi/host/pci_generic.c
+index f2cd6c358..f36ba9304 100644
+--- a/drivers/bus/mhi/host/pci_generic.c
++++ b/drivers/bus/mhi/host/pci_generic.c
+@@ -344,6 +344,55 @@ static struct mhi_event_config modem_qcom_v1_mhi_events[] = {
+ 	MHI_EVENT_CONFIG_HW_DATA(5, 2048, 101)
+ };
+ 
++/*
++ * SDX55 without flash, next to its host (e.g. Galaxy Tab S7, Xiaomi Mi 10T):
++ * SBL fetches the rest of the images over SAHARA; in mission mode QMI/QRTR
++ * go over IPCR and data over IP_HW0. From the downstream kona-mhi.dtsi
++ * channel map, as trimmed by the Mi 10T postmarketOS port (no DSP offload
++ * channels here).
++ */
++static const struct mhi_channel_config modem_qcom_sdx55_flashless_channels[] = {
++	MHI_CHANNEL_CONFIG_UL_SBL(2, "SAHARA", 128, 1),
++	MHI_CHANNEL_CONFIG_DL_SBL(3, "SAHARA", 128, 1),
++	MHI_CHANNEL_CONFIG_UL(4, "DIAG", 16, 1),
++	MHI_CHANNEL_CONFIG_DL(5, "DIAG", 16, 1),
++	MHI_CHANNEL_CONFIG_UL(10, "EFS", 64, 1),
++	MHI_CHANNEL_CONFIG_DL(11, "EFS", 64, 1),
++	MHI_CHANNEL_CONFIG_UL(14, "QMI", 4, 0),
++	MHI_CHANNEL_CONFIG_DL(15, "QMI", 4, 0),
++	MHI_CHANNEL_CONFIG_UL(16, "QMI1", 64, 3),
++	MHI_CHANNEL_CONFIG_DL(17, "QMI1", 64, 3),
++	MHI_CHANNEL_CONFIG_UL(18, "IP_CTRL", 64, 1),
++	MHI_CHANNEL_CONFIG_DL(19, "IP_CTRL", 64, 1),
++	MHI_CHANNEL_CONFIG_UL(20, "IPCR", 8, 0),
++	MHI_CHANNEL_CONFIG_DL(21, "IPCR", 8, 0),
++	MHI_CHANNEL_CONFIG_DL_SBL(25, "BL", 32, 1),
++	MHI_CHANNEL_CONFIG_UL(46, "IP_SW0", 64, 2),
++	MHI_CHANNEL_CONFIG_DL(47, "IP_SW0", 64, 3),
++	MHI_CHANNEL_CONFIG_HW_UL(100, "IP_HW0", 512, 4),
++	MHI_CHANNEL_CONFIG_HW_DL(101, "IP_HW0", 512, 5),
++};
++
++static struct mhi_event_config modem_qcom_sdx55_flashless_events[] = {
++	MHI_EVENT_CONFIG_CTRL(0, 64),
++	MHI_EVENT_CONFIG_DATA(1, 256),
++	MHI_EVENT_CONFIG_SW_DATA(2, 64),
++	MHI_EVENT_CONFIG_SW_DATA(3, 64),
++	MHI_EVENT_CONFIG_HW_DATA(4, 1024, 100),
++	MHI_EVENT_CONFIG_HW_DATA(5, 2048, 101),
++};
++
++/* SBL then streams ~90 MB of images before mission mode: generous timeouts */
++static const struct mhi_controller_config modem_qcom_sdx55_flashless_config = {
++	.max_channels = 128,
++	.timeout_ms = 60000,
++	.ready_timeout_ms = 50000,
++	.num_channels = ARRAY_SIZE(modem_qcom_sdx55_flashless_channels),
++	.ch_cfg = modem_qcom_sdx55_flashless_channels,
++	.num_events = ARRAY_SIZE(modem_qcom_sdx55_flashless_events),
++	.event_cfg = modem_qcom_sdx55_flashless_events,
++};
++
+ static const struct mhi_controller_config mhi_qcom_sa8775p_config = {
+ 	.max_channels = 128,
+ 	.timeout_ms = 8000,
+@@ -416,6 +465,25 @@ static const struct mhi_pci_dev_info mhi_qcom_sdx55_info = {
+ 	.sideband_wake = false,
+ };
+ 
++static const struct mhi_pci_dev_info mhi_qcom_sdx55_flashless_info = {
++	.name = "qcom-sdx55m-flashless",
++	.fw = "qcom/sdx55m/sbl1.mbn",
++	.edl = "qcom/sdx55m/edl.mbn",
++	.edl_trigger = true,
++	.config = &modem_qcom_sdx55_flashless_config,
++	.bar_num = MHI_PCI_DEFAULT_BAR_NUM,
++	/*
++	 * The flashless firmware only reaches IOVAs up to 0x3fffffff (the
++	 * downstream DT's modem pool is 0x20000000 + 0x1fffffff). With a
++	 * 32-bit mask the IOMMU allocator places the rings near 0xffffe000
++	 * and SBL never delivers an event. 30 bits bounds both the DMA
++	 * mask and the iova_stop the modem is told.
++	 */
++	.dma_data_width = 30,
++	.mru_default = 32768,
++	.sideband_wake = false,
++};
++
+ static const struct mhi_pci_dev_info mhi_qcom_sdx35_info = {
+ 	.name = "qcom-sdx35m",
+ 	.config = &modem_qcom_v2_mhiv_config,
+@@ -1093,10 +1161,29 @@ struct mhi_pci_device {
+ 	struct pci_saved_state *pci_state;
+ 	struct work_struct recovery_work;
+ 	struct timer_list health_check_timer;
++	struct timer_list poll_timer;	/* flashless SDX55: MSIs are lost */
++	bool poll_events;
+ 	unsigned long status;
+ 	bool reset_on_remove;
+ };
+ 
++/*
++ * The flashless SDX55 on SM8250: its MSIs fault in the SMMU before the DWC
++ * iMSI-RX block can terminate them, so the host never hears of the SBL
++ * entry (and nothing else). Poll the event rings instead, as the Xiaomi
++ * Mi 10T (apollo) postmarketOS port does.
++ */
++#define MHI_PCI_POLL_PERIOD_MS	2
++
++static void mhi_pci_poll(struct timer_list *t)
++{
++	struct mhi_pci_device *mhi_pdev = timer_container_of(mhi_pdev, t, poll_timer);
++
++	mhi_poll_events(&mhi_pdev->mhi_cntrl);
++	mod_timer(&mhi_pdev->poll_timer,
++		  jiffies + msecs_to_jiffies(MHI_PCI_POLL_PERIOD_MS));
++}
++
+ static int mhi_pci_read_reg(struct mhi_controller *mhi_cntrl,
+ 			    void __iomem *addr, u32 *out)
+ {
+@@ -1376,7 +1463,7 @@ static int mhi_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
+ 	 */
+ 	if (pdev->device == 0x0306 &&
+ 	    of_property_read_bool(pdev->dev.of_node, "qcom,flashless"))
+-		info = &mhi_qcom_sdx55_info;
++		info = &mhi_qcom_sdx55_flashless_info;
+ 
+ 	dev_info(&pdev->dev, "MHI PCI device found: %s\n", info->name);
+ 
+@@ -1455,6 +1542,17 @@ static int mhi_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
+ 		goto err_unregister;
+ 	}
+ 
++	/* Before power up: the SBL wait itself needs the events */
++	if (info == &mhi_qcom_sdx55_flashless_info) {
++		mhi_cntrl->sbl_ee_from_reg = true;
++		mhi_cntrl->ev_polled = true;
++		timer_setup(&mhi_pdev->poll_timer, mhi_pci_poll, 0);
++		mhi_pdev->poll_events = true;
++		mod_timer(&mhi_pdev->poll_timer,
++			  jiffies + msecs_to_jiffies(MHI_PCI_POLL_PERIOD_MS));
++		dev_info(&pdev->dev, "polling MHI events (MSIs are not delivered)\n");
++	}
++
+ 	err = mhi_async_power_up(mhi_cntrl);
+ 	if (err) {
+ 		dev_err(&pdev->dev, "failed to power up MHI controller\n");
+@@ -1478,6 +1576,8 @@ static int mhi_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
+ 	return 0;
+ 
+ err_unprepare:
++	if (mhi_pdev->poll_events)
++		timer_shutdown_sync(&mhi_pdev->poll_timer);
+ 	mhi_unprepare_after_power_down(mhi_cntrl);
+ err_unregister:
+ 	mhi_unregister_controller(mhi_cntrl);
+@@ -1496,6 +1596,8 @@ static void mhi_pci_remove(struct pci_dev *pdev)
+ 	if (!pdev->is_virtfn)
+ 		timer_delete_sync(&mhi_pdev->health_check_timer);
+ 	cancel_work_sync(&mhi_pdev->recovery_work);
++	if (mhi_pdev->poll_events)
++		timer_shutdown_sync(&mhi_pdev->poll_timer);
+ 
+ 	if (test_and_clear_bit(MHI_PCI_DEV_STARTED, &mhi_pdev->status)) {
+ 		mhi_power_down(mhi_cntrl, true);
+diff --git a/drivers/bus/mhi/host/sahara-modem.c b/drivers/bus/mhi/host/sahara-modem.c
+new file mode 100644
+index 000000000..55227a05b
+--- /dev/null
++++ b/drivers/bus/mhi/host/sahara-modem.c
+@@ -0,0 +1,510 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * MHI Sahara firmware loader for Qualcomm modems without onboard flash.
++ *
++ * Implements the Sahara v2 protocol over MHI channels 2/3 (SAHARA): once
++ * SBL runs, it requests the remaining images by ID and we serve them with
++ * request_firmware() from qcom/sdx55m/ (the modem partition's
++ * image/sdx55m directory). The EFS images (16/17/20, per-device NV) come
++ * from qcom/sdx55m-efs/efs{1,2,3}.bin, copies of the mdm1m9kefs{1,2,3}
++ * partitions (the modem partition only holds 512-byte placeholders).
++ *
++ * Based on the Xiaomi Mi 10T (apollo) postmarketOS port's sahara.c
++ * (royka1, linux apollo-7.1), adapted for the Galaxy Tab S7 (gts7l).
++ */
++
++#include <linux/firmware.h>
++#include <linux/mhi.h>
++#include <linux/mod_devicetable.h>
++#include <linux/module.h>
++#include <linux/workqueue.h>
++
++/* Sahara v2 protocol commands */
++#define SAHARA_HELLO_CMD		0x01
++#define SAHARA_HELLO_RESP_CMD		0x02
++#define SAHARA_READ_DATA_CMD		0x03
++#define SAHARA_END_OF_IMAGE_CMD		0x04
++#define SAHARA_DONE_CMD			0x05
++#define SAHARA_DONE_RESP_CMD		0x06
++#define SAHARA_RESET_CMD		0x07
++#define SAHARA_CMD_READY_CMD		0x0B
++#define SAHARA_CMD_SWITCH_MODE_CMD	0x0C
++
++#define SAHARA_VERSION			2
++#define SAHARA_SUCCESS			0
++
++#define SAHARA_MODE_IMAGE_TX_PENDING	0x0
++#define SAHARA_MODE_IMAGE_TX_COMPLETE	0x1
++
++/* Packet lengths (bytes, LE) */
++#define SAHARA_HELLO_LENGTH		0x30
++#define SAHARA_READ_DATA_LENGTH		0x14
++#define SAHARA_END_OF_IMAGE_LENGTH	0x10
++#define SAHARA_DONE_LENGTH		0x08
++#define SAHARA_RESET_LENGTH		0x08
++#define SAHARA_CMD_SWITCH_MODE_LENGTH	0x0C
++
++/*
++ * Maximum single MHI TRE payload.  Matches MHI_TRE_DATA_DWORD0() which uses
++ * a 16-bit length field, giving 64 KiB - 1 per TRE.
++ */
++#define SAHARA_MAX_PKT_SZ		0xffffU
++
++/*
++ * Largest READ_DATA request we will accept.  We send the data in
++ * SAHARA_MAX_PKT_SZ chunks linked with MHI_CHAIN.
++ *
++ * SDX55 SBL may request near-whole-image transfers for large firmware blobs
++ * such as qdsp6sw, so keep this comfortably above the largest observed
++ * request size.
++ */
++#define SAHARA_MAX_XFER_SZ		0x6000000U	/* 96 MiB */
++
++struct sahara_packet {
++	__le32 cmd;
++	__le32 length;
++	union {
++		struct {
++			__le32 version;
++			__le32 version_compat;
++			__le32 max_length;
++			__le32 mode;
++		} hello;
++		struct {
++			__le32 version;
++			__le32 version_compat;
++			__le32 status;
++			__le32 mode;
++		} hello_resp;
++		struct {
++			__le32 image;
++			__le32 offset;
++			__le32 length;
++		} read_data;
++		struct {
++			__le32 image;
++			__le32 status;
++		} end_of_image;
++		struct {
++			__le32 mode;
++		} switch_mode;
++	};
++};
++
++struct mhi_sahara_dev {
++	struct mhi_device	*mhi_dev;
++	struct work_struct	work;
++	struct delayed_work	xfer_work;
++	struct sahara_packet	*rx;
++	struct sahara_packet	*ctrl_tx;
++	u8			*data_tx;
++	const struct firmware	*fw;
++	u32			fw_image;	/* image ID fw holds */
++	size_t			rx_size;
++	u32			xfer_offset;
++	u32			xfer_remaining;
++	bool			xfer_active;
++};
++
++static void sahara_xfer_retry_work(struct work_struct *work);
++
++static void sahara_schedule_xfer_retry(struct mhi_sahara_dev *sdev)
++{
++	queue_delayed_work(system_wq, &sdev->xfer_work, msecs_to_jiffies(1));
++}
++
++/* Sahara image IDs as the SDX55 SBL requests them (Mi 10T port's map) */
++static const char *sahara_image_to_fw(struct mhi_sahara_dev *sdev, u32 image_id)
++{
++	switch (image_id) {
++	case 6:
++		return "qcom/sdx55m/apps.mbn";
++	case 16:
++		return "qcom/sdx55m-efs/efs1.bin";
++	case 17:
++		return "qcom/sdx55m-efs/efs2.bin";
++	case 20:
++		return "qcom/sdx55m-efs/efs3.bin";
++	case 23:
++		return "qcom/sdx55m/aop.mbn";
++	case 25:
++		return "qcom/sdx55m/tz.mbn";
++	case 29:
++		return "qcom/sdx55m/acdb.mbn";
++	case 33:
++		return "qcom/sdx55m/hyp.mbn";
++	case 34:
++		/* the Mi 10T ships multi_image.mbn, Samsung multi_image_qti.mbn */
++		return "qcom/sdx55m/multi_image_qti.mbn";
++	case 40:
++		return "qcom/sdx55m/apdp.mbn";
++	case 41:
++		return "qcom/sdx55m/devcfg.mbn";
++	case 42:
++		return "qcom/sdx55m/sec.elf";
++	default:
++		dev_warn(&sdev->mhi_dev->dev,
++			 "Sahara: unmapped image %u, trying qdsp6sw\n", image_id);
++		return "qcom/sdx55m/qdsp6sw.mbn";
++	}
++}
++
++static void sahara_send_reset(struct mhi_sahara_dev *sdev)
++{
++	sdev->ctrl_tx->cmd    = cpu_to_le32(SAHARA_RESET_CMD);
++	sdev->ctrl_tx->length = cpu_to_le32(SAHARA_RESET_LENGTH);
++	mhi_queue_buf(sdev->mhi_dev, DMA_TO_DEVICE, sdev->ctrl_tx,
++		      SAHARA_RESET_LENGTH, MHI_EOT);
++}
++
++static void sahara_hello(struct mhi_sahara_dev *sdev)
++{
++	struct device *dev = &sdev->mhi_dev->dev;
++
++	if (le32_to_cpu(sdev->rx->length) != SAHARA_HELLO_LENGTH ||
++	    le32_to_cpu(sdev->rx->hello.version) != SAHARA_VERSION) {
++		dev_err(dev, "Sahara: unexpected HELLO (len=%u ver=%u)\n",
++			le32_to_cpu(sdev->rx->length),
++			le32_to_cpu(sdev->rx->hello.version));
++		return;
++	}
++
++	dev_info(dev, "Sahara: HELLO received, mode=%u\n",
++		 le32_to_cpu(sdev->rx->hello.mode));
++
++	sdev->ctrl_tx->cmd                      = cpu_to_le32(SAHARA_HELLO_RESP_CMD);
++	sdev->ctrl_tx->length                   = cpu_to_le32(SAHARA_HELLO_LENGTH);
++	sdev->ctrl_tx->hello_resp.version       = cpu_to_le32(SAHARA_VERSION);
++	/* like linux-msm qdl: v2, compatible down to v1 (the SBL says 2/1) */
++	sdev->ctrl_tx->hello_resp.version_compat = cpu_to_le32(1);
++	sdev->ctrl_tx->hello_resp.status        = cpu_to_le32(SAHARA_SUCCESS);
++	sdev->ctrl_tx->hello_resp.mode          = sdev->rx->hello.mode;
++
++	mhi_queue_buf(sdev->mhi_dev, DMA_TO_DEVICE, sdev->ctrl_tx,
++		      SAHARA_HELLO_LENGTH, MHI_EOT);
++}
++
++static int sahara_queue_read_data(struct mhi_sahara_dev *sdev)
++{
++	struct device *dev = &sdev->mhi_dev->dev;
++	u32 chunk;
++	int ret;
++
++	if (!sdev->xfer_active || !sdev->xfer_remaining)
++		return 0;
++
++	chunk = min(sdev->xfer_remaining, (u32)SAHARA_MAX_PKT_SZ);
++	memcpy(sdev->data_tx, sdev->fw->data + sdev->xfer_offset, chunk);
++
++	sdev->xfer_offset += chunk;
++	sdev->xfer_remaining -= chunk;
++
++	ret = mhi_queue_buf(sdev->mhi_dev, DMA_TO_DEVICE, sdev->data_tx,
++			    chunk, MHI_EOT);
++	if (ret) {
++		if (ret != -EAGAIN)
++			dev_err(dev, "Sahara: mhi_queue_buf TX failed: %d\n", ret);
++		else
++			dev_dbg(dev, "Sahara: TX ring full, retrying chunk later\n");
++
++		sdev->xfer_offset -= chunk;
++		sdev->xfer_remaining += chunk;
++		return ret;
++	}
++
++	if (!sdev->xfer_remaining)
++		sdev->xfer_active = false;
++
++	return 0;
++}
++
++static void sahara_read_data(struct mhi_sahara_dev *sdev)
++{
++	struct device *dev = &sdev->mhi_dev->dev;
++	u32 offset, length;
++	int ret;
++
++	if (le32_to_cpu(sdev->rx->length) != SAHARA_READ_DATA_LENGTH) {
++		dev_err(dev, "Sahara: malformed READ_DATA (len=%u)\n",
++			le32_to_cpu(sdev->rx->length));
++		sahara_send_reset(sdev);
++		return;
++	}
++
++	offset = le32_to_cpu(sdev->rx->read_data.offset);
++	length = le32_to_cpu(sdev->rx->read_data.length);
++
++	dev_dbg(dev, "Sahara: READ_DATA image=%u offset=%u length=%u\n",
++		 le32_to_cpu(sdev->rx->read_data.image), offset, length);
++
++	/* A different image than the one loaded: switch */
++	if (sdev->fw && sdev->fw_image != le32_to_cpu(sdev->rx->read_data.image)) {
++		release_firmware(sdev->fw);
++		sdev->fw = NULL;
++	}
++
++	if (!sdev->fw) {
++		u32 image_id = le32_to_cpu(sdev->rx->read_data.image);
++		const char *fw_name = sahara_image_to_fw(sdev, image_id);
++
++		if (!fw_name) {
++			dev_err(dev, "Sahara: no firmware configured for image %u\n",
++				image_id);
++			sahara_send_reset(sdev);
++			return;
++		}
++
++		ret = request_firmware(&sdev->fw, fw_name, dev);
++		if (ret) {
++			dev_err(dev, "Sahara: failed to load %s: %d\n",
++				fw_name, ret);
++			sahara_send_reset(sdev);
++			return;
++		}
++
++		sdev->fw_image = image_id;
++		dev_info(dev, "Sahara: image %u -> loaded %s (%zu bytes)\n",
++			 image_id, fw_name, sdev->fw->size);
++	}
++
++	if (length > SAHARA_MAX_XFER_SZ) {
++		dev_err(dev, "Sahara: READ_DATA length %u exceeds max %u\n",
++			length, SAHARA_MAX_XFER_SZ);
++		sahara_send_reset(sdev);
++		return;
++	}
++
++	if (offset >= sdev->fw->size ||
++	    (u64)offset + length > sdev->fw->size) {
++		dev_err(dev, "Sahara: READ_DATA out of range (off=%u len=%u fwsz=%zu)\n",
++			offset, length, sdev->fw->size);
++		sahara_send_reset(sdev);
++		return;
++	}
++
++	sdev->xfer_offset = offset;
++	sdev->xfer_remaining = length;
++	sdev->xfer_active = true;
++
++	ret = sahara_queue_read_data(sdev);
++	if (ret == -EAGAIN)
++		sahara_schedule_xfer_retry(sdev);
++	else if (ret)
++		sahara_send_reset(sdev);
++}
++
++static void sahara_end_of_image(struct mhi_sahara_dev *sdev)
++{
++	struct device *dev = &sdev->mhi_dev->dev;
++
++	if (le32_to_cpu(sdev->rx->end_of_image.status)) {
++		dev_err(dev, "Sahara: END_OF_IMAGE status %u\n",
++			le32_to_cpu(sdev->rx->end_of_image.status));
++		return;
++	}
++
++	dev_info(dev, "Sahara: END_OF_IMAGE OK (image=%u), sending DONE\n",
++		 le32_to_cpu(sdev->rx->end_of_image.image));
++
++	sdev->ctrl_tx->cmd    = cpu_to_le32(SAHARA_DONE_CMD);
++	sdev->ctrl_tx->length = cpu_to_le32(SAHARA_DONE_LENGTH);
++	mhi_queue_buf(sdev->mhi_dev, DMA_TO_DEVICE, sdev->ctrl_tx,
++		      SAHARA_DONE_LENGTH, MHI_EOT);
++}
++
++static void sahara_work(struct work_struct *work)
++{
++	struct mhi_sahara_dev *sdev =
++		container_of(work, struct mhi_sahara_dev, work);
++	int ret;
++
++	dev_info(&sdev->mhi_dev->dev, "Sahara: rx cmd 0x%x len %u (xfer %zu): %*ph\n",
++		 le32_to_cpu(sdev->rx->cmd), le32_to_cpu(sdev->rx->length),
++		 sdev->rx_size, (int)min_t(size_t, sdev->rx_size, 24), sdev->rx);
++
++	switch (le32_to_cpu(sdev->rx->cmd)) {
++	case SAHARA_HELLO_CMD:
++		sahara_hello(sdev);
++		break;
++	case SAHARA_READ_DATA_CMD:
++		sahara_read_data(sdev);
++		break;
++	case SAHARA_END_OF_IMAGE_CMD:
++		sahara_end_of_image(sdev);
++		break;
++	case SAHARA_DONE_RESP_CMD:
++		dev_info(&sdev->mhi_dev->dev,
++			 "Sahara: DONE_RESP received, session complete\n");
++		/*
++		 * Release current firmware so the next READ_DATA re-evaluates
++		 * which file to load (the modem may start a second SAHARA
++		 * session requesting different image IDs).
++		 */
++		if (sdev->fw) {
++			release_firmware(sdev->fw);
++			sdev->fw = NULL;
++		}
++		sdev->xfer_active = false;
++		sdev->xfer_offset = 0;
++		sdev->xfer_remaining = 0;
++		cancel_delayed_work(&sdev->xfer_work);
++		break;	/* re-queue RX to listen for a possible next HELLO */
++	case SAHARA_CMD_READY_CMD:
++		/*
++		 * Modem is in command mode and ready for host commands.
++		 * We don't need to execute any commands — just ask the
++		 * modem to switch to image transfer mode.  It will reply
++		 * with a fresh HELLO (mode=0).
++		 */
++		dev_info(&sdev->mhi_dev->dev,
++			 "Sahara: CMD_READY, sending CMD_SWITCH_MODE -> image TX\n");
++		sdev->ctrl_tx->cmd    = cpu_to_le32(SAHARA_CMD_SWITCH_MODE_CMD);
++		sdev->ctrl_tx->length = cpu_to_le32(SAHARA_CMD_SWITCH_MODE_LENGTH);
++		sdev->ctrl_tx->switch_mode.mode = cpu_to_le32(SAHARA_MODE_IMAGE_TX_PENDING);
++		mhi_queue_buf(sdev->mhi_dev, DMA_TO_DEVICE, sdev->ctrl_tx,
++			      SAHARA_CMD_SWITCH_MODE_LENGTH, MHI_EOT);
++		break;
++	case SAHARA_RESET_CMD:
++		/* Device-initiated reset — just re-queue and wait */
++		break;
++	default:
++		dev_err(&sdev->mhi_dev->dev,
++			"Sahara: unknown command 0x%x\n",
++			le32_to_cpu(sdev->rx->cmd));
++		break;
++	}
++
++	/* Refill the single RX slot */
++	ret = mhi_queue_buf(sdev->mhi_dev, DMA_FROM_DEVICE, sdev->rx,
++			    SAHARA_MAX_PKT_SZ, MHI_EOT);
++	if (ret)
++		dev_err(&sdev->mhi_dev->dev,
++			"Sahara: failed to requeue RX buf: %d\n", ret);
++}
++
++static int sahara_mhi_probe(struct mhi_device *mhi_dev,
++			    const struct mhi_device_id *id)
++{
++	struct mhi_sahara_dev *sdev;
++	int ret;
++
++	sdev = devm_kzalloc(&mhi_dev->dev, sizeof(*sdev), GFP_KERNEL);
++	if (!sdev)
++		return -ENOMEM;
++
++	sdev->rx = devm_kzalloc(&mhi_dev->dev, SAHARA_MAX_PKT_SZ, GFP_KERNEL);
++	if (!sdev->rx)
++		return -ENOMEM;
++
++	sdev->ctrl_tx = devm_kzalloc(&mhi_dev->dev, SAHARA_MAX_PKT_SZ, GFP_KERNEL);
++	if (!sdev->ctrl_tx)
++		return -ENOMEM;
++
++	sdev->data_tx = devm_kzalloc(&mhi_dev->dev, SAHARA_MAX_PKT_SZ, GFP_KERNEL);
++	if (!sdev->data_tx)
++		return -ENOMEM;
++
++	sdev->mhi_dev = mhi_dev;
++	INIT_WORK(&sdev->work, sahara_work);
++	INIT_DELAYED_WORK(&sdev->xfer_work, sahara_xfer_retry_work);
++	dev_set_drvdata(&mhi_dev->dev, sdev);
++
++	ret = mhi_prepare_for_transfer(mhi_dev);
++	if (ret)
++		return ret;
++
++	ret = mhi_queue_buf(mhi_dev, DMA_FROM_DEVICE, sdev->rx,
++			    SAHARA_MAX_PKT_SZ, MHI_EOT);
++	if (ret) {
++		mhi_unprepare_from_transfer(mhi_dev);
++		return ret;
++	}
++
++	dev_info(&mhi_dev->dev, "Sahara: MHI channels ready, waiting for modem\n");
++	return 0;
++}
++
++static void sahara_mhi_remove(struct mhi_device *mhi_dev)
++{
++	struct mhi_sahara_dev *sdev = dev_get_drvdata(&mhi_dev->dev);
++
++	cancel_work_sync(&sdev->work);
++	cancel_delayed_work_sync(&sdev->xfer_work);
++	if (sdev->fw)
++		release_firmware(sdev->fw);
++	mhi_unprepare_from_transfer(mhi_dev);
++}
++
++static void sahara_mhi_ul_xfer_cb(struct mhi_device *mhi_dev,
++				  struct mhi_result *result)
++{
++	struct mhi_sahara_dev *sdev = dev_get_drvdata(&mhi_dev->dev);
++	int ret;
++
++	dev_info(&mhi_dev->dev, "Sahara: tx done status %d bytes %zu\n",
++		 result->transaction_status, result->bytes_xferd);
++	if (result->transaction_status) {
++		dev_err(&mhi_dev->dev, "Sahara: TX completion failed: %d\n",
++			result->transaction_status);
++		sdev->xfer_active = false;
++		return;
++	}
++
++	if (result->buf_addr != sdev->data_tx || !sdev->xfer_remaining)
++		return;
++
++	ret = sahara_queue_read_data(sdev);
++	if (ret == -EAGAIN)
++		sahara_schedule_xfer_retry(sdev);
++	else if (ret)
++		sahara_send_reset(sdev);
++}
++
++static void sahara_xfer_retry_work(struct work_struct *work)
++{
++	struct mhi_sahara_dev *sdev =
++		container_of(to_delayed_work(work), struct mhi_sahara_dev, xfer_work);
++	int ret;
++
++	if (!sdev->xfer_active || !sdev->xfer_remaining)
++		return;
++
++	ret = sahara_queue_read_data(sdev);
++	if (ret == -EAGAIN)
++		sahara_schedule_xfer_retry(sdev);
++	else if (ret)
++		sahara_send_reset(sdev);
++}
++
++static void sahara_mhi_dl_xfer_cb(struct mhi_device *mhi_dev,
++				  struct mhi_result *result)
++{
++	struct mhi_sahara_dev *sdev = dev_get_drvdata(&mhi_dev->dev);
++
++	if (result->transaction_status)
++		return;
++
++	sdev->rx_size = result->bytes_xferd;
++	schedule_work(&sdev->work);
++}
++
++static const struct mhi_device_id sahara_mhi_match_table[] = {
++	{ .chan = "SAHARA" },
++	{}
++};
++MODULE_DEVICE_TABLE(mhi, sahara_mhi_match_table);
++
++static struct mhi_driver sahara_mhi_driver = {
++	.id_table    = sahara_mhi_match_table,
++	.probe       = sahara_mhi_probe,
++	.remove      = sahara_mhi_remove,
++	.ul_xfer_cb  = sahara_mhi_ul_xfer_cb,
++	.dl_xfer_cb  = sahara_mhi_dl_xfer_cb,
++	.driver      = {
++		.name = "mhi_sahara_modem",
++	},
++};
++module_mhi_driver(sahara_mhi_driver);
++
++MODULE_DESCRIPTION("MHI Sahara firmware loader for Qualcomm modems");
++MODULE_LICENSE("GPL");
+diff --git a/include/linux/mhi.h b/include/linux/mhi.h
+index 4b86ae6f6..c72a1e2fa 100644
+--- a/include/linux/mhi.h
++++ b/include/linux/mhi.h
+@@ -374,6 +374,10 @@ struct mhi_controller_config {
+  * @index: Index of the MHI controller instance
+  * @bounce_buf: Use of bounce buffer
+  * @fbc_download: MHI host needs to do complete image transfer (optional)
++ * @sbl_ee_from_reg: Device enters SBL without an EE event; pick SBL (or
++ *                   mission mode) up from the EE register after READY
++ * @ev_polled: Event rings are polled, not interrupt driven: an element may be
++ *             seen before the device finished writing it
+  * @wake_set: Device wakeup set flag
+  * @irq_flags: irq flags passed to request_irq (optional)
+  * @mru: the default MRU for the MHI device
+@@ -459,6 +463,8 @@ struct mhi_controller {
+ 	int index;
+ 	bool bounce_buf;
+ 	bool fbc_download;
++	bool sbl_ee_from_reg;
++	bool ev_polled;
+ 	bool wake_set;
+ 	unsigned long irq_flags;
+ 	u32 mru;
+@@ -619,6 +625,12 @@ int mhi_get_free_desc_count(struct mhi_device *mhi_dev,
+  */
+ int mhi_prepare_for_power_up(struct mhi_controller *mhi_cntrl);
+ 
++/**
++ * mhi_poll_events - Poll all event rings (for devices whose MSIs are lost)
++ * @mhi_cntrl: MHI controller
++ */
++void mhi_poll_events(struct mhi_controller *mhi_cntrl);
++
+ /**
+  * mhi_async_power_up - Start MHI power up sequence
+  * @mhi_cntrl: MHI controller
