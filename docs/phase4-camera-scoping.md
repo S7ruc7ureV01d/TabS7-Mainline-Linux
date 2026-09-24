@@ -231,6 +231,33 @@ Known limits, next steps:
   libcamera patch.
 - Then stage 4: the rear second (S5K5E9) and front (S5K4HA) sensors.
 
+## Result: 30 fps and the AF actuator (2026-09-23)
+
+- Patch **0033**: the 2104x1184 mode now runs at 30 fps (VTS 3248). The
+  frame length caps exposure, and at 60 fps (~16.5 ms) indoor scenes stayed
+  dark at 16x gain. The preview is visibly brighter; the owner chose 30 fps
+  over 60 fps.
+- **CCI1 master 1** (`i2c-23`, powered with the rear main's VANA/VAF,
+  gpio39) holds: the AF actuator at 0x0c and the module EEPROMs at
+  0x50/0x51 and 0x58/0x59. The EEPROM headers: `C13QLNB01HM` /
+  `V103V0010TABS7QR` at 0x58 (13 MP rear main) and `C05QLNB01HM` /
+  `V103V0010TABS7QU` at 0x50 (5 MP rear **ultra-wide**, so the S5K5E9 is
+  the ultra-wide). CCI reads are limited to 8 bytes per transfer.
+- **The actuator is a Giantec GT9769**: IC info register 0x00 reads 0xe1
+  (the GT97xx series lists GT9769 = 0xE1), AAC/prescale 0x06 = 0x01, AAC
+  timing 0x07 = 0x20. Mainline supports it in `dw9768.c`
+  (`giantec,gt9769`); `VIDEO_DW9768=y`, DT node on `cci1_i2c1` and a
+  `lens-focus` link from the sensor. It registers as `dw9768 23-000c` with
+  `focus_absolute` 0-1023; the driver powers it only while the subdev is
+  open.
+- A focus sweep (`tools/rootfs/camera/focussweep.sh`, 4x4-downsampled
+  Tenengrad on the green plane) gives a clean curve: for a desk scene at
+  ~40 cm the peak is at **370-380** (50.2 vs 21.7 at the rest position 0),
+  with text on the scene sharp.
+- **libcamera 0.7.2's simple pipeline has no AF and no lens control**
+  (`cam --list-controls`: Contrast and Gamma only), so in apps the lens
+  stays unpowered at its rest position (0, blurry up close).
+
 ## To grab during the stock boot (planned anyway for the suspend work)
 
 - `/vendor/lib64/camera/com.qti.sensormodule.*.bin` and

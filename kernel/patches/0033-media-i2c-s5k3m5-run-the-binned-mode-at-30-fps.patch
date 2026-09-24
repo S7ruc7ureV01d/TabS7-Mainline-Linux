@@ -1,0 +1,35 @@
+From: gts7l project
+Subject: [PATCH] media: i2c: s5k3m5: run the 2104x1184 mode at 30 fps
+
+The frame length limits the exposure time. At 60 fps (VTS 1624) the
+longest exposure is ~16.5 ms, and indoor scenes stay dark even with the
+analogue gain at its 16x maximum; libcamera's simple pipeline adjusts
+exposure and gain but not the frame length. Use VTS 3248 (30.1 fps with
+HTS 4928 at 482 MHz), which doubles the longest exposure. The mode's VTS
+is also the minimum vertical blanking, so this is a 30 fps mode now.
+
+--- a/drivers/media/i2c/s5k3m5.c
++++ b/drivers/media/i2c/s5k3m5.c
+@@ -642,7 +642,7 @@
+ 	{ S5K3M5_REG_Y_ADDR_END,    0x0abf },
+ 	{ S5K3M5_REG_X_OUTPUT_SIZE, 0x0838 },
+ 	{ S5K3M5_REG_Y_OUTPUT_SIZE, 0x04a0 },
+-	{ S5K3M5_REG_VTS, 0x0658 },
++	{ S5K3M5_REG_VTS, 0x0cb0 },
+ 	{ S5K3M5_REG_HTS, 0x1340 },
+ 
+ 	{ CCI_REG16(0x0900), 0x0112 },
+@@ -712,7 +712,12 @@
+ 		.width = 2104,
+ 		.height = 1184,
+ 		.hts = 4928,
+-		.vts = 1624,
++		/*
++		 * 30 fps (was 1624, 60 fps): the frame length caps exposure,
++		 * and at 60 fps (~16.5 ms) indoor scenes stay dark even at
++		 * maximum gain. libcamera doesn't lengthen frames itself.
++		 */
++		.vts = 3248,
+ 		.exposure = 256,
+ 		/* 2x2 binned: y 0x180-0xabf of the array */
+ 		.crop = { .left = 4, .top = 384, .width = 4208, .height = 2368 },

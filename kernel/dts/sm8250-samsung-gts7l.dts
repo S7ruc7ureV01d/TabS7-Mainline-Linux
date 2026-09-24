@@ -2361,6 +2361,34 @@
 	status = "okay";
 };
 
+/*
+ * CCI1: the rear main module's AF actuator (downstream qcom,actuator@18,
+ * master 1, 8-bit 0x18) and EEPROM (master 1, 8-bit 0xb0) live here, and
+ * the rear second sensor (master 0). Enabled bare for now, to identify
+ * the actuator chip.
+ */
+&cci1 {
+	status = "okay";
+};
+
+&cci1_i2c1 {
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	/*
+	 * Rear main AF actuator: IC info register 0x00 reads 0xe1, a Giantec
+	 * GT9769 (the module EEPROMs, C13QLNB01HM at 0x58 and the ultra-wide's
+	 * C05QLNB01HM at 0x50, sit on this bus too). Powered from VAF, which
+	 * is the rear main's VANA rail (gpio39).
+	 */
+	cam_rear_af: camera-lens@c {
+		compatible = "giantec,gt9769";
+		reg = <0x0c>;
+		vin-supply = <&vreg_cam_vio>;
+		vdd-supply = <&vreg_cam_rear_vana>;
+	};
+};
+
 &cci0_i2c0 {
 	#address-cells = <1>;
 	#size-cells = <0>;
@@ -2381,6 +2409,7 @@
 		vdda-supply = <&vreg_cam_rear_vana>;
 		vddio-supply = <&vreg_cam_vio>;
 
+		lens-focus = <&cam_rear_af>;
 		orientation = <1>; /* rear */
 		rotation = <90>;
 
