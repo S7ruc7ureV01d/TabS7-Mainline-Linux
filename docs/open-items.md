@@ -111,9 +111,11 @@ Known / harmless, left:
   notices (cs35l41 VA/VP, PCIe, GPU, camera), max77705 of_node notices,
   `Initramfs unpacking failed` (stock template ramdisk), touch CRC-loop
   warning (cleared by the driver every boot).
-- Userspace: no rtkit (PipeWire/KWin run without realtime priority), no
-  wireless-regdb (`regulatory.db` missing - world regulatory domain),
-  powerdevil DDC probing `/dev/i2c-*` gets EACCES at login, portal
+- Userspace (fixed on the tablet 2026-09-24, next rootfs snapshot): rtkit
+  installed (PipeWire data loops now RR 20; KWin's own "Failed to gain real
+  time" needs CAP_SYS_NICE, normal on Arch); wireless-regdb installed, and
+  `tools/rootfs/wifi/wlan-pci-rebind-regdb.conf` runs `iw reg reload` once
+  the rootfs is up (cfg80211 asks at ~2.7 s, too early). Left: powerdevil DDC probing `/dev/i2c-*` gets EACCES at login, portal
   "App info not found" for KDE background services.
 
 ### Charging: what's not covered
