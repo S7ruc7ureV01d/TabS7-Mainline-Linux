@@ -1,0 +1,91 @@
+From: gts7l project
+Subject: [PATCH] phy: qcom: qmp-combo: keep the USB PHY usable when dwc3
+ inits in DP-only mode
+
+With a DP-only (pin C) monitor on the port at boot, the mux is in
+DP-only mode before dwc3 probes. qmp_combo_usb_init() then powered the
+USB side on, PHYSTATUS never cleared ("phy initialization timed-out"),
+and dwc3 failed to probe ("failed to initialize core"): no USB for the
+whole boot.
+
+As the Retroid Pocket 5 (SM8250) pocknix tree does:
+- skip the USB power on/off in usb_init/usb_exit and in the orientation
+  switch while in DP-only mode; the mux powers the USB side up when it
+  switches back;
+- keep usb_init_count across the DP-only switch: going DP-only is not
+  dwc3 releasing the PHY, and the old decrement desynced the count.
+
+diff --git a/drivers/phy/qualcomm/phy-qcom-qmp-combo.c b/drivers/phy/qualcomm/phy-qcom-qmp-combo.c
+index 542b82065..92b6dbc4b 100644
+--- a/drivers/phy/qualcomm/phy-qcom-qmp-combo.c
++++ b/drivers/phy/qualcomm/phy-qcom-qmp-combo.c
+@@ -3986,10 +3986,17 @@ static int qmp_combo_usb_init(struct phy *phy)
+ 	if (ret)
+ 		goto out_unlock;
+ 
+-	ret = qmp_combo_usb_power_on(phy);
+-	if (ret) {
+-		qmp_combo_com_exit(qmp, false);
+-		goto out_unlock;
++	/*
++	 * DP-only (a monitor attached before dwc3 probed): the USB3 blocks
++	 * are not configured and PHYSTATUS never clears. Power the USB side
++	 * up when the mux switches back instead.
++	 */
++	if (qmp->qmpphy_mode != QMPPHY_MODE_DP_ONLY) {
++		ret = qmp_combo_usb_power_on(phy);
++		if (ret) {
++			qmp_combo_com_exit(qmp, false);
++			goto out_unlock;
++		}
+ 	}
+ 
+ 	qmp->usb_init_count++;
+@@ -4005,9 +4012,11 @@ static int qmp_combo_usb_exit(struct phy *phy)
+ 	int ret;
+ 
+ 	mutex_lock(&qmp->phy_mutex);
+-	ret = qmp_combo_usb_power_off(phy);
+-	if (ret)
+-		goto out_unlock;
++	if (qmp->qmpphy_mode != QMPPHY_MODE_DP_ONLY) {
++		ret = qmp_combo_usb_power_off(phy);
++		if (ret)
++			goto out_unlock;
++	}
+ 
+ 	ret = qmp_combo_com_exit(qmp, false);
+ 	if (ret)
+@@ -4478,7 +4487,7 @@ static int qmp_combo_typec_switch_set(struct typec_switch_dev *sw,
+ 		qmp_combo_com_exit(qmp, true);
+ 
+ 		qmp_combo_com_init(qmp, true);
+-		if (qmp->usb_init_count)
++		if (qmp->usb_init_count && qmp->qmpphy_mode != QMPPHY_MODE_DP_ONLY)
+ 			qmp_combo_usb_power_on_retry(qmp);
+ 		if (qmp->dp_init_count)
+ 			cfg->dp_aux_init(qmp);
+@@ -4565,16 +4574,14 @@ static void qmp_combo_switch_mode(struct qmp_combo *qmp, enum qmpphy_mode new_mo
+ 		/* Now everything's powered down, power up the right PHYs */
+ 		qmp_combo_com_init(qmp, true);
+ 
+-		if (new_mode == QMPPHY_MODE_DP_ONLY) {
+-			if (qmp->usb_init_count)
+-				qmp->usb_init_count--;
+-		}
+-
+-		if (new_mode == QMPPHY_MODE_USB3DP || new_mode == QMPPHY_MODE_USB3_ONLY) {
++		/*
++		 * usb_init_count stays as dwc3 set it: going DP-only is not
++		 * dwc3 releasing the USB PHY (the old decrement desynced it,
++		 * and a dwc3 init while DP-only then failed for good).
++		 */
++		if ((new_mode == QMPPHY_MODE_USB3DP || new_mode == QMPPHY_MODE_USB3_ONLY) &&
++		    qmp->usb_init_count)
+ 			qmp_combo_usb_power_on_retry(qmp);
+-			if (!qmp->usb_init_count)
+-				qmp->usb_init_count++;
+-		}
+ 
+ 		if (new_mode == QMPPHY_MODE_DP_ONLY || new_mode == QMPPHY_MODE_USB3DP) {
+ 			if (qmp->dp_init_count)

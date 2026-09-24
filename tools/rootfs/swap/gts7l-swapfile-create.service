@@ -1,0 +1,17 @@
+[Unit]
+Description=Create the 8 GiB swap file on the root filesystem (first boot only)
+# Only the root mount, not local-fs.target: swap.target (and so
+# swapfile.swap) is ordered before tmp.mount, which local-fs.target waits
+# for. The old service's After=local-fs.target made a cycle that systemd
+# broke by dropping a random job - once local-fs.target itself, and then
+# nothing after it (USB gadget, Wi-Fi rebind, DSP start) ran.
+DefaultDependencies=no
+RequiresMountsFor=/swapfile
+After=systemd-remount-fs.service
+Before=swapfile.swap
+ConditionPathExists=!/swapfile
+
+[Service]
+Type=oneshot
+# mkswap --file allocates it without holes, mode 0600
+ExecStart=/usr/bin/mkswap --file /swapfile --size 8G

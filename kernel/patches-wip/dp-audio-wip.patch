@@ -1,0 +1,260 @@
+DisplayPort audio over USB-C - WORK IN PROGRESS, NOT IN THE SERIES
+(2026-09-24, docs/phase4-usb-dp-scoping.md "DP audio")
+
+Applies on top of kernel/patches/00*. What it does:
+- DTS: MultiMedia3 front end (PCM 2), a "DisplayPort Playback" back end
+  (q6afedai DISPLAY_PORT_RX -> q6routing -> &mdss_dp); the DP0 jack
+  follows the monitor.
+- q6afe-dai: start the DP AFE port from trigger instead of prepare (the
+  msm DP codec enables its audio engine in its own prepare, after ours).
+- q6afe: send AFE_PARAM_ID_HDMI_DP_MST_VID_IDX_CFG / _DPTX_IDX_CFG (0/0)
+  before the config, like downstream afe_set_display_stream().
+- msm dp_audio: prepare with no monitor powered returns 0 instead of
+  -EINVAL (PipeWire probes every PCM of the verb; one failing open drops
+  the whole profile - the speakers vanished), plus a debug print.
+- UCM: SectionDevice "HDMI1" on hw:X,2, JackControl "DP0 Jack",
+  priority 50, route in the verb.
+
+Status: the DSP accepts the stream/ctl index and the HDMI config params
+but never answers AFE_PORT_CMD_DEVICE_START for port 0x6020 (-110), with
+a monitor up and msm_dp_audio_prepare run (2 channels). Without a
+monitor the start always times out. Next: capture stock (DeX with audio)
+in the stock-boot pass.
+
+--- a/sound/soc/qcom/qdsp6/q6afe-dai.c	2026-09-24 14:21:45.804681033 -0300
++++ b/sound/soc/qcom/qdsp6/q6afe-dai.c	2026-09-24 13:37:02.298491807 -0300
+@@ -401,14 +401,25 @@
+ 			dev_err(dai->dev, "fail to close AFE port (%d)\n", rc);
+ 			return rc;
+ 		}
++		dai_data->is_port_started[dai->id] = false;
+ 	}
+ 
+ 	switch (dai->id) {
+ 	case HDMI_RX:
+-	case DISPLAY_PORT_RX:
+ 		q6afe_hdmi_port_prepare(dai_data->port[dai->id],
+ 					&dai_data->port_config[dai->id].hdmi);
+ 		break;
++	case DISPLAY_PORT_RX:
++		/*
++		 * The DP port is started from trigger instead: the ADSP only
++		 * starts it once the DP controller's audio engine runs, which
++		 * the codec (msm DP) enables in its own prepare, after ours.
++		 * Started here, the command timed out (and with no monitor at
++		 * all it always does), failing every open of the PCM.
++		 */
++		q6afe_hdmi_port_prepare(dai_data->port[dai->id],
++					&dai_data->port_config[dai->id].hdmi);
++		return 0;
+ 	case SLIMBUS_0_RX ... SLIMBUS_6_TX:
+ 		q6afe_slim_port_prepare(dai_data->port[dai->id],
+ 					&dai_data->port_config[dai->id].slim);
+@@ -715,10 +726,41 @@
+ 	 */
+ };
+ 
++/* DISPLAY_PORT_RX: start the port once the DP side is ready (see prepare) */
++static int q6hdmi_trigger(struct snd_pcm_substream *substream, int cmd,
++			  struct snd_soc_dai *dai)
++{
++	struct q6afe_dai_data *dai_data = dev_get_drvdata(dai->dev);
++	int rc;
++
++	if (dai->id != DISPLAY_PORT_RX)
++		return 0;
++
++	switch (cmd) {
++	case SNDRV_PCM_TRIGGER_START:
++	case SNDRV_PCM_TRIGGER_RESUME:
++	case SNDRV_PCM_TRIGGER_PAUSE_RELEASE:
++		if (dai_data->is_port_started[dai->id])
++			return 0;
++		rc = q6afe_port_start(dai_data->port[dai->id]);
++		if (rc < 0) {
++			dev_err(dai->dev, "fail to start AFE port %x\n", dai->id);
++			return rc;
++		}
++		dai_data->is_port_started[dai->id] = true;
++		break;
++	default:
++		break;
++	}
++
++	return 0;
++}
++
+ static const struct snd_soc_dai_ops q6hdmi_ops = {
+ 	.probe			= msm_dai_q6_dai_probe,
+ 	.remove			= msm_dai_q6_dai_remove,
+ 	.prepare		= q6afe_dai_prepare,
++	.trigger		= q6hdmi_trigger,
+ 	.hw_params		= q6hdmi_hw_params,
+ 	.shutdown		= q6afe_dai_shutdown,
+ };
+--- a/sound/soc/qcom/qdsp6/q6afe.c	2026-09-24 14:21:45.799742662 -0300
++++ b/sound/soc/qcom/qdsp6/q6afe.c	2026-09-24 13:46:02.906983578 -0300
+@@ -32,6 +32,9 @@
+ #define AFE_PORT_CMDRSP_GET_PARAM_V2	0x00010106
+ #define AFE_PARAM_ID_HDMI_CONFIG	0x00010210
+ #define AFE_MODULE_AUDIO_DEV_INTERFACE	0x0001020C
++/* DP: which stream (MST) and which DP controller the port feeds */
++#define AFE_PARAM_ID_HDMI_DP_MST_VID_IDX_CFG	0x000102b5
++#define AFE_PARAM_ID_HDMI_DPTX_IDX_CFG		0x000102b6
+ #define AFE_MODULE_TDM			0x0001028A
+ 
+ #define AFE_PARAM_ID_CDC_SLIMBUS_SLAVE_CFG 0x00010235
+@@ -1676,11 +1679,32 @@
+ 	struct apr_pkt *pkt;
+ 	int pkt_size;
+ 
++	/*
++	 * DP: like downstream's afe_set_display_stream(), name the stream and
++	 * the controller (0/0 for a single DP port) before the config.
++	 */
++	if (port_id == AFE_PORT_ID_HDMI_OVER_DP_RX) {
++		struct { u32 minor_version; u32 idx; } __packed idx = { 1, 0 };
++
++		ret = q6afe_port_set_param_v2(port, &idx,
++					      AFE_PARAM_ID_HDMI_DP_MST_VID_IDX_CFG,
++					      AFE_MODULE_AUDIO_DEV_INTERFACE,
++					      sizeof(idx));
++		if (!ret)
++			ret = q6afe_port_set_param_v2(port, &idx,
++						      AFE_PARAM_ID_HDMI_DPTX_IDX_CFG,
++						      AFE_MODULE_AUDIO_DEV_INTERFACE,
++						      sizeof(idx));
++		if (ret)
++			dev_warn(afe->dev, "DP stream/controller index for port 0x%x: %d\n",
++				 port_id, ret);
++	}
++
+ 	ret  = q6afe_port_set_param_v2(port, &port->port_cfg, param_id,
+ 				       AFE_MODULE_AUDIO_DEV_INTERFACE,
+ 				       sizeof(port->port_cfg));
+ 	if (ret) {
+-		dev_err(afe->dev, "AFE enable for port 0x%x failed %d\n",
++		dev_err(afe->dev, "AFE config for port 0x%x failed %d\n",
+ 			port_id, ret);
+ 		return ret;
+ 	}
+--- a/drivers/gpu/drm/msm/dp/dp_audio.c	2026-09-24 14:21:44.028185642 -0300
++++ b/drivers/gpu/drm/msm/dp/dp_audio.c	2026-09-24 13:46:02.907206661 -0300
+@@ -285,7 +285,12 @@
+ 	 * connected.
+ 	 */
+ 	if (!msm_dp_display->power_on) {
+-		rc = -EINVAL;
++		/*
++		 * Nothing to set up without a monitor. Don't fail: PipeWire
++		 * opens every PCM of a UCM verb when probing, and one failing
++		 * open drops the whole profile (speakers included). The jack
++		 * keeps the output unavailable meanwhile.
++		 */
+ 		goto end;
+ 	}
+ 
+@@ -296,6 +301,7 @@
+ 	}
+ 
+ 	audio->channels = params->channels;
++	pr_info("msm_dp_audio_prepare: %d channels\n", params->channels);
+ 
+ 	msm_dp_audio_setup_sdp(audio);
+ 	msm_dp_audio_setup_acr(audio);
+--- a/kernel/dts/sm8250-samsung-gts7l.dts	2026-09-24 14:21:58.115634079 -0300
++++ b/kernel/dts/sm8250-samsung-gts7l.dts	2026-09-24 14:21:58.100459728 -0300
+@@ -2209,6 +2209,12 @@
+ 		reg = <MSM_FRONTEND_DAI_MULTIMEDIA2>;
+ 		direction = <Q6ASM_DAI_TX>;
+ 	};
++
++	/* DisplayPort playback */
++	dai@2 {
++		reg = <MSM_FRONTEND_DAI_MULTIMEDIA3>;
++		direction = <Q6ASM_DAI_RX>;
++	};
+ };
+ 
+ /*
+@@ -2269,6 +2275,19 @@
+ 		};
+ 	};
+ 
++	/*
++	 * DisplayPort audio (docs/phase4-usb-dp-scoping.md): MultiMedia3
++	 * (PCM 2) -> AFE DISPLAY_PORT_RX -> the msm DP controller's
++	 * hdmi-codec. The DP0 jack follows the monitor's HPD.
++	 */
++	mm3-dai-link {
++		link-name = "MultiMedia3";
++
++		cpu {
++			sound-dai = <&q6asmdai MSM_FRONTEND_DAI_MULTIMEDIA3>;
++		};
++	};
++
+ 	mic-dai-link {
+ 		link-name = "Mic Capture";
+ 
+@@ -2301,6 +2320,22 @@
+ 				    <&cs35l41_41 0>, <&cs35l41_40 0>;
+ 		};
+ 	};
++
++	dp-dai-link {
++		link-name = "DisplayPort Playback";
++
++		cpu {
++			sound-dai = <&q6afedai DISPLAY_PORT_RX>;
++		};
++
++		platform {
++			sound-dai = <&q6routing>;
++		};
++
++		codec {
++			sound-dai = <&mdss_dp>;
++		};
++	};
+ };
+ 
+ /*
+diff --git a/tools/rootfs/audio/ucm2/Samsung/gts7l/HiFi.conf b/tools/rootfs/audio/ucm2/Samsung/gts7l/HiFi.conf
+index fde34d1..82b8947 100644
+--- a/tools/rootfs/audio/ucm2/Samsung/gts7l/HiFi.conf
++++ b/tools/rootfs/audio/ucm2/Samsung/gts7l/HiFi.conf
+@@ -30,11 +30,13 @@ SectionVerb {
+ 		cset "name='RR DSP1 Preload Switch' on"
+ 		cset "name='PRIMARY_TDM_RX_0 Audio Mixer MultiMedia1' 1"
+ 		cset "name='MultiMedia2 Mixer VA_CODEC_DMA_TX_0' 1"
++		cset "name='DISPLAY_PORT_RX Audio Mixer MultiMedia3' 1"
+ 	]
+ 
+ 	DisableSequence [
+ 		cset "name='PRIMARY_TDM_RX_0 Audio Mixer MultiMedia1' 0"
+ 		cset "name='MultiMedia2 Mixer VA_CODEC_DMA_TX_0' 0"
++		cset "name='DISPLAY_PORT_RX Audio Mixer MultiMedia3' 0"
+ 	]
+ 
+ 	Value {
+@@ -106,3 +108,19 @@ SectionDevice."Mic" {
+ 		CapturePCM "hw:${CardId},1"
+ 	}
+ }
++
++# DisplayPort audio over USB-C (docs/phase4-usb-dp-scoping.md): MultiMedia3
++# (PCM 2) -> AFE DISPLAY_PORT_RX -> the msm DP controller. The jack follows
++# the monitor's HPD, so the output is only available while one is attached.
++# Lower priority than the speakers: plugging a monitor in doesn't move the
++# sound by itself.
++SectionDevice."HDMI1" {
++	Comment "DisplayPort monitor"
++
++	Value {
++		PlaybackChannels 2
++		PlaybackPriority 50
++		PlaybackPCM "hw:${CardId},2"
++		JackControl "DP0 Jack"
++	}
++}

@@ -1,0 +1,101 @@
+From: gts7l project
+Subject: [PATCH] drm/bridge: aux-hpd: replay the last HPD state when HPD is
+ enabled
+
+A USB-C driver reports DP HPD through drm_aux_hpd_bridge_notify() as soon
+as the partner says so, which with a monitor attached at boot is before
+the display driver has bound and enabled HPD on the bridge.
+drm_bridge_hpd_notify() drops the event (no hpd_cb yet) and the
+connector stays disconnected until the next replug.
+
+Remember the last reported state and, when the connector enables HPD,
+replay a "connected" state from a work item (hpd_enable runs with
+hpd_mutex and the caller's locks held).
+
+Tested on gts7l (SM8250, MAX77705 USB-C): HPD high at 11.4 s, msm DP
+bound at 21.5 s; the monitor now lights up at boot.
+
+diff --git a/drivers/gpu/drm/bridge/aux-hpd-bridge.c b/drivers/gpu/drm/bridge/aux-hpd-bridge.c
+index f02a38a26..c688b8e89 100644
+--- a/drivers/gpu/drm/bridge/aux-hpd-bridge.c
++++ b/drivers/gpu/drm/bridge/aux-hpd-bridge.c
+@@ -5,6 +5,7 @@
+  * Author: Dmitry Baryshkov <dmitry.baryshkov@linaro.org>
+  */
+ #include <linux/auxiliary_bus.h>
++#include <linux/devm-helpers.h>
+ #include <linux/export.h>
+ #include <linux/module.h>
+ #include <linux/of.h>
+@@ -17,6 +18,9 @@ static DEFINE_IDA(drm_aux_hpd_bridge_ida);
+ struct drm_aux_hpd_bridge_data {
+ 	struct drm_bridge bridge;
+ 	struct device *dev;
++	/* last reported state, replayed when the connector enables HPD */
++	enum drm_connector_status status;
++	struct work_struct replay;
+ };
+ 
+ static void drm_aux_hpd_bridge_release(struct device *dev)
+@@ -153,6 +157,7 @@ void drm_aux_hpd_bridge_notify(struct device *dev, enum drm_connector_status sta
+ 	if (!data)
+ 		return;
+ 
++	data->status = status;
+ 	drm_bridge_hpd_notify(&data->bridge, status);
+ }
+ EXPORT_SYMBOL_GPL(drm_aux_hpd_bridge_notify);
+@@ -164,14 +169,41 @@ static int drm_aux_hpd_bridge_attach(struct drm_bridge *bridge,
+ 	return flags & DRM_BRIDGE_ATTACH_NO_CONNECTOR ? 0 : -EINVAL;
+ }
+ 
++/*
++ * A sink attached at boot is often reported before the display driver has
++ * bound and enabled HPD; drm_bridge_hpd_notify() then drops the event and
++ * the connector stays disconnected. Replay the last state once HPD is
++ * enabled, from a work item: hpd_enable runs under hpd_mutex and the
++ * caller's locks, where a hotplug event must not be delivered.
++ */
++static void drm_aux_hpd_bridge_replay(struct work_struct *work)
++{
++	struct drm_aux_hpd_bridge_data *data =
++		container_of(work, struct drm_aux_hpd_bridge_data, replay);
++
++	if (data->status == connector_status_connected)
++		drm_bridge_hpd_notify(&data->bridge, data->status);
++}
++
++static void drm_aux_hpd_bridge_hpd_enable(struct drm_bridge *bridge)
++{
++	struct drm_aux_hpd_bridge_data *data =
++		container_of(bridge, struct drm_aux_hpd_bridge_data, bridge);
++
++	if (data->status == connector_status_connected)
++		schedule_work(&data->replay);
++}
++
+ static const struct drm_bridge_funcs drm_aux_hpd_bridge_funcs = {
+ 	.attach	= drm_aux_hpd_bridge_attach,
++	.hpd_enable = drm_aux_hpd_bridge_hpd_enable,
+ };
+ 
+ static int drm_aux_hpd_bridge_probe(struct auxiliary_device *auxdev,
+ 				    const struct auxiliary_device_id *id)
+ {
+ 	struct drm_aux_hpd_bridge_data *data;
++	int ret;
+ 
+ 	data = devm_drm_bridge_alloc(&auxdev->dev,
+ 				     struct drm_aux_hpd_bridge_data, bridge,
+@@ -180,6 +212,11 @@ static int drm_aux_hpd_bridge_probe(struct auxiliary_device *auxdev,
+ 		return PTR_ERR(data);
+ 
+ 	data->dev = &auxdev->dev;
++	data->status = connector_status_disconnected;
++	ret = devm_work_autocancel(data->dev, &data->replay,
++				   drm_aux_hpd_bridge_replay);
++	if (ret)
++		return ret;
+ 	data->bridge.of_node = dev_get_platdata(data->dev);
+ 	data->bridge.ops = DRM_BRIDGE_OP_HPD;
+ 	data->bridge.type = id->driver_data;

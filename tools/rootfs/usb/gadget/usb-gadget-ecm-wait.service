@@ -1,0 +1,7 @@
+[Unit]
+Description=Bind the USB ECM debug gadget once the port is in device mode (gts7l)
+After=usb-gadget-ecm.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/usb-gadget-ecm.sh --wait

@@ -40,6 +40,15 @@ alone without asking, and getting this wrong wastes a round-trip):
 
 ### 2. Booted into Arch Linux (normal boot)
 
+- **Wi-Fi: static `<lan>.110`** (set 2026-09-24 at the owner's request,
+  NetworkManager connection "<home-wifi>": gateway
+  `<lan>.1`, DNS `<lan>.101`). The ath11k MAC is random every
+  boot, so DHCP gave a new address each time. Not in the tarball.
+  `ssh -i ~/.ssh/id_ed25519_gts7l root@<lan>.110`. If the PC loses
+  its ARP entry (No route to host), ping the tablet until it answers,
+  then keep the entry alive from the tablet:
+  `systemd-run --unit=arpkeep --collect ping -i 2 -w 3600 -q <PC IP>`.
+
 - Not visible to `adb` at all once fully booted - this project's `boot.img`
   runs a mainline kernel + Arch userspace, not stock Android, so there's no
   ADB daemon.
@@ -63,8 +72,8 @@ alone without asking, and getting this wrong wastes a round-trip):
     `/etc/sudoers.d/10-wheel` (`%wheel ALL=(ALL:ALL) ALL`, password
     required).
   - **Current rootfs tarball:**
-    `work/archroot-build/archroot-rootfs-v11.tar` (2026-09-24, sha256
-    `74b39489b76f7d847795fc392221a1b19a975152e2a9a5b693fc4631b62fb947`).
+    `work/archroot-build/archroot-rootfs-v12.tar` (2026-09-24, sha256
+    `98881196fd89f94c1aa9e1cf5a5674360207d68e65d939367f69c0d7f9730b0f`).
     Lineage, each step a verified stream-rewrite of the previous one with
     Python's `tarfile` (GNU `tar --delete` corrupted this archive):
     - v5 = v4 + `authorized_keys` owned by root + `/etc/sudoers.d/10-wheel`
@@ -121,6 +130,21 @@ alone without asking, and getting this wrong wastes a round-trip):
       microSD userspace installed live since v10 (libcamera stack, Kamoso,
       GStreamer PipeWire plugins, dosfstools/exfatprogs,
       `tools/rootfs/camera/`).
+    - v12 = v11 with two boot fixes:
+      - swap: `gts7l-swapfile.service` replaced by `swapfile.swap` plus
+        `gts7l-swapfile-create.service` (`tools/rootfs/swap/`). The old
+        service's `After=local-fs.target` made an ordering cycle
+        (swap.target -> tmp.mount -> local-fs.target) that systemd broke
+        by dropping a random job every boot: usually `tmp.mount` (so no
+        tmpfs /tmp), once `local-fs.target`, and then the USB gadget,
+        Wi-Fi rebind and DSP start never ran.
+      - USB gadget (`tools/rootfs/usb/gadget/`, now tracked in the repo):
+        if the UDC is missing or the port is in host mode at boot (a
+        monitor or USB device attached), `usb-gadget-ecm-wait.service`
+        binds it once the port reaches device mode.
+
+      Verified: 183435 entries = v11 - 4 + 6; capabilities identical;
+      the new files match the repo; GNU tar and bsdtar read it cleanly.
 
     File capabilities (`kwin_wayland`, `newuidmap`, ...) are preserved
     byte-for-byte. Python tags two entries with a `hdrcharset=BINARY` pax

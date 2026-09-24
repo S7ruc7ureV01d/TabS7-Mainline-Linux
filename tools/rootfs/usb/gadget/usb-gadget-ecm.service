@@ -1,0 +1,14 @@
+[Unit]
+Description=USB Ethernet (ECM) debug gadget for gts7l (Phase 5)
+DefaultDependencies=no
+After=local-fs.target sys-kernel-config.mount
+Requires=local-fs.target
+Before=sshd.service network.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/bin/usb-gadget-ecm.sh
+
+[Install]
+WantedBy=multi-user.target

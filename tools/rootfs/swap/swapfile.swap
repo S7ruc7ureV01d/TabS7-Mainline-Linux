@@ -1,0 +1,10 @@
+[Unit]
+Description=8 GiB swap file on the root filesystem
+Wants=gts7l-swapfile-create.service
+After=gts7l-swapfile-create.service
+
+[Swap]
+What=/swapfile
+
+[Install]
+WantedBy=swap.target

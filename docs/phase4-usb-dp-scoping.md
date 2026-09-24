@@ -4,7 +4,9 @@ DP alt mode works: two different USB-C portable monitors show a picture
 in both cable orientations, KDE detects them as a second screen, and USB
 device mode (ssh over the cable) comes back after unplugging.
 Patches 0037 (USB-C driver) and 0038 (msm DP mode filter), plus DT;
-0039 (QMP PHY) and 0040 (USB-C driver follow-ups) fix USB after DP.
+0039 (QMP PHY) and 0040 (USB-C driver follow-ups) fix USB after DP;
+0041 (QMP PHY) and 0042 (aux-hpd bridge) fix booting with a monitor
+attached.
 
 ## The path
 
@@ -90,6 +92,30 @@ A rebind of dwc3 (`/sys/bus/platform/drivers/dwc3/{un,}bind`) plus
 re-attaching the gadget UDC and a replug was the manual recovery before
 0040.
 
+## Booting with the monitor attached (0041, 0042, gadget)
+
+Three separate failures when the monitor was on the port from power-on:
+
+1. **No picture:** the USB-C driver reported HPD high at 11.4 s, but msm
+   DP only binds at ~21.5 s. `drm_aux_hpd_bridge_notify()` ->
+   `drm_bridge_hpd_notify()` dropped the event (no `hpd_cb` yet), and
+   the connector stayed "disconnected". 0042 makes the aux-hpd bridge
+   remember the last state and replay "connected" from a work item when
+   the connector enables HPD.
+2. **dwc3 failed to probe** ("failed to initialize core", -110): the mux
+   was already DP-only, and `qmp_combo_usb_init()` powered the USB side
+   on anyway, which times out in DP-only mode. 0041, as pocknix's
+   RP5 patches: no USB power on/off in DP-only mode (usb_init/exit and
+   the orientation switch), and `usb_init_count` kept across the switch.
+3. **No USB network after the monitor:** the ECM gadget binds its UDC at
+   boot. In host mode (or before dwc3 has registered the UDC) the bind
+   fails, and nothing retried. `usb-gadget-ecm-wait.service` now retries
+   until the port reaches device mode (`tools/rootfs/usb/gadget/`).
+
+Unrelated but found in the same boot: the swap service's ordering cycle
+(see `docs/dev-environment-quickref.md`, rootfs v12), which once took out
+Wi-Fi and the gadget.
+
 ## Robustness bits (0040)
 
 - Enter Mode is resent up to 3 times, 2.5 s apart, until an Enter ACK or
@@ -139,7 +165,29 @@ tablet resets.
 
 - Pin assignment D (DP + USB 3 at once): coded, but untested; neither
   monitor offers it. A dock would test it.
-- Audio over DP: not looked at.
+- **Audio over DP: attempted, parked** (`kernel/patches-wip/dp-audio-wip.patch`,
+  not in the series). The pieces exist in mainline: `mdss_dp` is a
+  sound DAI (hdmi-codec via `dp_audio_prepare`), q6afe has
+  `DISPLAY_PORT_RX` (AFE port 0x6020), `sm8250.c` sets up the DP0 jack.
+  With a MultiMedia3 front end, the DP back-end link and a UCM "HDMI1"
+  device:
+  - PipeWire probes every PCM of the verb (open + hw_params + prepare).
+    The DP port start then hangs 3 s in the ADSP and fails, and one failed
+    mapping drops the whole profile: **the speakers vanished**. Never ship
+    a UCM DP device before the port can start.
+  - Deferring the AFE port start from prepare to trigger (after the DP
+    codec's prepare enabled its audio engine), sending the downstream
+    `AFE_PARAM_ID_HDMI_DP_MST_VID_IDX_CFG` / `_DPTX_IDX_CFG` (0/0), and a
+    no-op DP prepare without a monitor: the params and the HDMI config
+    are accepted, but **`AFE_PORT_CMD_DEVICE_START` is never answered**
+    (-110), even with the monitor up and `msm_dp_audio_prepare` run.
+  - The stock DP audio path (sde `dp_audio.c`, `msm-dai-q6-hdmi-v2.c`)
+    does the same register setup and the same config. Stock also sends an
+    AFE topology, calibration and HW delay before the start, which
+    mainline never does for any port.
+  - Next: in the stock-boot pass, play audio to the monitor under DeX and
+    capture the AFE/ext-disp sequence (kernel log with audio debug,
+    `tinymix` state of the "Display Port" controls).
 - Tool: `tools/rootfs/usb/vdmprobe.sh` is the read-only discovery probe
   used at the start. It enables VDM discovery from userspace
   (i2c-tools) and dumps the firmware's Discover Identity/SVIDs/Modes
