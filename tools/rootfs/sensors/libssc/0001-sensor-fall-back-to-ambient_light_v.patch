@@ -1,0 +1,42 @@
+From: gts7l project
+Subject: [PATCH] sensor: fall back to Samsung's ambient_light_v data type
+
+Samsung devices (seen on the Galaxy Tab S7, SM8250) register their light
+sensor (here a VEML3235) under the data type "ambient_light_v" instead of
+"ambient_light", so the light sensor was never found and iio-sensor-proxy
+reported no ambient light. If the SUID lookup finds no "ambient_light"
+sensor, look up "ambient_light_v" before giving up. Its events are the
+standard lux samples the light sensor already parses.
+---
+diff --git a/src/libssc-sensor.c b/src/libssc-sensor.c
+index 2cf686f..fe35a39 100644
+--- a/src/libssc-sensor.c
++++ b/src/libssc-sensor.c
+@@ -78,6 +78,8 @@ discover (SSCSensor *self, GTask *task);
+ static void
+ attribute (SSCSensor *self, GTask *task);
+ 
++static void discover (SSCSensor *self, GTask *task);
++
+ static void
+ report_received (SSCClient *self, guint32 msg_id, guint64 uid_high, guint64 uid_low, GArray *buf, gpointer user_data);
+ 
+@@ -345,6 +347,18 @@ report_received (SSCClient *self, guint32 msg_id, guint64 uid_high, guint64 uid_
+ 			/* Sensor discovered, populate attributes */
+ 			attribute (ctx->sensor, ctx->task);
+ 
++			return;
++		/*
++		 * Samsung devices register their light sensor as "ambient_light_v":
++		 * look that up before giving up on "ambient_light".
++		 */
++		} else if (g_strcmp0 (priv->data_type, "ambient_light") == 0) {
++			g_debug ("No 'ambient_light' sensor available, trying 'ambient_light_v'");
++			ssc_suid_response__free_unpacked (suid_msg, NULL);
++			g_free (priv->data_type);
++			priv->data_type = g_strdup ("ambient_light_v");
++			discover (ctx->sensor, ctx->task);
++
+ 			return;
+ 		/* No sensor available for specified data type, complete task */
+ 		} else {

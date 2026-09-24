@@ -1,0 +1,34 @@
+# libssc 0.4.4 with one gts7l patch (ambient_light_v fallback), so that
+# iio-sensor-proxy exposes the Galaxy Tab S7's light sensor and KWin's
+# automatic brightness (Plasma 6.6+) can use it.
+# docs/open-items.md "Ambient light sensor / auto-brightness".
+# pkgrel 1.1: stays installed over the repo's 0.4.4-1 until a newer
+# upstream version arrives (then check whether the fallback is still
+# needed).
+pkgname=libssc
+pkgver=0.4.4
+pkgrel=1.1
+pkgdesc='Library to expose Qualcomm Sensor Core sensors (gts7l: ambient_light_v fallback)'
+arch=(aarch64)
+url='https://libssc.dylanvanassche.be/'
+license=(GPL-3.0-or-later)
+depends=(glib2 glibc libgcc libqmi libqrtr-glib protobuf-c)
+makedepends=(git meson gobject-introspection)
+source=("git+https://codeberg.org/DylanVanAssche/libssc.git#tag=v$pkgver"
+        0001-sensor-fall-back-to-ambient_light_v.patch)
+sha256sums=('SKIP'
+            'd48bfc034922fd97dc367ea0675dd09c2de17767ace4ada7e66f97bce4f8a9f5')
+
+prepare() {
+	cd libssc
+	git apply "$srcdir/0001-sensor-fall-back-to-ambient_light_v.patch"
+}
+
+build() {
+	arch-meson libssc build
+	meson compile -C build
+}
+
+package() {
+	meson install -C build --destdir "$pkgdir"
+}

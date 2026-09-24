@@ -27,21 +27,21 @@ exactly, checked 2026-09-24), `kernel/dts/sm8250-samsung-gts7l.dts` and
 
 ## Parked on purpose
 
-### Ambient light sensor / auto-brightness (sensor works 2026-09-24)
+### Ambient light sensor / auto-brightness (works 2026-09-24)
 
-- **The sensor streams:** the missing piece was its supply. Stock pins
-  `pm8150_l10` at 2.8-2.9 V, always-on, with no Linux consumer; now
-  `vreg_l10a_2p8` in the DTS. With it, `ssccli --sensor light` (test
-  libssc build in `/root/libssc`, `SSC_DATA_TYPE=ambient_light_v`) reads
-  ~70 lux indoors. Earlier request-side experiments (see
-  `docs/kernel-boot-debugging.md`, 2026-09-22) were not the cause.
-- **Left for auto-brightness:**
-  1. libssc: look up Samsung's `ambient_light_v` when `ambient_light` is
-     missing (today only via the test build's env switch), then install
-     it, so iio-sensor-proxy exposes `LightLevel`.
-  2. KDE Plasma 6.7 / PowerDevil has no ambient-light support: a small
-     daemon mapping `net.hadess.SensorProxy` `LightLevel` to PowerDevil's
-     brightness D-Bus API.
+- **Sensor:** VEML3235 behind the SLPI; it streams once `pm8150_l10`
+  (2.8 V, always-on, as stock) is on - `vreg_l10a_2p8` in the DTS.
+- **libssc:** looked only for data type `ambient_light`; Samsung registers
+  it as `ambient_light_v`. `tools/rootfs/sensors/libssc/` builds libssc
+  0.4.4-1.1 with a fallback (lookup `ambient_light_v` when `ambient_light`
+  isn't there). Installed on the tablet; not in rootfs v12.
+- **Desktop:** Plasma 6.6+ has automatic brightness in **KWin** (not
+  PowerDevil), fed by iio-sensor-proxy's `LightLevel`. With the patched
+  libssc, iio-sensor-proxy reports `HasAmbientLight` and KWin shows
+  "Automatic brightness: supported" for DSI-1. It's switched in **System
+  Settings -> Display & Monitor** for the built-in screen. KWin only checks
+  at session start, so after installing libssc a re-login/reboot is
+  needed.
 
 ### Charging: what's not covered
 
