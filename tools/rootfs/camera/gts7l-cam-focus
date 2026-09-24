@@ -1,0 +1,36 @@
+#!/bin/bash
+# Fixed focus for the rear main camera (docs/phase4-camera-scoping.md).
+# libcamera's simple pipeline has no AF or lens control. The rear main's
+# AF actuator (Giantec GT9769, CCI1 master 1 = i2c-23, 0x0c) is powered by
+# the sensor's own rails (VAF = VANA gpio39, VIO gpio37), which are on only
+# while the sensor streams. So: when the sensor becomes active, program the
+# actuator directly (the dw9768 driver's init sequence) and move it to a
+# fixed position; when the sensor stops, the rails drop and the actuator
+# powers off by itself, so nothing stays powered while idle.
+# Position: FOCUS in /etc/default/gts7l-cam-focus (0-1023, 0 = rest).
+FOCUS=330
+[ -r /etc/default/gts7l-cam-focus ] && . /etc/default/gts7l-cam-focus
+SENSOR=/sys/bus/i2c/devices/20-002d/power/runtime_status
+BUS=23 ADDR=0x0c
+w() { i2ctransfer -f -y $BUS w$(($#))@$ADDR "$@" 2>/dev/null; }
+dac() { w 0x03 $(printf "0x%02x 0x%02x" $(($1 >> 8)) $(($1 & 255))); }
+set_focus() {
+	sleep 0.2			# rails up, sensor powered
+	w 0x02 0x00 || return 1		# power-down mode off
+	sleep 0.002
+	w 0x02 0x02			# AAC (ringing control) mode on; 0x01 would be power-down
+	w 0x06 0x41			# AAC mode 2, prescaler 1 (driver defaults)
+	local p step=$(( (FOCUS + 3) / 4 ))
+	for p in $step $((step * 2)) $((step * 3)) $FOCUS; do
+		[ $p -gt $FOCUS ] && p=$FOCUS
+		dac $p; sleep 0.01
+	done
+}
+done=0
+while sleep 1; do
+	if [ "$(cat $SENSOR 2>/dev/null)" = active ]; then
+		[ $done = 0 ] && set_focus && done=1
+	else
+		done=0
+	fi
+done

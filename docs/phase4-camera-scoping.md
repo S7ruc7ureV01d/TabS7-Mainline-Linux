@@ -258,6 +258,26 @@ Known limits, next steps:
   (`cam --list-controls`: Contrast and Gamma only), so in apps the lens
   stays unpowered at its rest position (0, blurry up close).
 
+### Fixed focus in apps: `gts7l-cam-focus` (2026-09-23)
+
+- With the `lens-focus` link, libcamera (inside WirePlumber) opened the lens
+  at start-up and kept it open: the dw9768 driver powers the actuator while
+  open, so the actuator and the sensor's VANA (gpio39) and VIO (gpio37)
+  rails stayed on while idle. The link is gone from the DT. Without it the
+  lens subdev isn't registered at all (nothing binds it into a media graph).
+- `tools/rootfs/camera/gts7l-cam-focus` (systemd service) polls the sensor's
+  runtime PM status once a second; when it turns `active` (streaming), it
+  programs the GT9769 directly on `i2c-23` (the driver's init sequence:
+  `0x02 = 0x00`, 1 ms, `0x02 = 0x02` AAC on, `0x06 = 0x41`, then the DAC word
+  at `0x03`) and ramps to `FOCUS` from `/etc/default/gts7l-cam-focus`. The
+  actuator is powered by the sensor's own rails, so it switches off with
+  the sensor: nothing is powered while idle (checked: gpio37/39 low).
+- Gotcha found on the way: bit 0 of `0x02` is **power-down**, AAC-enable is
+  bit 1 (`DW9768_AAC_MODE_EN = BIT(1)`); writing 0x01 puts the chip in
+  power-down, where DAC writes are ignored.
+- Checked: a DAC write of 380 during a stream raised sharpness from 30.4 to
+  70.0 on the desk scene.
+
 ## To grab during the stock boot (planned anyway for the suspend work)
 
 - `/vendor/lib64/camera/com.qti.sensormodule.*.bin` and

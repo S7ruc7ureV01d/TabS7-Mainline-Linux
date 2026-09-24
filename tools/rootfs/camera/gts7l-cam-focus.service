@@ -1,0 +1,9 @@
+[Unit]
+Description=Fixed focus for the rear camera while it streams (gts7l)
+
+[Service]
+ExecStart=/usr/local/sbin/gts7l-cam-focus
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

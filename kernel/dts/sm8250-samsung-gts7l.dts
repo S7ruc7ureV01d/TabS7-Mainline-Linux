@@ -2409,7 +2409,15 @@
 		vdda-supply = <&vreg_cam_rear_vana>;
 		vddio-supply = <&vreg_cam_vio>;
 
-		lens-focus = <&cam_rear_af>;
+		/*
+		 * No lens-focus link: with it, libcamera (in WirePlumber) opens
+		 * the lens at start-up and keeps it open, which keeps the
+		 * actuator and the VANA/VIO rails powered while idle, and its
+		 * simple pipeline has no AF anyway. Without the link the dw9768
+		 * subdev isn't registered either; gts7l-cam-focus programs the
+		 * GT9769 directly over I2C while the sensor streams. Restore the
+		 * link once libcamera can drive the lens itself.
+		 */
 		orientation = <1>; /* rear */
 		rotation = <90>;
 
