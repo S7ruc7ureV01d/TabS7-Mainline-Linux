@@ -52,6 +52,23 @@ exactly, checked 2026-09-24), `kernel/dts/sm8250-samsung-gts7l.dts` and
   the first login, so the seed applies from the second login. Tested
   2026-09-24: dims when covered, brightens in light.
 
+### Refresh rates 120/96/60/48 Hz (done 2026-09-24, patch 0047)
+
+- The panel's downstream dfps list is `<120 96 60 48>`; mainline offered
+  only 96 Hz since Round 50. That was based on the DPU core clock check
+  asking for ~523 MHz at 120 Hz (MDP max is 460 MHz). The check counted the
+  full 1600px line while each of the two layer mixers handles 800px; it
+  now divides by the mixer count (`dpu_core_perf.c`), so 120 Hz needs
+  ~261 MHz (the 300 MHz OPP step).
+- Modes are built like downstream's `dfps_immediate_porch_mode_vfp`: one
+  pixel clock (570 MHz), longer vertical front porch for lower rates
+  (vtotal 2594 / 3242 / 5188 / 6485). The panel gets its TCON rate code
+  (page `0x2a`, reg `0x23`: 0x0d/0x0e/0x0c/0x0f, from downstream
+  `dfps_update()`) in `prepare()`; the driver logs `N Hz, TCON rate code`.
+- 120 Hz is the preferred mode. All four are listed and switch in **System
+  Settings -> Display & Monitor -> Refresh rate**. A switch is a full
+  modeset (short blank), not seamless.
+
 ### Charging: what's not covered
 
 - **PPS / up to 45 W:** stock uses a separate **PCA9468** direct charger

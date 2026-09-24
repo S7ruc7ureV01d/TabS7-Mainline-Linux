@@ -1,0 +1,172 @@
+From: gts7l project
+Subject: [PATCH] drm: panel: nt36523: gts7l 120/96/60/48 Hz modes, dpu per-mixer core clock
+
+The gts7l panel only offered 96 Hz. The 120 Hz native rate was dropped
+because the DPU core clock check asked for ~523 MHz against the 460 MHz
+MDP maximum, but that check counted the full 1600px line, while each of
+the two layer mixers only handles 800px. Divide the CRTC mode clock by
+the number of mixers, like the per-pipe plane clocks already do; 120 Hz
+then needs ~261 MHz.
+
+Add the downstream dfps list (120 96 60 48) the way downstream does it
+("dfps_immediate_porch_mode_vfp"): one pixel clock, and a longer vertical
+front porch for the lower rates. The panel is told the rate through its
+TCON rate code (page 0x2a, register 0x23), taken from downstream
+dfps_update(); the mode being enabled is read from the connector's CRTC
+state in prepare(). Rate changes are full modesets.
+
+Tested on gts7l: all four rates are listed and selectable in KDE, the
+panel gets its rate code for each, no DSI/DPU errors, MDP clock 300 MHz.
+
+diff --git a/drivers/gpu/drm/msm/disp/dpu1/dpu_core_perf.c b/drivers/gpu/drm/msm/disp/dpu1/dpu_core_perf.c
+index 13cc65806..530ac1914 100644
+--- a/drivers/gpu/drm/msm/disp/dpu1/dpu_core_perf.c
++++ b/drivers/gpu/drm/msm/disp/dpu1/dpu_core_perf.c
+@@ -101,6 +101,14 @@ static u64 _dpu_core_perf_calc_clk(const struct dpu_perf_cfg *perf_cfg,
+ 
+ 	mode_clk = (u64)mode->vtotal * mode->hdisplay * drm_mode_vrefresh(mode);
+ 
++	/*
++	 * Each layer mixer only processes its own slice of the line, so a
++	 * mode split over several mixers (dual DSI, 3D merge) needs the core
++	 * clock of one slice, like the per-pipe plane clocks below.
++	 */
++	if (to_dpu_crtc_state(state)->num_mixers > 1)
++		mode_clk = div_u64(mode_clk, to_dpu_crtc_state(state)->num_mixers);
++
+ 	drm_atomic_crtc_for_each_plane(plane, crtc) {
+ 		pstate = to_dpu_plane_state(plane->state);
+ 		if (!pstate)
+diff --git a/drivers/gpu/drm/panel/panel-novatek-nt36523.c b/drivers/gpu/drm/panel/panel-novatek-nt36523.c
+index 7a7d627ef..82cdff697 100644
+--- a/drivers/gpu/drm/panel/panel-novatek-nt36523.c
++++ b/drivers/gpu/drm/panel/panel-novatek-nt36523.c
+@@ -32,6 +32,9 @@ struct panel_info {
+ 	struct gpio_desc *reset_gpio;
+ 	struct backlight_device *backlight;
+ 	struct regulator *vddio;
++
++	/* gts7l: the connector get_modes() filled, to find the mode in prepare */
++	struct drm_connector *connector;
+ };
+ 
+ struct panel_desc {
+@@ -57,11 +60,49 @@ static inline struct panel_info *to_panel_info(struct drm_panel *panel)
+ 	return container_of(panel, struct panel_info, panel);
+ }
+ 
++/*
++ * Refresh rate of the mode being enabled. The panel API does not pass the
++ * mode, but prepare() runs inside the atomic commit, after the new state
++ * is swapped in, so the connector's CRTC state is the one being enabled.
++ */
++static int gts7l_current_vrefresh(struct panel_info *pinfo)
++{
++	struct drm_connector *connector = pinfo->connector;
++	struct drm_crtc *crtc;
++
++	if (!connector || !connector->state)
++		return 120;
++	crtc = connector->state->crtc;
++	if (!crtc || !crtc->state)
++		return 120;
++	return drm_mode_vrefresh(&crtc->state->adjusted_mode);
++}
++
++/*
++ * TCON frame rate code, page 0x2a register 0x23: downstream dfps_update()
++ * in ss_dsi_panel_NT36523_PPA957DB1.c (samsung,dfps_tx_cmds_revA).
++ */
++static u8 gts7l_rate_code(int vrefresh)
++{
++	switch (vrefresh) {
++	case 120:
++		return 0x0d;
++	case 96:
++		return 0x0e;
++	case 60:
++		return 0x0c;
++	default:
++		return 0x0f;	/* 48 */
++	}
++}
++
+ static int gts7l_init_sequence(struct panel_info *pinfo)
+ {
+ 	struct mipi_dsi_device *dsi0 = pinfo->dsi[0];
+ 	struct mipi_dsi_device *dsi1 = pinfo->dsi[1];
+ 	struct mipi_dsi_multi_context dsi_ctx = { .dsi = NULL };
++	int vrefresh = gts7l_current_vrefresh(pinfo);
++	u8 rate_cmd[] = { 0x23, 0x0d };
+ 
+ 	/*
+ 	 * Samsung's downstream on-command sequence, transcribed mechanically
+@@ -332,7 +373,11 @@ static int gts7l_init_sequence(struct panel_info *pinfo)
+ 	mipi_dsi_dual_dcs_write_seq_multi(&dsi_ctx, dsi0, dsi1, 0xff, 0x2a);
+ 	mipi_dsi_dual_dcs_write_seq_multi(&dsi_ctx, dsi0, dsi1, 0xfb, 0x01);
+ 	mipi_dsi_dual_dcs_write_seq_multi(&dsi_ctx, dsi0, dsi1, 0x22, 0x1f);
+-	mipi_dsi_dual_dcs_write_seq_multi(&dsi_ctx, dsi0, dsi1, 0x23, 0x0d);
++	/* the on-command has 0x0d (120Hz); the other rates use their own code */
++	rate_cmd[1] = gts7l_rate_code(vrefresh);
++	dev_info(&dsi0->dev, "%d Hz, TCON rate code 0x%02x\n", vrefresh, rate_cmd[1]);
++	mipi_dsi_dual_dcs_write_buffer_multi(&dsi_ctx, dsi0, dsi1, rate_cmd,
++					     ARRAY_SIZE(rate_cmd));
+ 	mipi_dsi_dual_dcs_write_seq_multi(&dsi_ctx, dsi0, dsi1, 0x24, 0x00);
+ 	mipi_dsi_dual_dcs_write_seq_multi(&dsi_ctx, dsi0, dsi1, 0x25, 0x56);
+ 	mipi_dsi_dual_dcs_write_seq_multi(&dsi_ctx, dsi0, dsi1, 0x27, 0x00);
+@@ -1410,18 +1455,36 @@ static int j606f_boe_init_sequence(struct panel_info *pinfo)
+  * downstream clock driver has additional divider entries mainline's
+  * doesn't - a separate, valid future improvement, out of scope here.
+  */
++/*
++ * Refresh rates: downstream lists qcom,dsi-supported-dfps-list = <120 96
++ * 60 48> with "dfps_immediate_porch_mode_vfp", i.e. one pixel clock (the
++ * 120Hz one) and a longer vertical front porch for the lower rates. The
++ * 120Hz core clock limit above was an overestimate: the DPU core clock
++ * check counted the full 1600px line although each of the two layer
++ * mixers only handles 800px (fixed in dpu_core_perf.c), which puts 120Hz
++ * at ~261MHz of the 460MHz budget.
++ */
++#define GTS7L_HTOTAL	(1600 + 168 + 4 + 60)
++#define GTS7L_VTOTAL	(2560 + 26 + 1 + 7)
++#define GTS7L_CLOCK	(GTS7L_HTOTAL * GTS7L_VTOTAL * 120 / 1000)
++#define GTS7L_MODE(fps)							\
++	{								\
++		.clock = GTS7L_CLOCK,					\
++		.hdisplay = 1600,					\
++		.hsync_start = 1600 + 168,				\
++		.hsync_end = 1600 + 168 + 4,				\
++		.htotal = GTS7L_HTOTAL,					\
++		.vdisplay = 2560,					\
++		.vsync_start = GTS7L_VTOTAL * 120 / (fps) - 1 - 7,	\
++		.vsync_end = GTS7L_VTOTAL * 120 / (fps) - 7,		\
++		.vtotal = GTS7L_VTOTAL * 120 / (fps),			\
++	}
++
+ static const struct drm_display_mode gts7l_modes[] = {
+-	{
+-		.clock = (1600 + 168 + 4 + 60) * (2560 + 26 + 1 + 7) * 96 / 1000,
+-		.hdisplay = 1600,
+-		.hsync_start = 1600 + 168,
+-		.hsync_end = 1600 + 168 + 4,
+-		.htotal = 1600 + 168 + 4 + 60,
+-		.vdisplay = 2560,
+-		.vsync_start = 2560 + 26,
+-		.vsync_end = 2560 + 26 + 1,
+-		.vtotal = 2560 + 26 + 1 + 7,
+-	},
++	GTS7L_MODE(120),	/* preferred: first entry */
++	GTS7L_MODE(96),
++	GTS7L_MODE(60),
++	GTS7L_MODE(48),
+ };
+ 
+ static const struct panel_desc gts7l_desc = {
+@@ -1681,6 +1744,7 @@ static int nt36523_get_modes(struct drm_panel *panel,
+ 		drm_mode_probed_add(connector, mode);
+ 	}
+ 
++	pinfo->connector = connector;
+ 	connector->display_info.width_mm = pinfo->desc->width_mm;
+ 	connector->display_info.height_mm = pinfo->desc->height_mm;
+ 	connector->display_info.bpc = pinfo->desc->bpc;
