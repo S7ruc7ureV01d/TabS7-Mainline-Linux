@@ -1,0 +1,68 @@
+From: gts7l project
+Subject: [PATCH] power: supply: max77705: handle OTG boost: AICL loop and
+ online
+
+max77705_aicl_irq() lowers CHGIN_LIM step by step, sleeping in between,
+until INT_OK reports AICL OK. In OTG boost the charger's input is its own
+output and AICL never reports OK, so the loop never ends (CHGIN_LIM wraps
+around past 0). It runs in the MAX77705's nested interrupt thread, so
+every other MAX77705 interrupt (USB-C attach/detach, charger, fuel
+gauge) is lost from then on.
+
+Ignore AICL while the charger is in OTG boost, and stop at the lowest
+input limit.
+
+Also report the charger offline in OTG boost: CHGIN_OK is then set by
+our own output, and userspace saw line power come online (KDE played
+its charger sound for every USB device).
+
+diff --git a/drivers/power/supply/max77705_charger.c b/drivers/power/supply/max77705_charger.c
+index 63b0b4f0c..ff648a73e 100644
+--- a/drivers/power/supply/max77705_charger.c
++++ b/drivers/power/supply/max77705_charger.c
+@@ -43,9 +43,18 @@ static enum power_supply_property max77705_charger_props[] = {
+ static irqreturn_t max77705_aicl_irq(int irq, void *irq_drv_data)
+ {
+ 	struct max77705_charger_data *chg = irq_drv_data;
+-	unsigned int regval, irq_status;
++	unsigned int regval, irq_status, mode;
+ 	int err;
+ 
++	/*
++	 * In OTG boost the charger's input is its own output: AICL never
++	 * reports OK there, and the loop below would never end, holding the
++	 * MAX77705's interrupt thread (and so every other MAX77705 interrupt).
++	 */
++	err = regmap_read(chg->regmap, MAX77705_CHG_REG_CNFG_00, &mode);
++	if (err < 0 || (mode & MAX77705_OTG_CTRL) == MAX77705_OTG_CTRL)
++		return IRQ_HANDLED;
++
+ 	err = regmap_read(chg->regmap, MAX77705_CHG_REG_INT_OK, &irq_status);
+ 	if (err < 0)
+ 		return IRQ_HANDLED;
+@@ -57,6 +66,9 @@ static irqreturn_t max77705_aicl_irq(int irq, void *irq_drv_data)
+ 		if (err < 0)
+ 			return IRQ_HANDLED;
+ 
++		/* At the lowest input limit there is nothing left to lower */
++		if (!regval)
++			break;
+ 		regval--;
+ 
+ 		err = regmap_field_write(chg->rfield[MAX77705_CHG_CHGIN_LIM], regval);
+@@ -128,6 +140,15 @@ static int max77705_get_online(struct regmap *regmap, int *val)
+ 	unsigned int data;
+ 	int ret;
+ 
++	/* In OTG boost CHGIN is our own output, not a charger */
++	ret = regmap_read(regmap, MAX77705_CHG_REG_CNFG_00, &data);
++	if (ret < 0)
++		return ret;
++	if ((data & MAX77705_OTG_CTRL) == MAX77705_OTG_CTRL) {
++		*val = 0;
++		return 0;
++	}
++
+ 	ret = regmap_read(regmap, MAX77705_CHG_REG_INT_OK, &data);
+ 	if (ret < 0)
+ 		return ret;

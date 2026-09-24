@@ -685,3 +685,8 @@ CONFIG_VIDEO_DW9768=y
 # microSD (docs/phase4-microsd-scoping.md): SDHCI_MSM is already =y;
 # exFAT for SDXC cards and exFAT-formatted cards (TWRP offers it).
 CONFIG_EXFAT_FS=y
+
+# USB host (docs/phase4-usb-host-scoping.md): UAS for USB SSD enclosures.
+# (xHCI, dwc3 dual-role, usb-storage and USB HID were already =y; the USB-C
+# driver now selects EXTCON.)
+CONFIG_USB_UAS=y

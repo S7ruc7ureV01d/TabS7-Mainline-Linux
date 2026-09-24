@@ -738,7 +738,7 @@
 	 * table, and 0025 moves a PD source to its fixed 9 V PDO (stock's 9 V
 	 * 1650/3150 mA), all within the stock battery temperature bands.
 	 */
-	usbc@25 {
+	max77705_usbc: usbc@25 {
 		compatible = "maxim,max77705-usbc";
 		reg = <0x25>;
 		interrupt-parent = <&max77705_pmic>;
@@ -2494,4 +2494,20 @@
 		function = "gpio";
 		bias-pull-up;
 	};
+};
+
+/*
+ * USB host (OTG) (docs/phase4-usb-host-scoping.md): the MAX77705 USB-C
+ * driver's extcon reports the data role from the CC state (a device
+ * attached = host, with the charger's OTG boost on VBUS; a PC or charger
+ * = device). The glue follows EXTCON_USB for its VBUS override and the
+ * core EXTCON_USB_HOST for the role. Still USB 2.0 only (no QMP PHY yet).
+ */
+&usb_1 {
+	extcon = <&max77705_usbc>, <&max77705_usbc>;
+};
+
+&usb_1_dwc3 {
+	dr_mode = "otg";
+	extcon = <&max77705_usbc>;
 };

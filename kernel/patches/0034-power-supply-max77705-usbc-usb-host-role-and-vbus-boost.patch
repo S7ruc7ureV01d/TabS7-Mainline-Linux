@@ -1,0 +1,246 @@
+From: gts7l project
+Subject: [PATCH] power: supply: max77705_usbc_ilim: USB host role and VBUS
+ boost
+
+After reset the MAX77705 USB-C firmware only sinks. OPCODE
+SET_ALTERNATEMODE (0x55) with bit 0 (SRCCAP) set lets it toggle as a
+dual-role port: an attached device (Rd) then shows as CC_STATUS0 CCStat
+= 2 (source). Stock sends 0x3 at boot (bit 1 adds VDM alt-mode
+discovery, not needed for USB host).
+
+Register an extcon (EXTCON_USB, EXTCON_USB_HOST) and set it from the CC
+state: a device gets host mode and the charger's OTG boost on VBUS
+(CHG_CNFG_00 OTG|BOOST, stock's mode 0xf; never while VBUS is already
+present); a PC or charger (sink with VBUS) gets device mode, so USB
+networking to a PC keeps working. The dwc3 glue and core follow the
+extcon. While sourcing, VBUS is our own boost, so the input current
+logic stands down.
+
+The D+/D- switch (CONTROL1) resets to open, following BC1.2 detection,
+which only runs when we sink: as a source the data lines stayed
+disconnected and devices enumerated only by luck. Set it to USB
+(COM_USB, as stock does for OTG) while sourcing and back to the default
+afterwards.
+
+Set the OTG current limit to 1.5 A (the boost's maximum) when sourcing:
+at the charger's 900 mA a USB SSD's start-up current pulled VBUS down
+until the CC logic saw a detach, and it never enumerated.
+
+diff --git a/drivers/power/supply/Kconfig b/drivers/power/supply/Kconfig
+index 862a34b4e..0da03d03e 100644
+--- a/drivers/power/supply/Kconfig
++++ b/drivers/power/supply/Kconfig
+@@ -645,6 +645,7 @@ config CHARGER_MAX77705
+ config CHARGER_MAX77705_USBC_ILIM
+ 	tristate "Maxim MAX77705 USB-C input current selection"
+ 	depends on CHARGER_MAX77705 && I2C && IIO
++	select EXTCON
+ 	select REGMAP_I2C
+ 	help
+ 	  Say Y to set the MAX77705 charger's input and charge current from
+diff --git a/drivers/power/supply/max77705_usbc_ilim.c b/drivers/power/supply/max77705_usbc_ilim.c
+index 507805444..a5be2a97c 100644
+--- a/drivers/power/supply/max77705_usbc_ilim.c
++++ b/drivers/power/supply/max77705_usbc_ilim.c
+@@ -35,11 +35,14 @@
+ #include <linux/i2c.h>
+ #include <linux/iio/consumer.h>
+ #include <linux/interrupt.h>
++#include <linux/extcon-provider.h>
++#include <linux/mfd/max77705-private.h>
+ #include <linux/minmax.h>
+ #include <linux/module.h>
+ #include <linux/mutex.h>
+ #include <linux/of.h>
+ #include <linux/power_supply.h>
++#include <linux/power/max77705_charger.h>
+ #include <linux/regmap.h>
+ #include <linux/unaligned.h>
+ #include <linux/workqueue.h>
+@@ -79,12 +82,34 @@
+ #define MAX77705_BC_CHGTYP		GENMASK(1, 0)
+ /* CC_STATUS0 */
+ #define MAX77705_CC_CCISTAT		GENMASK(5, 4)
++#define MAX77705_CC_CCSTAT		GENMASK(2, 0)
++#define MAX77705_CCSTAT_SINK		1	/* we sink: charger or PC */
++#define MAX77705_CCSTAT_SOURCE		2	/* we source: a USB device */
+ /* PD_STATUS0: last PD event */
+ #define MAX77705_PD_SNK_PSRDY		0x01
+ 
+ /* Firmware commands (downstream max77705.h) */
+ #define MAX77705_OP_CURRENT_SRCCAP	0x30
+ #define MAX77705_OP_SRCCAP_REQUEST	0x32
++/*
++ * SET_ALTERNATEMODE: after reset the firmware only sinks; bit 0 (SRCCAP)
++ * lets it toggle as a dual-role port and take the source role when a
++ * device (Rd) is attached. Bit 1 would add VDM alt-mode discovery (DP),
++ * which stock also sets (0x3); not needed for USB host.
++ */
++#define MAX77705_OP_SET_ALTERNATEMODE	0x55
++#define MAX77705_ALTMODE_SRCCAP		BIT(0)
++/*
++ * CONTROL1: the D+/D- switch (COMN1SW bits 2:0, COMP2SW bits 5:3; 001 =
++ * USB to the SoC). The reset default 0x00 is open with the switch
++ * following BC1.2 detection, which only runs when we sink: as a source
++ * the data lines stay disconnected. Stock sets COM_USB for an OTG attach.
++ */
++#define MAX77705_OP_CONTROL1_W		0x06
++/* The charger's CHG_CNFG_02: OTG (boost) current limit */
++#define MAX77705_CNFG02_OTG_ILIM	GENMASK(7, 6)
++#define MAX77705_CTRL1_COM_USB		0x09
++#define MAX77705_CTRL1_DEFAULT		0x00
+ 
+ /* OPCODE_CURRENT_SRCCAP reply: [1] = selected position << 3 | count */
+ #define MAX77705_SRCCAP_SEL		GENMASK(5, 3)
+@@ -170,6 +195,9 @@ enum max77705_pd_state {
+ struct max77705_usbc_ilim {
+ 	struct device *dev;
+ 	struct regmap *regmap;
++	struct regmap *chg_regmap;	/* the charger's, for the OTG boost */
++	struct extcon_dev *extcon;
++	bool source;			/* supplying VBUS to a USB device */
+ 	struct power_supply *charger;
+ 	struct iio_channel *batt_therm;
+ 	struct mutex lock;
+@@ -392,6 +420,83 @@ static void max77705_pd_reply(struct max77705_usbc_ilim *ilim)
+ 	}
+ }
+ 
++static const unsigned int max77705_extcon_cables[] = {
++	EXTCON_USB,
++	EXTCON_USB_HOST,
++	EXTCON_NONE,
++};
++
++/* The charger's OTG boost: 5 V out on VBUS (stock: CHG_CNFG_00 mode 0xf) */
++static void max77705_set_source(struct max77705_usbc_ilim *ilim, bool on)
++{
++	u8 ctrl1;
++	int ret;
++
++	if (on == ilim->source)
++		return;
++
++	/*
++	 * 1.5 A, the boost's maximum: at the charger's 900 mA a USB SSD's
++	 * start-up current pulled VBUS down far enough for the CC logic to
++	 * see a detach, and it never enumerated.
++	 */
++	if (on) {
++		ret = regmap_update_bits(ilim->chg_regmap, MAX77705_CHG_REG_CNFG_02,
++					 MAX77705_CNFG02_OTG_ILIM,
++					 FIELD_PREP(MAX77705_CNFG02_OTG_ILIM,
++						    MAX77705_OTG_ILIM_1500));
++		if (ret)
++			dev_warn(ilim->dev, "cannot set the OTG current limit: %d\n", ret);
++	}
++
++	ret = regmap_update_bits(ilim->chg_regmap, MAX77705_CHG_REG_CNFG_00,
++				 MAX77705_OTG_CTRL, on ? MAX77705_OTG_CTRL : 0);
++	if (ret) {
++		dev_warn(ilim->dev, "cannot switch the VBUS boost %s: %d\n",
++			 on ? "on" : "off", ret);
++		return;
++	}
++	ilim->source = on;
++	dev_info(ilim->dev, "USB device attached: VBUS boost %s\n",
++		 on ? "on" : "off");
++
++	/* Data lines to the SoC while hosting; back to BC1.2 control after */
++	ctrl1 = on ? MAX77705_CTRL1_COM_USB : MAX77705_CTRL1_DEFAULT;
++	ret = max77705_opcode(ilim, MAX77705_OP_CONTROL1_W, &ctrl1, 1);
++	if (ret)
++		dev_warn(ilim->dev, "cannot set the USB data switch: %d\n", ret);
++}
++
++/*
++ * Data and power role from the CC state: a device (we source) gets host
++ * mode and VBUS; a PC or charger (we sink, VBUS present) gets device mode,
++ * so USB networking to a PC keeps working. dwc3 and its glue follow the
++ * extcon.
++ */
++static bool max77705_roles(struct max77705_usbc_ilim *ilim, unsigned int cc0,
++			   unsigned int bc)
++{
++	unsigned int ccstat = FIELD_GET(MAX77705_CC_CCSTAT, cc0);
++	bool vbus = bc & MAX77705_BC_VBUSDET;
++
++	if (ccstat == MAX77705_CCSTAT_SOURCE) {
++		/* Never drive VBUS against a source that is already there */
++		if (!ilim->source && vbus)
++			dev_warn(ilim->dev, "device attached with VBUS present: no boost\n");
++		else
++			max77705_set_source(ilim, true);
++		extcon_set_state_sync(ilim->extcon, EXTCON_USB, false);
++		extcon_set_state_sync(ilim->extcon, EXTCON_USB_HOST, true);
++		return true;
++	}
++
++	max77705_set_source(ilim, false);
++	extcon_set_state_sync(ilim->extcon, EXTCON_USB_HOST, false);
++	extcon_set_state_sync(ilim->extcon, EXTCON_USB,
++			      ccstat == MAX77705_CCSTAT_SINK && vbus);
++	return false;
++}
++
+ static void max77705_update(struct max77705_usbc_ilim *ilim)
+ {
+ 	unsigned int bc, cc0, st1, chgtyp, ccistat;
+@@ -408,6 +513,19 @@ static void max77705_update(struct max77705_usbc_ilim *ilim)
+ 
+ 	mutex_lock(&ilim->lock);
+ 
++	/*
++	 * Sourcing a USB device: VBUS is our own boost, not a charger, so the
++	 * input current logic below has nothing to do.
++	 */
++	if (max77705_roles(ilim, cc0, bc)) {
++		ilim->attached = false;
++		ilim->pd = MAX77705_PD_IDLE;
++		ilim->psrdy = false;
++		ilim->cmd_done = false;
++		cancel_delayed_work(&ilim->pd_timeout);
++		goto out;
++	}
++
+ 	/* Detach: forget this attach's PD state; the next one starts at 5 V */
+ 	if (!(bc & MAX77705_BC_VBUSDET)) {
+ 		ilim->attached = false;
+@@ -560,6 +678,7 @@ static int max77705_usbc_ilim_probe(struct i2c_client *client)
+ {
+ 	struct device *dev = &client->dev;
+ 	struct max77705_usbc_ilim *ilim;
++	u8 altmode = MAX77705_ALTMODE_SRCCAP;
+ 	unsigned int msg;
+ 	int ret;
+ 
+@@ -593,6 +712,17 @@ static int max77705_usbc_ilim_probe(struct i2c_client *client)
+ 		ilim->batt_therm = NULL;
+ 	}
+ 
++	ilim->chg_regmap = dev_get_regmap(ilim->charger->dev.parent, NULL);
++	if (!ilim->chg_regmap)
++		return dev_err_probe(dev, -ENODEV, "no charger regmap\n");
++
++	ilim->extcon = devm_extcon_dev_allocate(dev, max77705_extcon_cables);
++	if (IS_ERR(ilim->extcon))
++		return PTR_ERR(ilim->extcon);
++	ret = devm_extcon_dev_register(dev, ilim->extcon);
++	if (ret)
++		return dev_err_probe(dev, ret, "cannot register extcon\n");
++
+ 	ret = devm_delayed_work_autocancel(dev, &ilim->work, max77705_work);
+ 	if (!ret)
+ 		ret = devm_delayed_work_autocancel(dev, &ilim->pd_timeout,
+@@ -613,6 +743,11 @@ static int max77705_usbc_ilim_probe(struct i2c_client *client)
+ 	if (ret)
+ 		return dev_err_probe(dev, ret, "cannot unmask interrupts\n");
+ 
++	/* Let the firmware take the source role (USB host for devices) */
++	ret = max77705_opcode(ilim, MAX77705_OP_SET_ALTERNATEMODE, &altmode, 1);
++	if (ret)
++		dev_warn(dev, "cannot enable the source role: %d\n", ret);
++
+ 	/* A 5 V contract agreed before we probed left no event for us */
+ 	if (!regmap_read(ilim->regmap, MAX77705_USBC_REG_PD_STATUS0, &msg) &&
+ 	    msg == MAX77705_PD_SNK_PSRDY)
