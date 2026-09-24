@@ -27,7 +27,7 @@ exactly, checked 2026-09-24), `kernel/dts/sm8250-samsung-gts7l.dts` and
 
 ## Parked on purpose
 
-### Ambient light sensor / auto-brightness (works 2026-09-24)
+### Ambient light sensor / auto-brightness (done 2026-09-24)
 
 - **Sensor:** VEML3235 behind the SLPI; it streams once `pm8150_l10`
   (2.8 V, always-on, as stock) is on - `vreg_l10a_2p8` in the DTS.
@@ -42,6 +42,15 @@ exactly, checked 2026-09-24), `kernel/dts/sm8250-samsung-gts7l.dts` and
   Settings -> Display & Monitor** for the built-in screen. KWin only checks
   at session start, so after installing libssc a re-login/reboot is
   needed.
+- **Starting curve** (`tools/rootfs/sensors/autobrightness/`): KWin learns
+  its curve from slider use and starts all-zero (= always 100%). A user
+  service before KWin (`gts7l-seed-autobrightness`) fills an all-zero
+  DSI-1 curve with `[0, 1, 3, 8, 20, 45, 90, 180, 350, 700, 1400]` lux for
+  0-100% (dark room ~2-3 lux -> ~15-20%, indoors ~75 lux -> ~55%); a
+  learned curve is never touched. `touch ~/.config/gts7l-autobrightness-reseed`
+  + re-login resets to it. On a brand-new user KWin creates the file at
+  the first login, so the seed applies from the second login. Tested
+  2026-09-24: dims when covered, brightens in light.
 
 ### Charging: what's not covered
 

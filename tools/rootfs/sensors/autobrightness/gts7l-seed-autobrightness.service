@@ -1,0 +1,10 @@
+[Unit]
+Description=Seed KWin's automatic-brightness curve for the built-in panel (gts7l)
+Before=plasma-kwin_wayland.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/gts7l-seed-autobrightness
+
+[Install]
+WantedBy=plasma-kwin_wayland.service

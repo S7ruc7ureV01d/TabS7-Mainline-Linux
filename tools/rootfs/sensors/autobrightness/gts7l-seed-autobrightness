@@ -1,0 +1,54 @@
+#!/usr/bin/python3
+"""Seed KWin's automatic-brightness curve for the gts7l's built-in panel.
+
+KWin (Plasma 6.6+) learns the curve from brightness adjustments made while
+automatic brightness is on, and starts with all points at 0 lux, so any
+light reading means 100% until trained. Before KWin starts, give the
+built-in panel (connector DSI-1) a starting curve if its curve is still all
+zeros; a curve KWin has learned is never touched.
+
+To go back to this curve later, create ~/.config/gts7l-autobrightness-reseed
+(e.g. `touch`) and log in again: the curve is then replaced once, and the
+file removed.
+
+Points: ambient light in lux for 0%, 10%, ... 100% brightness (VEML3235
+behind the SLPI; ~2-3 lux in a dark room, ~70-80 lux indoors).
+"""
+import json
+import os
+import sys
+import tempfile
+
+CURVE = [0, 1, 3, 8, 20, 45, 90, 180, 350, 700, 1400]
+CONNECTOR = "DSI-1"
+
+config = os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config"))
+path = os.path.join(config, "kwinoutputconfig.json")
+reseed = os.path.join(config, "gts7l-autobrightness-reseed")
+force = os.path.exists(reseed)
+try:
+    with open(path) as f:
+        data = json.load(f)
+except (OSError, ValueError):
+    sys.exit(0)  # first login: KWin creates it; seeded on the next login
+
+changed = False
+for entry in data:
+    if entry.get("name") != "outputs":
+        continue
+    for out in entry.get("data", []):
+        curve = out.get("autoBrightnessCurve")
+        if (out.get("connectorName") == CONNECTOR and isinstance(curve, list)
+                and len(curve) == len(CURVE) and (force or not any(curve))):
+            out["autoBrightnessCurve"] = list(CURVE)
+            changed = True
+
+if changed:
+    d = os.path.dirname(path)
+    with tempfile.NamedTemporaryFile("w", dir=d, delete=False) as t:
+        json.dump(data, t, indent=4)
+        tmp = t.name
+    os.replace(tmp, path)
+    print("seeded the automatic-brightness curve for " + CONNECTOR)
+if force:
+    os.unlink(reseed)
