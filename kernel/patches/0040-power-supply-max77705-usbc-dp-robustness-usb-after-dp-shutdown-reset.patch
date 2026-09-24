@@ -1,0 +1,220 @@
+From: gts7l project
+Subject: [PATCH] power: supply: max77705_usbc_ilim: DP robustness, USB after
+ DP, reset at shutdown
+
+- USB after a DP session: the QMP PHY's USB side comes back only some
+  time after the monitor is gone, and dwc3 switching to device mode
+  before that fails for good ("failed to enable ep0out"). Keep dwc3 in
+  host mode after a DP session until the next attach, so plugging a PC
+  in is a fresh host -> device switch.
+- Enter Mode: resend (3 tries, 2.5 s apart) until an Enter ACK or a DP
+  Attention shows the partner is in DP mode.
+- Some attaches got the partner's Attention with "DP enabled" but never
+  a Configure ACK: treat that as configured.
+- Shutdown: the CCIC runs from the battery and keeps its state across a
+  reboot. Like stock max77705_usbc_shutdown(): VBUS boost off, AUX switch
+  and PS5169 cleared, interrupts masked, firmware reset (0x80 = 0x0f).
+
+diff --git a/drivers/power/supply/max77705_usbc_ilim.c b/drivers/power/supply/max77705_usbc_ilim.c
+index 93a52e370..e56672592 100644
+--- a/drivers/power/supply/max77705_usbc_ilim.c
++++ b/drivers/power/supply/max77705_usbc_ilim.c
+@@ -68,6 +68,8 @@
+ #define MAX77705_USBC_REG_CC_INT_M	0x0f
+ #define MAX77705_USBC_REG_PD_INT_M	0x10
+ #define MAX77705_USBC_REG_VDM_INT_M	0x11
++#define MAX77705_USBC_REG_RESET		0x80	/* stock max77705_reset_ic() */
++#define MAX77705_USBC_RESET_IC		0x0f
+ #define MAX77705_USBC_REG_OPCODE_W	0x21
+ #define MAX77705_USBC_REG_OPCODE_END	0x41
+ #define MAX77705_USBC_REG_OPCODE_R	0x51
+@@ -149,6 +151,7 @@
+ #define MAX_DPCAP_UFP_D_PINS		GENMASK(23, 16)
+ /* DP Status VDO */
+ #define MAX_DPSTS_CONNECTED		GENMASK(1, 0)
++#define MAX_DPSTS_ENABLED		BIT(3)
+ #define MAX_DPSTS_MF_PREFER		BIT(4)
+ #define MAX_DPSTS_HPD			BIT(7)
+ /* DP Configure VDO byte 0: configure as UFP_D, DP 1.3 signalling */
+@@ -269,6 +272,8 @@ enum max77705_pd_state {
+ #define MAX77705_POLL_MS		30000	/* temperature, while attached */
+ #define MAX77705_PD_TIMEOUT_MS		3000
+ #define MAX77705_DP_ENTER_DELAY_MS	1500
++#define MAX77705_DP_ENTER_RETRY_MS	2500
++#define MAX77705_DP_ENTER_TRIES		3
+ 
+ struct max77705_usbc_ilim {
+ 	struct device *dev;
+@@ -291,6 +296,9 @@ struct max77705_usbc_ilim {
+ 	struct regulator *aux_pullup;
+ 	bool aux_on;
+ 	bool dp_hpd_high;
++	bool dp_entered;	/* Enter Mode ACKed */
++	bool dp_session;	/* DP was up since the last attach */
++	int dp_enter_tries;
+ 	struct power_supply *charger;
+ 	struct iio_channel *batt_therm;
+ 	struct mutex lock;
+@@ -769,6 +777,8 @@ static void max77705_dp_reset(struct max77705_usbc_ilim *ilim)
+ 	ilim->vdm_int = ilim->pd_int = 0;
+ 	ilim->dp_pins = 0;
+ 	ilim->dp_pin = 0;
++	ilim->dp_entered = false;
++	ilim->dp_enter_tries = 0;
+ 	max77705_dp_hpd(ilim, false);
+ 	if (ilim->dp_muxed) {
+ 		ilim->dp_muxed = false;
+@@ -784,6 +794,7 @@ static void max77705_dp_configured(struct max77705_usbc_ilim *ilim)
+ 	if (ilim->dp_muxed)
+ 		return;
+ 	ilim->dp_muxed = true;
++	ilim->dp_session = true;
+ 	dev_info(ilim->dev, "DP configured, pin %c\n", 'A' + ilim->dp_pin);
+ 	max77705_dp_mux(ilim, ilim->dp_pin);
+ 	if (!max77705_vdm_resp(ilim, MAX77705_VDM_ID_ATTENTION, &hdr, &vdo) &&
+@@ -849,10 +860,24 @@ static void max77705_dp_enter_work(struct work_struct *work)
+ 		container_of(to_delayed_work(work), struct max77705_usbc_ilim, dp_enter);
+ 
+ 	mutex_lock(&ilim->lock);
+-	if (ilim->source && ilim->dp_pins && !ilim->dp_pin && !ilim->dp_muxed) {
+-		dev_info(ilim->dev, "entering DP mode\n");
+-		if (max77705_vdm_send(ilim, VDM_HDR_ENTER_DP, NULL, 0))
+-			dev_warn(ilim->dev, "cannot send DP Enter Mode\n");
++	if (ilim->source && ilim->dp_pins && !ilim->dp_pin && !ilim->dp_muxed &&
++	    !ilim->dp_entered) {
++		/*
++		 * Most attaches show no Enter Mode ACK event; the firmware
++		 * then enters and configures by itself ~9 s after attach.
++		 * Resend in case ours was dropped, until Attention shows the
++		 * partner is in DP mode.
++		 */
++		if (ilim->dp_enter_tries++ < MAX77705_DP_ENTER_TRIES) {
++			dev_info(ilim->dev, "entering DP mode (try %d)\n",
++				 ilim->dp_enter_tries);
++			if (max77705_vdm_send(ilim, VDM_HDR_ENTER_DP, NULL, 0))
++				dev_warn(ilim->dev, "cannot send DP Enter Mode\n");
++			mod_delayed_work(system_wq, &ilim->dp_enter,
++					 msecs_to_jiffies(MAX77705_DP_ENTER_RETRY_MS));
++		} else {
++			dev_warn(ilim->dev, "no DP Enter Mode ACK, giving up\n");
++		}
+ 	}
+ 	mutex_unlock(&ilim->lock);
+ }
+@@ -889,9 +914,14 @@ static void max77705_dp_events(struct max77705_usbc_ilim *ilim)
+ 	}
+ 
+ 	if ((vdm & MAX77705_VDM_ENTER_MODEI) && ilim->dp_pins &&
+-	    !max77705_vdm_resp(ilim, MAX77705_VDM_ID_ENTER, &hdr, &vdo) &&
+-	    FIELD_GET(VDM_HDR_CMDT, hdr) != 1)
+-		dev_warn(ilim->dev, "DP Enter Mode refused (0x%08x)\n", hdr);
++	    !max77705_vdm_resp(ilim, MAX77705_VDM_ID_ENTER, &hdr, &vdo)) {
++		if (FIELD_GET(VDM_HDR_CMDT, hdr) != 1)
++			dev_warn(ilim->dev, "DP Enter Mode refused (0x%08x)\n", hdr);
++		else {
++			ilim->dp_entered = true;
++			dev_dbg(ilim->dev, "DP Enter Mode ACK (0x%08x)\n", hdr);
++		}
++	}
+ 
+ 	if ((pd & MAX77705_DP_STATUSI) && ilim->dp_pins &&
+ 	    !max77705_vdm_resp(ilim, MAX77705_VDM_ID_DP_STATUS, &hdr, &vdo)) {
+@@ -920,8 +950,25 @@ static void max77705_dp_events(struct max77705_usbc_ilim *ilim)
+ 	if ((pd & MAX77705_DP_ATTENTIONI) && ilim->dp_pins &&
+ 	    !max77705_vdm_resp(ilim, MAX77705_VDM_ID_ATTENTION, &hdr, &vdo)) {
+ 		dev_dbg(ilim->dev, "DP attention 0x%08x\n", vdo);
+-		if (ilim->dp_muxed)
++		/* Attention only comes in DP mode: no more Enter Mode */
++		ilim->dp_entered = true;
++		if (ilim->dp_muxed) {
+ 			max77705_dp_hpd(ilim, vdo & MAX_DPSTS_HPD);
++		} else if (FIELD_GET(MAX_DPSTS_CONNECTED, vdo) &&
++			   (vdo & MAX_DPSTS_ENABLED)) {
++			/*
++			 * Seen: the partner reports DP enabled (so it was
++			 * configured) but the firmware never raised the
++			 * Configure ACK for us.
++			 */
++			if (!ilim->dp_pin)
++				ilim->dp_pin = max77705_dp_pick_pin(ilim->dp_pins,
++								    vdo & MAX_DPSTS_MF_PREFER);
++			if (ilim->dp_pin) {
++				dev_info(ilim->dev, "DP enabled by the partner\n");
++				max77705_dp_configured(ilim);
++			}
++		}
+ 	}
+ }
+ 
+@@ -956,6 +1003,17 @@ static bool max77705_roles(struct max77705_usbc_ilim *ilim, unsigned int cc0,
+ 	max77705_set_orientation(ilim, ccstat == MAX77705_CCSTAT_SINK && vbus ?
+ 				 max77705_cc_orientation(cc0) :
+ 				 TYPEC_ORIENTATION_NONE);
++	/*
++	 * After a DP session the QMP PHY's USB side comes back up only some
++	 * time after the monitor is gone, and dwc3 entering device mode before
++	 * that fails for good ("failed to enable ep0out"). Stay in host mode
++	 * until the next attach, which is then a fresh host -> device switch.
++	 */
++	if (ilim->dp_session) {
++		if (!(ccstat == MAX77705_CCSTAT_SINK && vbus))
++			return false;
++		ilim->dp_session = false;
++	}
+ 	extcon_set_state_sync(ilim->extcon, EXTCON_USB_HOST, false);
+ 	extcon_set_state_sync(ilim->extcon, EXTCON_USB,
+ 			      ccstat == MAX77705_CCSTAT_SINK && vbus);
+@@ -1262,6 +1320,7 @@ static int max77705_usbc_ilim_probe(struct i2c_client *client)
+ 		return -ENOMEM;
+ 
+ 	ilim->dev = dev;
++	i2c_set_clientdata(client, ilim);
+ 	mutex_init(&ilim->lock);
+ 
+ 	ilim->regmap = devm_regmap_init_i2c(client, &max77705_usbc_regmap_config);
+@@ -1351,6 +1410,37 @@ static int max77705_usbc_ilim_probe(struct i2c_client *client)
+ 	return 0;
+ }
+ 
++/*
++ * The CCIC runs from the battery and keeps its PD/alternate mode state
++ * across a reboot. Like stock (max77705_usbc_shutdown()), leave nothing
++ * driven and reset its firmware so the next boot starts from scratch.
++ */
++static void max77705_usbc_ilim_shutdown(struct i2c_client *client)
++{
++	struct max77705_usbc_ilim *ilim = i2c_get_clientdata(client);
++	unsigned int reg;
++
++	disable_irq(client->irq);
++	cancel_delayed_work_sync(&ilim->dp_enter);
++	cancel_delayed_work_sync(&ilim->pd_timeout);
++	cancel_delayed_work_sync(&ilim->work);
++
++	mutex_lock(&ilim->lock);
++	max77705_dp_aux(ilim, false);
++	if (ilim->redriver)
++		i2c_smbus_write_byte_data(ilim->redriver, PS5169_MODE,
++					  PS5169_MODE_CLEAR);
++	max77705_set_source(ilim, false);
++	mutex_unlock(&ilim->lock);
++
++	for (reg = MAX77705_USBC_REG_UIC_INT_M;
++	     reg <= MAX77705_USBC_REG_VDM_INT_M; reg++)
++		regmap_write(ilim->regmap, reg, 0xff);
++	i2c_smbus_write_byte_data(client, MAX77705_USBC_REG_RESET,
++				  MAX77705_USBC_RESET_IC);
++	msleep(100);
++}
++
+ static const struct of_device_id max77705_usbc_ilim_of_match[] = {
+ 	{ .compatible = "maxim,max77705-usbc" },
+ 	{ }
+@@ -1363,6 +1453,7 @@ static struct i2c_driver max77705_usbc_ilim_driver = {
+ 		.of_match_table = max77705_usbc_ilim_of_match,
+ 	},
+ 	.probe = max77705_usbc_ilim_probe,
++	.shutdown = max77705_usbc_ilim_shutdown,
+ };
+ module_i2c_driver(max77705_usbc_ilim_driver);
+ 

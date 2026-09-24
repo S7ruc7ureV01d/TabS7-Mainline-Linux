@@ -1,0 +1,15 @@
+[Desktop Entry]
+Type=Application
+Name=Reboot to Recovery
+GenericName=Restart into TWRP
+Comment=Restart the tablet into TWRP recovery
+Icon=system-reboot
+Exec=gts7l-reboot-to recovery
+Categories=System;
+Keywords=reboot;restart;recovery;twrp;download;odin;
+Actions=download;
+
+[Desktop Action download]
+Name=Reboot to Download Mode
+Icon=system-reboot
+Exec=gts7l-reboot-to download

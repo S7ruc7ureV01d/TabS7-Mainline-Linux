@@ -512,6 +512,18 @@
  * the pmic_arb domain. No override needed here.
  */
 
+/*
+ * Reboot modes. ABL reads the PON SOFT_RB_SPARE restart reason at boot.
+ * The downstream kernel writes it in msm-poweroff.c / sec_debug.h:
+ * RECOVERY 0x01, BOOTLOADER 0x02, DOWNLOAD 0x15. Mainline's qcom-pon
+ * applies the same GEN2 shift through the reboot-mode framework, so
+ * `systemctl reboot --reboot-argument=recovery` boots TWRP.
+ */
+&pon {
+	mode-recovery = <0x01>;
+	mode-bootloader = <0x02>;
+	mode-download = <0x15>;
+};
 
 /*
  * Touchscreen: Novatek NT36523 TDDI (same IC drives the display panel -
@@ -2531,6 +2543,13 @@
 	/delete-property/ maximum-speed;
 	phys = <&usb_1_hsphy>, <&usb_1_qmpphy QMP_USB43DP_USB3_PHY>;
 	phy-names = "usb2-phy", "usb3-phy";
+	/*
+	 * Keep dwc3 from putting the USB 3 PIPE into P3 (GUSB3PIPECTL
+	 * SUSPHY): the QMP PHY's switch back from DP-only mode re-inits the
+	 * USB PHY while dwc3 runs, and in P3 PHYSTATUS never clears ("phy
+	 * initialization timed-out"), leaving USB dead after a monitor.
+	 */
+	snps,dis_u3_susphy_quirk;
 };
 
 /*

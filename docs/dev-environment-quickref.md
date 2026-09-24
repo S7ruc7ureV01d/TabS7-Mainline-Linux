@@ -33,6 +33,10 @@ alone without asking, and getting this wrong wastes a round-trip):
   writes directly to the `archroot`/`userdata`-backed partition.
 - `adb shell` gets you a root shell in TWRP's own busybox environment, not
   the real Arch rootfs.
+- Getting there from Linux (DTS `&pon` reboot modes, 2026-09-24):
+  `systemctl reboot --reboot-argument=recovery` over ssh as root (systemd 261 rejects the old positional form). On the tablet, use the "Reboot to
+  Recovery" launcher (`tools/rootfs/recovery/`; right-click it for "Reboot
+  to Download Mode"; it sets the argument through logind `SetRebootParameter`, which needs no password in the desktop session). `--reboot-argument=download` goes to Odin mode.
 
 ### 2. Booted into Arch Linux (normal boot)
 
@@ -306,6 +310,15 @@ Round-trip, used identically every time a kernel/DTS change needs testing:
     ```
 11. Ask the user to reboot and confirm which state they land in ("in twrp" /
     "in linux").
+
+**Alternative to step 10, from running Linux (used since 2026-09-24):** the
+same `boot` partition is `/dev/sda23` (TWRP's `by-name/boot` points there
+too). Check that `readlink -f /dev/disk/by-partlabel/boot` is `/dev/sda23`
+and that its first 17408×4096 bytes md5 to the previously flashed image.
+Then `scp` the image to `/tmp` and `dd if=/tmp/new-boot.img of=/dev/sda23
+bs=4096 conv=fsync`, and read it back the same way. The new kernel runs
+only after a reboot: check `uptime`/`/proc/version` before trusting a test.
+No ABL/rp involvement: only `boot` is written, as in step 10.
 
 ## Where things live
 

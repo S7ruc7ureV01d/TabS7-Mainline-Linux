@@ -1,0 +1,30 @@
+#!/bin/sh
+# Reboot into recovery (TWRP), download mode or ABL's bootloader mode.
+# logind's SetRebootParameter stores the argument that systemd passes to
+# the kernel at reboot (RESTART2); qcom-pon writes the matching PON
+# restart reason (DTS &pon mode-*), which ABL reads on the next boot.
+# The active desktop session may call it without a password (polkit
+# org.freedesktop.login1.set-reboot-parameter). `systemctl reboot
+# --reboot-argument=` would write the file itself and needs root.
+set -eu
+target=${1:-recovery}
+case $target in
+recovery) what="TWRP recovery" ;;
+download) what="download mode (Odin)" ;;
+bootloader) what="bootloader mode" ;;
+*) echo "usage: $0 [recovery|download|bootloader]" >&2; exit 2 ;;
+esac
+if [ -n "${WAYLAND_DISPLAY:-}${DISPLAY:-}" ] && command -v kdialog >/dev/null; then
+	kdialog --title "Reboot" --warningcontinuecancel \
+		"Reboot to $what now? Unsaved work will be lost." \
+		--continue-label "Reboot" || exit 0
+fi
+login1() {
+	busctl call org.freedesktop.login1 /org/freedesktop/login1 \
+		org.freedesktop.login1.Manager "$@"
+}
+login1 SetRebootParameter s "$target"
+if ! systemctl reboot; then
+	login1 SetRebootParameter s "" || true
+	exit 1
+fi
