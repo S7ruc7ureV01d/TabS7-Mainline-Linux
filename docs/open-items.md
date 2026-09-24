@@ -27,25 +27,21 @@ exactly, checked 2026-09-24), `kernel/dts/sm8250-samsung-gts7l.dts` and
 
 ## Parked on purpose
 
-### Ambient light sensor / auto-brightness (parked 2026-09-22 at the owner's request)
+### Ambient light sensor / auto-brightness (sensor works 2026-09-24)
 
-What was established:
-- The sensor is a **VEML3235**, reached through the SLPI sensor stack
-  (hexagonrpcd + libssc, the same stack that makes the accelerometer and
-  auto-rotate work). libssc finds `ambient_light_v`, and the SLPI accepts
-  the enable request.
-- It never sends data: no physical-config event (768) and no samples.
-- Already tried with no change: request IDs 513/514/768, continuous
-  mode, non-wakeup delivery, and also enabling `light_cct_v`.
-- So the request side looks right. The best remaining theory is a
-  **missing sensor supply**: **pm8150_l10** (2.8-2.9 V, always-on in
-  stock) is not enabled in our DTS. The accelerometer needed its own rail
-  (L8C) in the same way.
-- A test build of libssc sits on the tablet in `/root/libssc` (not
-  installed).
-
-First step: enable `pm8150_l10` at stock's voltage in the DTS, then retry
-the libssc enable.
+- **The sensor streams:** the missing piece was its supply. Stock pins
+  `pm8150_l10` at 2.8-2.9 V, always-on, with no Linux consumer; now
+  `vreg_l10a_2p8` in the DTS. With it, `ssccli --sensor light` (test
+  libssc build in `/root/libssc`, `SSC_DATA_TYPE=ambient_light_v`) reads
+  ~70 lux indoors. Earlier request-side experiments (see
+  `docs/kernel-boot-debugging.md`, 2026-09-22) were not the cause.
+- **Left for auto-brightness:**
+  1. libssc: look up Samsung's `ambient_light_v` when `ambient_light` is
+     missing (today only via the test build's env switch), then install
+     it, so iio-sensor-proxy exposes `LightLevel`.
+  2. KDE Plasma 6.7 / PowerDevil has no ambient-light support: a small
+     daemon mapping `net.hadess.SensorProxy` `LightLevel` to PowerDevil's
+     brightness D-Bus API.
 
 ### Charging: what's not covered
 

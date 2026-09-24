@@ -1430,6 +1430,22 @@
 		 */
 		vdd-l13-l16-l17-supply = <&vreg_bob>;
 
+		/*
+		 * Ambient light sensor supply (open-items: the VEML3235 behind
+		 * the SLPI never sends samples). Stock's r07 overlay
+		 * (fragments 159/164) pins pm8150_l10 to 2.8-2.9 V, init 2.9 V,
+		 * regulator-always-on, with no Linux consumer - a board rail for
+		 * the SLPI's sensors, like L8C for the accelerometer. 2.8 V is an
+		 * exact pmic5_pldo step (1.504 V + 162 * 8 mV); 2.9 V is not, so
+		 * the top is the step below it.
+		 */
+		vreg_l10a_2p8: ldo10 {
+			regulator-name = "vreg_l10a_2p8";
+			regulator-min-microvolt = <2800000>;
+			regulator-max-microvolt = <2896000>;
+			regulator-always-on;
+		};
+
 		vreg_s5a_1p9: smps5 {
 			regulator-name = "vreg_s5a_1p9";
 			regulator-min-microvolt = <1900000>;
