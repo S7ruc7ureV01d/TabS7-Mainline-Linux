@@ -6,19 +6,23 @@ Applies on top of kernel/patches/00*. Contents:
   2 ms event polling timer (MSIs are lost), sets sbl_ee_from_reg and
   ev_polled.
 - MHI core: mhi_poll_events(); SBL entry picked up from the EE register
-  (sbl_ee_from_reg); handled event elements zeroed when polled; temporary
-  "poll:" event logging.
+  (sbl_ee_from_reg); handled event elements zeroed when polled; debug:
+  "poll:" event logging and a BAD_TRE descriptor dump.
 - mhi_sahara_modem (sahara-modem.c) and mhi_bl_logger (mhi-bl.c), from
   the Xiaomi Mi 10T postmarketOS port, adapted (image map, EFS from
-  qcom/sdx55m-efs/, per-packet debug logging).
-- Kconfig: MHI_BUS_SAHARA_MODEM, MHI_BUS_BL_LOGGER (both =y in the
-  fragment).
+  qcom/sdx55m-efs/, HELLO_RESP compatible version 1, per-packet and TX
+  completion logging, SBL log printed line by line).
+- qcom-sdx55-ctrl (on top of 0045): AP2MDM_STATUS claimed high at probe
+  (it was driven low, telling the modem the host is not up).
+- Kconfig: MHI_BUS_SAHARA_MODEM, MHI_BUS_BL_LOGGER (=y in the fragment).
+- Last hunk (DTS, separate): EXPERIMENT dropping dma-coherent from &pcie2
+  (intermittent BAD_TRE); no effect seen. The committed DTS keeps it.
 
-Status: HELLO/HELLO_RESP done, SBL waits at "TRDATA Image Load".
+Status: HELLO/HELLO_RESP done (TX completion OK), the SBL log ends at
+"TRDATA Image Load, Start"; the modem then either rejects a queued
+descriptor (BAD_TRE, completion code 0x11) or sends nothing.
 
- drivers/bus/mhi/host/sahara-modem.c | 510 ++++++++++++++++++++++++++++++++++++
- include/linux/mhi.h                 |  12 +
- 8 files changed, 830 insertions(+), 1 deletion(-)
+ 9 files changed, 858 insertions(+), 4 deletions(-)
 diff --git a/drivers/bus/mhi/host/Kconfig b/drivers/bus/mhi/host/Kconfig
 index da5cd0c9f..44c7d181a 100644
 --- a/drivers/bus/mhi/host/Kconfig
@@ -86,7 +90,7 @@ index 19c84913c..05bb4cbbc 100644
  	return;
  
 diff --git a/drivers/bus/mhi/host/main.c b/drivers/bus/mhi/host/main.c
-index 53c0ffe30..7a50291ac 100644
+index 53c0ffe30..7ecf4113a 100644
 --- a/drivers/bus/mhi/host/main.c
 +++ b/drivers/bus/mhi/host/main.c
 @@ -535,6 +535,35 @@ irqreturn_t mhi_intvec_threaded_handler(int irq_number, void *priv)
@@ -125,7 +129,31 @@ index 53c0ffe30..7a50291ac 100644
  irqreturn_t mhi_intvec_handler(int irq_number, void *dev)
  {
  	struct mhi_controller *mhi_cntrl = dev;
-@@ -830,6 +859,10 @@ int mhi_process_ctrl_ev_ring(struct mhi_controller *mhi_cntrl,
+@@ -683,6 +712,23 @@ static int parse_xfer_event(struct mhi_controller *mhi_cntrl,
+ 		break;
+ 	}
+ 	case MHI_EV_CC_BAD_TRE:
++	{
++		/* bring-up debug: which descriptor did the device reject? */
++		dma_addr_t ptr = MHI_TRE_GET_EV_PTR(event);
++
++		dev_err(dev, "BAD_TRE ch %u: ev ptr %pad ring base %pad rp %ld wp %ld len %zu\n",
++			mhi_chan->chan, &ptr, &tre_ring->iommu_base,
++			(long)(tre_ring->rp - tre_ring->base),
++			(long)(tre_ring->wp - tre_ring->base), tre_ring->len);
++		if (is_valid_ring_ptr(tre_ring, ptr)) {
++			struct mhi_ring_element *t = mhi_to_virtual(tre_ring, ptr);
++
++			dev_err(dev, "BAD_TRE tre: ptr %016llx d0 %08x d1 %08x\n",
++				le64_to_cpu(t->ptr), le32_to_cpu(t->dword[0]),
++				le32_to_cpu(t->dword[1]));
++		}
++		break;
++	}
+ 	default:
+ 		dev_err(dev, "Unknown event 0x%x\n", ev_code);
+ 		break;
+@@ -830,6 +876,10 @@ int mhi_process_ctrl_ev_ring(struct mhi_controller *mhi_cntrl,
  	while (dev_rp != local_rp) {
  		enum mhi_pkt_type type = MHI_TRE_GET_EV_TYPE(local_rp);
  
@@ -136,7 +164,7 @@ index 53c0ffe30..7a50291ac 100644
  		trace_mhi_ctrl_event(mhi_cntrl, local_rp);
  
  		switch (type) {
-@@ -945,6 +978,9 @@ int mhi_process_ctrl_ev_ring(struct mhi_controller *mhi_cntrl,
+@@ -945,6 +995,9 @@ int mhi_process_ctrl_ev_ring(struct mhi_controller *mhi_cntrl,
  			break;
  		}
  
@@ -146,7 +174,7 @@ index 53c0ffe30..7a50291ac 100644
  		mhi_recycle_ev_ring_element(mhi_cntrl, ev_ring);
  		local_rp = ev_ring->rp;
  
-@@ -997,6 +1033,12 @@ int mhi_process_data_event_ring(struct mhi_controller *mhi_cntrl,
+@@ -997,6 +1050,12 @@ int mhi_process_data_event_ring(struct mhi_controller *mhi_cntrl,
  	while (dev_rp != local_rp && event_quota > 0) {
  		enum mhi_pkt_type type = MHI_TRE_GET_EV_TYPE(local_rp);
  
@@ -159,7 +187,7 @@ index 53c0ffe30..7a50291ac 100644
  		trace_mhi_data_event(mhi_cntrl, local_rp);
  
  		chan = MHI_TRE_GET_EV_CHID(local_rp);
-@@ -1020,6 +1062,9 @@ int mhi_process_data_event_ring(struct mhi_controller *mhi_cntrl,
+@@ -1020,6 +1079,9 @@ int mhi_process_data_event_ring(struct mhi_controller *mhi_cntrl,
  			}
  		}
  
@@ -976,6 +1004,45 @@ index 000000000..55227a05b
 +
 +MODULE_DESCRIPTION("MHI Sahara firmware loader for Qualcomm modems");
 +MODULE_LICENSE("GPL");
+diff --git a/drivers/misc/qcom-sdx55-ctrl.c b/drivers/misc/qcom-sdx55-ctrl.c
+index cbc6de374..0332cd896 100644
+--- a/drivers/misc/qcom-sdx55-ctrl.c
++++ b/drivers/misc/qcom-sdx55-ctrl.c
+@@ -6,8 +6,9 @@
+  * Stage 1 bring-up: the modem is reset through its own PMIC (PMX55) PON
+  * block on the SoC's SPMI bus, like downstream sdx55m_toggle_soft_reset()
+  * -> qpnp_pon_modem_pwr_off(PON_POWER_OFF_WARM_RESET), then AP2MDM_STATUS
+- * is raised and the modem's PBL brings up PCIe. Nothing happens at probe:
+- * userspace powers it on through sysfs "power_on".
++ * is raised and the modem's PBL brings up PCIe. The bootloader leaves the
++ * modem powered, so probe only keeps AP2MDM_STATUS high; sysfs "power_on"
++ * (0, then 1) resets it.
+  */
+ 
+ #include <linux/delay.h>
+@@ -176,7 +177,13 @@ static int sdx55_ctrl_probe(struct platform_device *pdev)
+ 	if (ret)
+ 		return dev_err_probe(dev, ret, "no PON base\n");
+ 
+-	ctrl->ap2mdm_status = devm_gpiod_get(dev, "ap2mdm-status", GPIOD_OUT_LOW);
++	/*
++	 * AP2MDM_STATUS tells the modem the host is up; stock raises it at
++	 * power-on and keeps it high. The bootloader leaves the modem
++	 * powered, so claim it high: driven low, SBL waited at its first
++	 * image load ("TRDATA Image Load, Start").
++	 */
++	ctrl->ap2mdm_status = devm_gpiod_get(dev, "ap2mdm-status", GPIOD_OUT_HIGH);
+ 	if (IS_ERR(ctrl->ap2mdm_status))
+ 		return dev_err_probe(dev, PTR_ERR(ctrl->ap2mdm_status), "ap2mdm-status\n");
+ 	ctrl->ap2mdm_errfatal = devm_gpiod_get(dev, "ap2mdm-errfatal", GPIOD_OUT_LOW);
+@@ -208,6 +215,7 @@ static int sdx55_ctrl_probe(struct platform_device *pdev)
+ 	if (ret)
+ 		dev_warn(dev, "no MDM2AP interrupts: %d\n", ret);
+ 
++	ctrl->on = true;
+ 	platform_set_drvdata(pdev, ctrl);
+ 	return 0;
+ }
 diff --git a/include/linux/mhi.h b/include/linux/mhi.h
 index 4b86ae6f6..c72a1e2fa 100644
 --- a/include/linux/mhi.h
@@ -1013,3 +1080,20 @@ index 4b86ae6f6..c72a1e2fa 100644
  /**
   * mhi_async_power_up - Start MHI power up sequence
   * @mhi_cntrl: MHI controller
+diff --git a/kernel/dts/sm8250-samsung-gts7l.dts b/kernel/dts/sm8250-samsung-gts7l.dts
+index 812f123..4851388 100644
+--- a/kernel/dts/sm8250-samsung-gts7l.dts
++++ b/kernel/dts/sm8250-samsung-gts7l.dts
+@@ -2720,6 +2720,12 @@
+ };
+ 
+ &pcie2 {
++	/*
++	 * EXPERIMENT (LTE stage 2): the SDX55 intermittently rejects our
++	 * UL TREs (BAD_TRE) and skips event elements - test the PCIe2 path
++	 * as non-coherent.
++	 */
++	/delete-property/ dma-coherent;
+ 	status = "okay";
+ };
+ 
