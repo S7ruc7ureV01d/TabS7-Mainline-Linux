@@ -1,0 +1,340 @@
+From: gts7l project
+Subject: [PATCH] phy: qcom: qmp-combo, usb: dwc3: qcom: UTMI as PIPE clock
+ while DP owns all four lanes
+
+In DP-only mode (pin C/E) the combo PHY's USB3 side is off, and so is the
+PIPE clock dwc3 runs from. Even USB 2 then fails: with a monitor attached
+at boot, DP took the lanes at ~10 s, the xHCI host started at ~21 s, and
+the monitor's USB 2 hub sat in port reset for good (PORTSC CCS/CSC,
+Link=Polling). Setting PIPE_UTMI_CLK_SEL | PIPE3_PHYSTATUS_SW by hand made
+it enumerate at once. (After a replug the hub had enumerated before DP
+switched, and kept working.)
+
+The PHY now tells the dwc3 glue when the PIPE clock goes away (switching
+to DP-only, or the USB side failing to come back) and when it is back
+(USB power-on succeeded), through a notifier on the USB3 phy
+(qcom_qmp_combo_usb3_register_notifier(), include/linux/phy/
+qcom-qmp-combo.h). The glue looks the phy up from its dwc3 child's
+"usb3-phy" before registering the core, applies the current state, and
+switches QSCRATCH_GENERAL_CFG between UTMI and PIPE on each event, with
+the same PIPE_UTMI_CLK_DIS sequence as dwc3_qcom_select_utmi_clk().
+The idea follows Particle's Tachyon kernel (dwc3 subscribing to the
+combo PHY's DP-only state).
+
+Tested on gts7l (SM8250, dwc3-qcom-legacy): monitor attached at boot, its
+hub enumerates; replug: "PIPE clock back" / "gone (DP-only)", hub and
+picture back; PC afterwards: device mode, GENERAL_CFG back to 0x4.
+
+diff --git a/drivers/phy/qualcomm/phy-qcom-qmp-combo.c b/drivers/phy/qualcomm/phy-qcom-qmp-combo.c
+index 92b6dbc4b..088baa302 100644
+--- a/drivers/phy/qualcomm/phy-qcom-qmp-combo.c
++++ b/drivers/phy/qualcomm/phy-qcom-qmp-combo.c
+@@ -52,6 +52,9 @@
+ 
+ #include "phy-qcom-qmp-usb43-pcs-v8.h"
+ 
++#include <linux/notifier.h>
++#include <linux/phy/qcom-qmp-combo.h>
++
+ /* QPHY_V3_DP_COM_RESET_OVRD_CTRL register bits */
+ /* DP PHY soft reset */
+ #define SW_DPPHY_RESET				BIT(0)
+@@ -2310,6 +2313,9 @@ struct qmp_combo {
+ 	enum qmpphy_mode pending_mode;
+ 	/* the USB PHY failed to come back up after a switch */
+ 	bool usb_stale;
++	/* the USB controller glue follows the PIPE clock (DP-only, stale) */
++	struct blocking_notifier_head usb3_nh;
++	bool usb3_no_pipe;
+ 
+ 	struct clk_fixed_rate pipe_clk_fixed;
+ 	struct clk_hw dp_link_hw;
+@@ -3855,6 +3861,20 @@ static int qmp_combo_dp_power_on(struct phy *phy)
+ 
+ static void qmp_combo_switch_mode(struct qmp_combo *qmp, enum qmpphy_mode new_mode);
+ 
++/*
++ * No USB3 side means no PIPE clock for the controller, and then even USB 2
++ * port resets never complete (a monitor's hub attached at boot, with the
++ * host started after DP took all four lanes, never enumerated). Tell the
++ * glue, which clocks the controller from UTMI meanwhile. phy_mutex held.
++ */
++static void qmp_combo_set_usb3_no_pipe(struct qmp_combo *qmp, bool no_pipe)
++{
++	if (no_pipe == qmp->usb3_no_pipe)
++		return;
++	qmp->usb3_no_pipe = no_pipe;
++	blocking_notifier_call_chain(&qmp->usb3_nh, no_pipe, NULL);
++}
++
+ static int qmp_combo_dp_power_off(struct phy *phy)
+ {
+ 	struct qmp_combo *qmp = phy_get_drvdata(phy);
+@@ -3966,6 +3986,7 @@ static void qmp_combo_usb_power_on_retry(struct qmp_combo *qmp)
+ 	for (i = 0; i < 5; i++) {
+ 		if (!qmp_combo_usb_power_on(qmp->usb_phy)) {
+ 			qmp->usb_stale = false;
++			qmp_combo_set_usb3_no_pipe(qmp, false);
+ 			return;
+ 		}
+ 		qmp_combo_usb_power_off(qmp->usb_phy);
+@@ -3974,6 +3995,7 @@ static void qmp_combo_usb_power_on_retry(struct qmp_combo *qmp)
+ 	/* Seen right after leaving DP-only mode; it works a while later */
+ 	dev_warn(qmp->dev, "USB PHY did not come back up, retrying on next attach\n");
+ 	qmp->usb_stale = true;
++	qmp_combo_set_usb3_no_pipe(qmp, true);
+ }
+ 
+ static int qmp_combo_usb_init(struct phy *phy)
+@@ -4038,6 +4060,47 @@ static int qmp_combo_usb_set_mode(struct phy *phy, enum phy_mode mode, int submo
+ 	return 0;
+ }
+ 
++static const struct phy_ops qmp_combo_usb_phy_ops;
++
++/**
++ * qcom_qmp_combo_usb3_register_notifier() - follow the USB3 PIPE clock
++ * @phy: the combo PHY's USB3 phy (as the dwc3 core's "usb3-phy")
++ * @nb: called with 1 when the PIPE clock goes away, 0 when it is back
++ * @no_pipe_clk: set to the current state, atomically with registering
++ */
++int qcom_qmp_combo_usb3_register_notifier(struct phy *phy,
++					  struct notifier_block *nb,
++					  bool *no_pipe_clk)
++{
++	struct qmp_combo *qmp;
++	int ret;
++
++	if (IS_ERR_OR_NULL(phy) || phy->ops != &qmp_combo_usb_phy_ops)
++		return -EINVAL;
++	qmp = phy_get_drvdata(phy);
++
++	mutex_lock(&qmp->phy_mutex);
++	ret = blocking_notifier_chain_register(&qmp->usb3_nh, nb);
++	if (!ret && no_pipe_clk)
++		*no_pipe_clk = qmp->usb3_no_pipe;
++	mutex_unlock(&qmp->phy_mutex);
++
++	return ret;
++}
++EXPORT_SYMBOL_GPL(qcom_qmp_combo_usb3_register_notifier);
++
++void qcom_qmp_combo_usb3_unregister_notifier(struct phy *phy,
++					     struct notifier_block *nb)
++{
++	struct qmp_combo *qmp;
++
++	if (IS_ERR_OR_NULL(phy) || phy->ops != &qmp_combo_usb_phy_ops)
++		return;
++	qmp = phy_get_drvdata(phy);
++	blocking_notifier_chain_unregister(&qmp->usb3_nh, nb);
++}
++EXPORT_SYMBOL_GPL(qcom_qmp_combo_usb3_unregister_notifier);
++
+ static const struct phy_ops qmp_combo_usb_phy_ops = {
+ 	.init		= qmp_combo_usb_init,
+ 	.exit		= qmp_combo_usb_exit,
+@@ -4560,6 +4623,10 @@ static void qmp_combo_switch_mode(struct qmp_combo *qmp, enum qmpphy_mode new_mo
+ 	dev_dbg(qmp->dev, "typec_mux_set: switching from qmpphy mode %d to %d\n",
+ 		qmp->qmpphy_mode, new_mode);
+ 
++	/* Before the USB3 side and its PIPE clock go away */
++	if (new_mode == QMPPHY_MODE_DP_ONLY)
++		qmp_combo_set_usb3_no_pipe(qmp, true);
++
+ 	qmp->qmpphy_mode = new_mode;
+ 
+ 	if (qmp->init_count) {
+@@ -4921,6 +4988,7 @@ static int qmp_combo_probe(struct platform_device *pdev)
+ 		return -EINVAL;
+ 
+ 	mutex_init(&qmp->phy_mutex);
++	BLOCKING_INIT_NOTIFIER_HEAD(&qmp->usb3_nh);
+ 
+ 	ret = qmp_combo_reset_init(qmp);
+ 	if (ret)
+diff --git a/drivers/usb/dwc3/dwc3-qcom-legacy.c b/drivers/usb/dwc3/dwc3-qcom-legacy.c
+index d3fad0fcf..b6267ba6f 100644
+--- a/drivers/usb/dwc3/dwc3-qcom-legacy.c
++++ b/drivers/usb/dwc3/dwc3-qcom-legacy.c
+@@ -17,6 +17,7 @@
+ #include <linux/of_platform.h>
+ #include <linux/platform_device.h>
+ #include <linux/phy/phy.h>
++#include <linux/phy/qcom-qmp-combo.h>
+ #include <linux/usb/of.h>
+ #include <linux/reset.h>
+ #include <linux/iopoll.h>
+@@ -90,6 +91,11 @@ struct dwc3_qcom {
+ 	bool			pm_suspended;
+ 	struct icc_path		*icc_path_ddr;
+ 	struct icc_path		*icc_path_apps;
++
++	/* QMP combo USB3 PHY: UTMI as PIPE clock while it has none */
++	struct phy		*usb3_phy;
++	struct notifier_block	pipe_nb;
++	bool			utmi_pipe;
+ };
+ 
+ static inline void dwc3_qcom_setbits(void __iomem *base, u32 offset, u32 val)
+@@ -514,6 +520,60 @@ static irqreturn_t qcom_dwc3_resume_irq(int irq, void *data)
+ 	return IRQ_HANDLED;
+ }
+ 
++static void dwc3_qcom_select_utmi_clk(struct dwc3_qcom *qcom);
++static void dwc3_qcom_deselect_utmi_clk(struct dwc3_qcom *qcom);
++
++static int dwc3_qcom_pipe_notifier(struct notifier_block *nb,
++				   unsigned long no_pipe, void *ptr)
++{
++	struct dwc3_qcom *qcom = container_of(nb, struct dwc3_qcom, pipe_nb);
++
++	if (!!no_pipe == qcom->utmi_pipe)
++		return NOTIFY_DONE;
++	if (no_pipe)
++		dwc3_qcom_select_utmi_clk(qcom);
++	else
++		dwc3_qcom_deselect_utmi_clk(qcom);
++	qcom->utmi_pipe = no_pipe;
++	dev_info(qcom->dev, "PIPE clock %s\n",
++		 no_pipe ? "gone (DP-only): UTMI clock" : "back");
++
++	return NOTIFY_OK;
++}
++
++/*
++ * Follow the QMP combo PHY's USB3 side: while DP owns all four lanes it
++ * has no PIPE clock, and dwc3 runs from UTMI (USB 2 only) meanwhile.
++ * Before the core is registered: a monitor may be on the port at boot.
++ */
++static int dwc3_qcom_follow_pipe_clk(struct dwc3_qcom *qcom)
++{
++	struct device_node *np;
++	struct phy *phy;
++	bool no_pipe = false;
++	int ret;
++
++	np = of_get_compatible_child(qcom->dev->of_node, "snps,dwc3");
++	if (!np)
++		return 0;
++	phy = devm_of_phy_get(qcom->dev, np, "usb3-phy");
++	of_node_put(np);
++	if (IS_ERR(phy))
++		return PTR_ERR(phy) == -EPROBE_DEFER ? -EPROBE_DEFER : 0;
++
++	qcom->pipe_nb.notifier_call = dwc3_qcom_pipe_notifier;
++	ret = qcom_qmp_combo_usb3_register_notifier(phy, &qcom->pipe_nb, &no_pipe);
++	if (ret)
++		return 0;	/* not a QMP combo PHY */
++	qcom->usb3_phy = phy;
++	if (no_pipe) {
++		dwc3_qcom_select_utmi_clk(qcom);
++		qcom->utmi_pipe = true;
++	}
++
++	return 0;
++}
++
+ static void dwc3_qcom_select_utmi_clk(struct dwc3_qcom *qcom)
+ {
+ 	/* Configure dwc3 to use UTMI clock as PIPE clock not present */
+@@ -531,6 +591,23 @@ static void dwc3_qcom_select_utmi_clk(struct dwc3_qcom *qcom)
+ 			  PIPE_UTMI_CLK_DIS);
+ }
+ 
++static void dwc3_qcom_deselect_utmi_clk(struct dwc3_qcom *qcom)
++{
++	/* The reverse of dwc3_qcom_select_utmi_clk(): PIPE clock again */
++	dwc3_qcom_setbits(qcom->qscratch_base, QSCRATCH_GENERAL_CFG,
++			  PIPE_UTMI_CLK_DIS);
++
++	usleep_range(100, 1000);
++
++	dwc3_qcom_clrbits(qcom->qscratch_base, QSCRATCH_GENERAL_CFG,
++			  PIPE_UTMI_CLK_SEL | PIPE3_PHYSTATUS_SW);
++
++	usleep_range(100, 1000);
++
++	dwc3_qcom_clrbits(qcom->qscratch_base, QSCRATCH_GENERAL_CFG,
++			  PIPE_UTMI_CLK_DIS);
++}
++
+ static int dwc3_qcom_request_irq(struct dwc3_qcom *qcom, int irq,
+ 				 const char *name)
+ {
+@@ -790,8 +867,13 @@ static int dwc3_qcom_probe(struct platform_device *pdev)
+ 	 */
+ 	ignore_pipe_clk = device_property_read_bool(dev,
+ 				"qcom,select-utmi-as-pipe-clk");
+-	if (ignore_pipe_clk)
++	if (ignore_pipe_clk) {
+ 		dwc3_qcom_select_utmi_clk(qcom);
++	} else {
++		ret = dwc3_qcom_follow_pipe_clk(qcom);
++		if (ret)
++			goto clk_disable;
++	}
+ 
+ 	ret = dwc3_qcom_of_register_core(pdev);
+ 	if (ret) {
+@@ -831,6 +913,8 @@ static int dwc3_qcom_probe(struct platform_device *pdev)
+ 	of_platform_depopulate(&pdev->dev);
+ 	platform_device_put(qcom->dwc3);
+ clk_disable:
++	if (qcom->usb3_phy)
++		qcom_qmp_combo_usb3_unregister_notifier(qcom->usb3_phy, &qcom->pipe_nb);
+ 	for (i = qcom->num_clocks - 1; i >= 0; i--) {
+ 		clk_disable_unprepare(qcom->clks[i]);
+ 		clk_put(qcom->clks[i]);
+@@ -847,6 +931,8 @@ static void dwc3_qcom_remove(struct platform_device *pdev)
+ 	struct device *dev = &pdev->dev;
+ 	int i;
+ 
++	if (qcom->usb3_phy)
++		qcom_qmp_combo_usb3_unregister_notifier(qcom->usb3_phy, &qcom->pipe_nb);
+ 	of_platform_depopulate(&pdev->dev);
+ 	platform_device_put(qcom->dwc3);
+ 
+diff --git a/include/linux/phy/qcom-qmp-combo.h b/include/linux/phy/qcom-qmp-combo.h
+new file mode 100644
+index 000000000..d395c37a6
+--- /dev/null
++++ b/include/linux/phy/qcom-qmp-combo.h
+@@ -0,0 +1,37 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++/*
++ * Qualcomm QMP USB3/DP combo PHY: tell the USB controller glue when the
++ * USB3 side (and so the PIPE clock) is gone, e.g. while DP owns all four
++ * lanes, so it can clock the controller from UTMI instead.
++ */
++#ifndef __PHY_QCOM_QMP_COMBO_H__
++#define __PHY_QCOM_QMP_COMBO_H__
++
++#include <linux/errno.h>
++#include <linux/types.h>
++
++struct notifier_block;
++struct phy;
++
++#if IS_REACHABLE(CONFIG_PHY_QCOM_QMP_COMBO)
++/* Notifier event: 1 = no PIPE clock (use UTMI), 0 = PIPE clock back */
++int qcom_qmp_combo_usb3_register_notifier(struct phy *phy,
++					  struct notifier_block *nb,
++					  bool *no_pipe_clk);
++void qcom_qmp_combo_usb3_unregister_notifier(struct phy *phy,
++					     struct notifier_block *nb);
++#else
++static inline int qcom_qmp_combo_usb3_register_notifier(struct phy *phy,
++							struct notifier_block *nb,
++							bool *no_pipe_clk)
++{
++	return -EOPNOTSUPP;
++}
++
++static inline void qcom_qmp_combo_usb3_unregister_notifier(struct phy *phy,
++							   struct notifier_block *nb)
++{
++}
++#endif
++
++#endif

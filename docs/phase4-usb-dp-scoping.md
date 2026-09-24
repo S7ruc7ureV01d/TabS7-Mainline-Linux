@@ -6,7 +6,7 @@ device mode (ssh over the cable) comes back after unplugging.
 Patches 0037 (USB-C driver) and 0038 (msm DP mode filter), plus DT;
 0039 (QMP PHY) and 0040 (USB-C driver follow-ups) fix USB after DP;
 0041 (QMP PHY) and 0042 (aux-hpd bridge) fix booting with a monitor
-attached.
+attached; 0043 (QMP PHY + dwc3 glue) keeps USB 2 working in DP-only mode.
 
 ## The path
 
@@ -111,6 +111,18 @@ Three separate failures when the monitor was on the port from power-on:
    boot. In host mode (or before dwc3 has registered the UDC) the bind
    fails, and nothing retried. `usb-gadget-ecm-wait.service` now retries
    until the port reaches device mode (`tools/rootfs/usb/gadget/`).
+
+4. **The monitor's USB 2 hub didn't enumerate** (fine after a replug).
+   In DP-only mode the combo PHY's USB3 side is off, and with it the
+   PIPE clock dwc3 runs from; USB 2 port resets then never complete
+   (PORTSC: CCS, CSC, Link=Polling). After a replug the hub enumerates in
+   the first ~0.4 s, before DP takes the lanes; at boot the xHCI host only
+   starts at ~21 s, after DP (~10 s). Setting QSCRATCH_GENERAL_CFG
+   `PIPE_UTMI_CLK_SEL | PIPE3_PHYSTATUS_SW` by hand made it enumerate at
+   once. 0043: the PHY notifies the dwc3 glue when the PIPE clock goes
+   away or comes back, and the glue switches between UTMI and PIPE
+   (Particle Tachyon's approach). Logged as "PIPE clock gone (DP-only):
+   UTMI clock" / "PIPE clock back".
 
 Unrelated but found in the same boot: the swap service's ordering cycle
 (see `docs/dev-environment-quickref.md`, rootfs v12), which once took out
