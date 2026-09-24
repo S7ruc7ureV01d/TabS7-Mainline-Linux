@@ -6,7 +6,7 @@ first concrete step. Finished work is in `plans/roadmap.md` and the scoping
 docs it links.
 
 **Build state:** the kernel is fully reproducible from the repo. v7.2 plus
-`kernel/patches/0002-0030` (all apply cleanly and reproduce the working tree
+`kernel/patches/0002-0033` (all apply cleanly and reproduce the working tree
 exactly, checked 2026-09-23), `kernel/dts/sm8250-samsung-gts7l.dts` and
 `kernel/config/gts7l.fragment`. The current rootfs tarball is v10
 (`docs/dev-environment-quickref.md`).
@@ -17,7 +17,7 @@ exactly, checked 2026-09-23), `kernel/dts/sm8250-samsung-gts7l.dts` and
 |---|---|---|
 | **Suspend/resume** | In progress (`docs/phase3-suspend-scoping.md`). s2idle suspends and resumes; the SLPI crash (0026) and four drivers holding CXO in sleep (0027-0030) are fixed, and the application CPUs' RPMh sleep votes are now clean. The SoC still never reaches AOSS sleep/CX collapse (`qcom_stats` 0), so the blocker is outside Linux's own votes. | Check the display RSC and the unbooted subsystems; compare with stock Android's sleep stats. |
 | **LTE modem** | In scope (roadmap 2026-09-11 decision), but it has no checklist line and was never scoped. | Scoping pass: which modem subsystem (MPSS on SM8250), its firmware, and mainline's `qcom_q6v5_pas` + QMI/`rmnet` + ModemManager path. |
-| **Cameras** | Not scoped beyond the roadmap line. Mainline SM8250 CAMSS support is partial; the sensors are unknown. | Scoping: identify the sensors from the stock DT (`qcom,cam-sensor*`) and check mainline driver coverage. |
+| **Cameras** | In progress (`docs/phase4-camera-scoping.md`). Rear main (Samsung S5K3M5) works in apps: CAMSS + libcamera simple pipeline/software ISP + PipeWire, 30 fps, AE/AWB, fixed focus (`gts7l-cam-focus`, `FOCUS=330`). **Proper autofocus deferred** (owner, 2026-09-23): libcamera's simple pipeline has no AF/lens control; the GT9769 actuator works (dw9768.c). Rear ultra-wide (S5K5E9) and front (S5K4HA) need new drivers. | New sensor drivers: pull the stock sensor modules (`/vendor/lib64/camera/com.qti.sensormodule.*.bin`) during the stock boot. AF: contrast AF in libcamera, then restore the `lens-focus` link. |
 | **Fingerprint** | Goodix GW3X in the power button. Stock's kernel side is only a TEE shim. | Check `libfprint` support for this sensor; it probably needs the TZ app, which may make it infeasible. |
 | **microSD and USB host** | USB host needs the MAX77705 USB-C block to act as a **source** (VBUS out, DRP). The current driver (0024/0025) is sink-only. | microSD first (SDHC2, likely DT only). Then USB host: CCIC source role plus the charger's OTG boost (`OTG_ILIM` exists in the charger driver). |
 | **USB-C DisplayPort** | Stock has a `ps5169` redriver and DP alt-mode VDMs through the CCIC (the part of `max77705_usbc.c` we skipped). | Only after USB host; it needs the VDM/alt-mode side of the CCIC. |
