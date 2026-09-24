@@ -695,3 +695,8 @@ CONFIG_USB_UAS=y
 # core (for its orientation switch) were =m.
 CONFIG_TYPEC=y
 CONFIG_PHY_QCOM_QMP_COMBO=y
+
+# LTE modem stage 1 (docs/phase4-lte-modem-scoping.md): power control for
+# the external SDX55 (PMX55 PON, AP2MDM/MDM2AP). MHI_BUS_PCI_GENERIC and
+# QRTR_MHI are already =y.
+CONFIG_QCOM_SDX55_CTRL=y

@@ -2653,6 +2653,23 @@
 		bias-disable;
 	};
 
+	/* SDX55 modem handshake (stock kona-pinctrl ap2mdm/mdm2ap) */
+	sdx55_ctrl_default: sdx55-ctrl-default-state {
+		ap2mdm-pins {
+			pins = "gpio56", "gpio57";
+			function = "gpio";
+			drive-strength = <16>;
+			bias-disable;
+		};
+
+		mdm2ap-pins {
+			pins = "gpio1", "gpio3";
+			function = "gpio";
+			drive-strength = <8>;
+			bias-disable;
+		};
+	};
+
 	/* PS5169 enable (stock combo,redriver_en; ABL already drives it high) */
 	ps5169-en-hog {
 		gpio-hog;
@@ -2670,4 +2687,58 @@
 		compatible = "parade,ps5169";
 		reg = <0x28>;
 	};
+};
+
+/*
+ * LTE modem, stage 1 (docs/phase4-lte-modem-scoping.md): an external,
+ * flashless Qualcomm SDX55 on PCIe2 (stock kona-mhi.dtsi: &pcie2_rp,
+ * "esoc0"). Its own PMIC, the PMX55 ("pmxprairie"), sits on the SoC's
+ * SPMI bus at SID 8; stock resets the modem through its PON block
+ * (kona-pmic-overlay.dtsi "qcom,modem-reset"). The control driver
+ * (qcom-sdx55-ctrl) does that plus the AP2MDM/MDM2AP handshake, on demand
+ * from sysfs. PCIe2 is the "modem" QMP PHY; supplies as stock (vreg-0p9
+ * L5A, vreg-1p8 L9A at 1.2 V).
+ */
+&spmi_bus {
+	pmic@8 {
+		compatible = "qcom,pmx55", "qcom,spmi-pmic";
+		reg = <0x8 SPMI_USID>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		sdx55-ctrl@800 {
+			compatible = "qcom,sdx55-fusion-ctrl";
+			reg = <0x800>;
+			ap2mdm-status-gpios = <&tlmm 56 GPIO_ACTIVE_HIGH>;
+			ap2mdm-errfatal-gpios = <&tlmm 57 GPIO_ACTIVE_HIGH>;
+			mdm2ap-status-gpios = <&tlmm 3 GPIO_ACTIVE_HIGH>;
+			mdm2ap-errfatal-gpios = <&tlmm 1 GPIO_ACTIVE_HIGH>;
+			pinctrl-names = "default";
+			pinctrl-0 = <&sdx55_ctrl_default>;
+		};
+	};
+};
+
+&pcie2 {
+	status = "okay";
+};
+
+/*
+ * The SDX55 behind PCIe2's root port (17cb:0306, subsystem 17cb:010c like
+ * Foxconn's M.2 cards, which boot from their own flash): flashless, so
+ * pci_generic loads qcom/sdx55m/sbl1.mbn. The bootloader leaves it
+ * powered in PBL.
+ */
+&{/soc@0/pcie@1c10000/pcie@0} {
+	modem@0 {
+		compatible = "pci17cb,306";
+		reg = <0x10000 0x0 0x0 0x0 0x0>;
+		qcom,flashless;
+	};
+};
+
+&pcie2_phy {
+	vdda-phy-supply = <&vreg_l5a_0p88>;
+	vdda-pll-supply = <&vreg_l9a_1p2>;
+	status = "okay";
 };

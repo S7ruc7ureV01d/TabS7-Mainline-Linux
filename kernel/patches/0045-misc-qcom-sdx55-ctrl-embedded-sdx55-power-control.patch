@@ -1,0 +1,279 @@
+From: gts7l project
+Subject: [PATCH] misc: qcom-sdx55-ctrl: power control for an embedded SDX55
+
+An SDX55 modem soldered next to an SM8250 (Galaxy Tab S7) is reset
+through its own PMIC, the PMX55, whose PON block sits on the SoC's SPMI
+bus (downstream sdx55m_toggle_soft_reset() ->
+qpnp_pon_modem_pwr_off(PON_POWER_OFF_WARM_RESET)), plus the
+AP2MDM/MDM2AP status/errfatal GPIO handshake.
+
+Stage 1 bring-up driver, a child of the PMX55 SPMI PMIC node: reads the
+PON type at probe (proves SPMI access), logs MDM2AP status/errfatal
+edges, and offers sysfs "power_on" (warm reset, 150 ms, AP2MDM_STATUS
+high; 0: the reverse) and "status". Nothing happens at probe: on gts7l
+the bootloader already leaves the modem powered in PBL.
+
+diff --git a/drivers/misc/Kconfig b/drivers/misc/Kconfig
+index a882f1fc2..ad9b31594 100644
+--- a/drivers/misc/Kconfig
++++ b/drivers/misc/Kconfig
+@@ -664,4 +664,12 @@ config ISL98608_GTS7L
+ 
+ 	  Say Y here if you have this device.
+ 
++config QCOM_SDX55_CTRL
++	tristate "Embedded Qualcomm SDX55 modem power control"
++	depends on OF && REGMAP && (ARCH_QCOM || COMPILE_TEST)
++	help
++	  Power control for a flashless SDX55 modem next to an SM8250, as on
++	  the Samsung Galaxy Tab S7: resets the modem through its PMX55 PON
++	  block and drives the AP2MDM/MDM2AP handshake GPIOs, from sysfs.
++
+ endmenu
+diff --git a/drivers/misc/Makefile b/drivers/misc/Makefile
+index 5b995a9a9..d18df9d26 100644
+--- a/drivers/misc/Makefile
++++ b/drivers/misc/Makefile
+@@ -75,3 +75,4 @@ obj-y				+= keba/
+ obj-y				+= amd-sbi/
+ obj-$(CONFIG_MISC_RP1)		+= rp1/
+ obj-$(CONFIG_ISL98608_GTS7L)	+= isl98608-gts7l.o
++obj-$(CONFIG_QCOM_SDX55_CTRL)	+= qcom-sdx55-ctrl.o
+diff --git a/drivers/misc/qcom-sdx55-ctrl.c b/drivers/misc/qcom-sdx55-ctrl.c
+new file mode 100644
+index 000000000..cbc6de374
+--- /dev/null
++++ b/drivers/misc/qcom-sdx55-ctrl.c
+@@ -0,0 +1,232 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * Power control for an embedded (flashless) Qualcomm SDX55 modem next to
++ * an SM8250, as on the Galaxy Tab S7 (docs/phase4-lte-modem-scoping.md).
++ *
++ * Stage 1 bring-up: the modem is reset through its own PMIC (PMX55) PON
++ * block on the SoC's SPMI bus, like downstream sdx55m_toggle_soft_reset()
++ * -> qpnp_pon_modem_pwr_off(PON_POWER_OFF_WARM_RESET), then AP2MDM_STATUS
++ * is raised and the modem's PBL brings up PCIe. Nothing happens at probe:
++ * userspace powers it on through sysfs "power_on".
++ */
++
++#include <linux/delay.h>
++#include <linux/gpio/consumer.h>
++#include <linux/interrupt.h>
++#include <linux/module.h>
++#include <linux/of.h>
++#include <linux/platform_device.h>
++#include <linux/regmap.h>
++
++/* PMX55 PON registers, offsets from the PON base (downstream qpnp-power-on) */
++#define PON_REVISION2		0x01
++#define PON_PERPH_TYPE		0x04
++#define PON_PERPH_SUBTYPE	0x05
++#define PON_SW_RST_S2_CTL	0x62
++#define PON_SW_RST_S2_CTL2	0x63
++#define PON_SW_RST_GO		0x64
++#define PON_RESET_EN		BIT(7)
++#define PON_SW_RST_GO_VAL	0xa5
++#define PON_TYPE_WARM_RESET	0x01
++
++struct sdx55_ctrl {
++	struct device *dev;
++	struct regmap *regmap;
++	u32 pon;
++	struct gpio_desc *ap2mdm_status;
++	struct gpio_desc *ap2mdm_errfatal;
++	struct gpio_desc *mdm2ap_status;
++	struct gpio_desc *mdm2ap_errfatal;
++	struct mutex lock;
++	bool on;
++};
++
++/* Downstream qpnp_pon_modem_pwr_off(): a warm reset of the modem PMIC */
++static int sdx55_ctrl_pon_reset(struct sdx55_ctrl *ctrl)
++{
++	int ret;
++
++	ret = regmap_write(ctrl->regmap, ctrl->pon + PON_SW_RST_S2_CTL2, 0);
++	if (ret)
++		return ret;
++	udelay(500);	/* at least 10 sleep clock cycles */
++	ret = regmap_write(ctrl->regmap, ctrl->pon + PON_SW_RST_S2_CTL,
++			   PON_TYPE_WARM_RESET);
++	if (ret)
++		return ret;
++	ret = regmap_write(ctrl->regmap, ctrl->pon + PON_SW_RST_S2_CTL2,
++			   PON_RESET_EN);
++	if (ret)
++		return ret;
++	udelay(500);
++	return regmap_write(ctrl->regmap, ctrl->pon + PON_SW_RST_GO,
++			    PON_SW_RST_GO_VAL);
++}
++
++static int sdx55_ctrl_set(struct sdx55_ctrl *ctrl, bool on)
++{
++	int ret = 0;
++
++	mutex_lock(&ctrl->lock);
++	if (on == ctrl->on)
++		goto out;
++
++	if (on) {
++		/* downstream mdm4x_do_first_power_on() */
++		ret = sdx55_ctrl_pon_reset(ctrl);
++		if (ret) {
++			dev_err(ctrl->dev, "PMX55 warm reset failed: %d\n", ret);
++			goto out;
++		}
++		msleep(150);	/* PON sequence */
++		gpiod_set_value_cansleep(ctrl->ap2mdm_status, 1);
++		dev_info(ctrl->dev, "PMX55 warm reset done, AP2MDM_STATUS = 1\n");
++	} else {
++		/* downstream sdx55m_power_down(): status low, then the reset */
++		gpiod_set_value_cansleep(ctrl->ap2mdm_status, 0);
++		ret = sdx55_ctrl_pon_reset(ctrl);
++		dev_info(ctrl->dev, "AP2MDM_STATUS = 0, PMX55 warm reset: %d\n", ret);
++	}
++	ctrl->on = on;
++out:
++	mutex_unlock(&ctrl->lock);
++	return ret;
++}
++
++static ssize_t power_on_store(struct device *dev, struct device_attribute *attr,
++			      const char *buf, size_t count)
++{
++	struct sdx55_ctrl *ctrl = dev_get_drvdata(dev);
++	bool on;
++	int ret;
++
++	ret = kstrtobool(buf, &on);
++	if (ret)
++		return ret;
++	ret = sdx55_ctrl_set(ctrl, on);
++	return ret ? ret : count;
++}
++
++static ssize_t power_on_show(struct device *dev, struct device_attribute *attr,
++			     char *buf)
++{
++	struct sdx55_ctrl *ctrl = dev_get_drvdata(dev);
++
++	return sysfs_emit(buf, "%d\n", ctrl->on);
++}
++static DEVICE_ATTR_RW(power_on);
++
++static ssize_t status_show(struct device *dev, struct device_attribute *attr,
++			   char *buf)
++{
++	struct sdx55_ctrl *ctrl = dev_get_drvdata(dev);
++
++	return sysfs_emit(buf, "mdm2ap_status=%d mdm2ap_errfatal=%d\n",
++			  gpiod_get_value_cansleep(ctrl->mdm2ap_status),
++			  gpiod_get_value_cansleep(ctrl->mdm2ap_errfatal));
++}
++static DEVICE_ATTR_RO(status);
++
++static struct attribute *sdx55_ctrl_attrs[] = {
++	&dev_attr_power_on.attr,
++	&dev_attr_status.attr,
++	NULL
++};
++ATTRIBUTE_GROUPS(sdx55_ctrl);
++
++static irqreturn_t sdx55_ctrl_irq(int irq, void *data)
++{
++	struct sdx55_ctrl *ctrl = data;
++
++	dev_info(ctrl->dev, "MDM2AP status %d, errfatal %d\n",
++		 gpiod_get_value_cansleep(ctrl->mdm2ap_status),
++		 gpiod_get_value_cansleep(ctrl->mdm2ap_errfatal));
++	return IRQ_HANDLED;
++}
++
++static int sdx55_ctrl_request_irq(struct sdx55_ctrl *ctrl, struct gpio_desc *gpio,
++				  const char *name)
++{
++	int irq = gpiod_to_irq(gpio);
++
++	if (irq < 0)
++		return irq;
++	return devm_request_threaded_irq(ctrl->dev, irq, NULL, sdx55_ctrl_irq,
++					 IRQF_ONESHOT | IRQF_TRIGGER_RISING |
++					 IRQF_TRIGGER_FALLING, name, ctrl);
++}
++
++static int sdx55_ctrl_probe(struct platform_device *pdev)
++{
++	struct device *dev = &pdev->dev;
++	struct sdx55_ctrl *ctrl;
++	unsigned int type, subtype, rev;
++	int ret;
++
++	ctrl = devm_kzalloc(dev, sizeof(*ctrl), GFP_KERNEL);
++	if (!ctrl)
++		return -ENOMEM;
++	ctrl->dev = dev;
++	mutex_init(&ctrl->lock);
++
++	ctrl->regmap = dev_get_regmap(dev->parent, NULL);
++	if (!ctrl->regmap)
++		return dev_err_probe(dev, -ENODEV, "no PMIC regmap\n");
++	ret = of_property_read_u32(dev->of_node, "reg", &ctrl->pon);
++	if (ret)
++		return dev_err_probe(dev, ret, "no PON base\n");
++
++	ctrl->ap2mdm_status = devm_gpiod_get(dev, "ap2mdm-status", GPIOD_OUT_LOW);
++	if (IS_ERR(ctrl->ap2mdm_status))
++		return dev_err_probe(dev, PTR_ERR(ctrl->ap2mdm_status), "ap2mdm-status\n");
++	ctrl->ap2mdm_errfatal = devm_gpiod_get(dev, "ap2mdm-errfatal", GPIOD_OUT_LOW);
++	if (IS_ERR(ctrl->ap2mdm_errfatal))
++		return dev_err_probe(dev, PTR_ERR(ctrl->ap2mdm_errfatal), "ap2mdm-errfatal\n");
++	ctrl->mdm2ap_status = devm_gpiod_get(dev, "mdm2ap-status", GPIOD_IN);
++	if (IS_ERR(ctrl->mdm2ap_status))
++		return dev_err_probe(dev, PTR_ERR(ctrl->mdm2ap_status), "mdm2ap-status\n");
++	ctrl->mdm2ap_errfatal = devm_gpiod_get(dev, "mdm2ap-errfatal", GPIOD_IN);
++	if (IS_ERR(ctrl->mdm2ap_errfatal))
++		return dev_err_probe(dev, PTR_ERR(ctrl->mdm2ap_errfatal), "mdm2ap-errfatal\n");
++
++	/* Proves SPMI access to the PMX55 before anything is written */
++	ret = regmap_read(ctrl->regmap, ctrl->pon + PON_PERPH_TYPE, &type);
++	if (!ret)
++		ret = regmap_read(ctrl->regmap, ctrl->pon + PON_PERPH_SUBTYPE, &subtype);
++	if (!ret)
++		ret = regmap_read(ctrl->regmap, ctrl->pon + PON_REVISION2, &rev);
++	if (ret)
++		return dev_err_probe(dev, ret, "cannot read the PMX55 PON\n");
++	dev_info(dev, "PMX55 PON type 0x%02x subtype 0x%02x rev 0x%02x; %s\n",
++		 type, subtype, rev,
++		 gpiod_get_value_cansleep(ctrl->mdm2ap_status) ?
++		 "modem already up" : "modem off");
++
++	ret = sdx55_ctrl_request_irq(ctrl, ctrl->mdm2ap_status, "sdx55-status");
++	if (!ret)
++		ret = sdx55_ctrl_request_irq(ctrl, ctrl->mdm2ap_errfatal, "sdx55-errfatal");
++	if (ret)
++		dev_warn(dev, "no MDM2AP interrupts: %d\n", ret);
++
++	platform_set_drvdata(pdev, ctrl);
++	return 0;
++}
++
++static const struct of_device_id sdx55_ctrl_of_match[] = {
++	{ .compatible = "qcom,sdx55-fusion-ctrl" },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, sdx55_ctrl_of_match);
++
++static struct platform_driver sdx55_ctrl_driver = {
++	.driver = {
++		.name = "qcom-sdx55-ctrl",
++		.of_match_table = sdx55_ctrl_of_match,
++		.dev_groups = sdx55_ctrl_groups,
++	},
++	.probe = sdx55_ctrl_probe,
++};
++module_platform_driver(sdx55_ctrl_driver);
++
++MODULE_DESCRIPTION("Embedded SDX55 modem power control (PMX55 PON, AP2MDM/MDM2AP)");
++MODULE_LICENSE("GPL");

@@ -1,0 +1,41 @@
+From: gts7l project
+Subject: [PATCH] bus: mhi: host: pci_generic: flashless SDX55 marked in DT
+
+An SDX55 soldered next to its host has no flash; the host loads SBL. It
+reports the Qualcomm reference subsystem ID 17cb:010c, which the table
+maps to the Foxconn M.2 profile (no firmware: those boot from their own
+flash), so the modem stayed in PBL. Use the generic qcom-sdx55m profile
+(qcom/sdx55m/sbl1.mbn) when the device's DT node is "qcom,flashless".
+
+Tested on gts7l: after the firmware is reachable, the X55 enters SBL
+(BHI EXECENV 1, MHISTATUS M0/READY).
+
+diff --git a/drivers/bus/mhi/host/pci_generic.c b/drivers/bus/mhi/host/pci_generic.c
+index 0d0d9c7ff..f2cd6c358 100644
+--- a/drivers/bus/mhi/host/pci_generic.c
++++ b/drivers/bus/mhi/host/pci_generic.c
+@@ -12,6 +12,7 @@
+ #include <linux/device.h>
+ #include <linux/mhi.h>
+ #include <linux/module.h>
++#include <linux/of.h>
+ #include <linux/pci.h>
+ #include <linux/pm_runtime.h>
+ #include <linux/timer.h>
+@@ -1367,6 +1368,16 @@ static int mhi_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
+ 	unsigned int dma_data_width;
+ 	int err;
+ 
++	/*
++	 * An SDX55 soldered next to its host (e.g. SM8250 phones/tablets) has
++	 * no flash: the host loads SBL. It shares the Qualcomm reference
++	 * subsystem ID with the Foxconn M.2 cards, which boot by themselves;
++	 * the board DT marks the embedded one "qcom,flashless".
++	 */
++	if (pdev->device == 0x0306 &&
++	    of_property_read_bool(pdev->dev.of_node, "qcom,flashless"))
++		info = &mhi_qcom_sdx55_info;
++
+ 	dev_info(&pdev->dev, "MHI PCI device found: %s\n", info->name);
+ 
+ 	/* mhi_pdev.mhi_cntrl must be zero-initialized */

@@ -1,6 +1,6 @@
 # Phase 4: LTE modem scoping (2026-09-24)
 
-Scoping only; nothing implemented yet. SIM is in the tablet.
+Stage 1 done (SBL runs on the X55). SIM is in the tablet.
 
 ## What the modem is
 
@@ -105,6 +105,33 @@ Same SoC and modem; **registers on LTE/5G, voice both ways, SMS, data**.
   MM probe the EFS port with AT (ERRFATAL).
 - OnePlus 8T "kebab" reuses it: Sahara boot, mission mode and SIM work,
   stuck at MCFG apply (no radio).
+
+## Stage 1 results (2026-09-24): SBL runs
+
+- **The X55 is already powered at boot:** the bootloader leaves it in PBL.
+  PCIe2 links up at 0.8 s (Gen3 x2), device `17cb:0306`, subsystem
+  `17cb:010c`. MHI reads its serial number and OEM PK hash (PBL). The
+  PMX55 answers on SPMI SID 8 (PON type 0x01, subtype 0x04); the
+  sysfs power-on (`qcom-sdx55-ctrl`) was not needed.
+- **Wrong profile:** `pci_generic` matched `foxconn-sdx55` (Foxconn's M.2
+  cards share the Qualcomm reference subsystem ID and boot from their own
+  flash, so no firmware). Now the board DT marks the modem
+  `qcom,flashless` and `pci_generic` uses `qcom-sdx55m`
+  (`qcom/sdx55m/sbl1.mbn`, copied from the `modem` partition).
+- **The probe is too early** (0.8 s, no rootfs: firmware load -2).
+  Rebinding `mhi-pci-generic` after boot loads SBL. To solve properly in
+  stage 2 (firmware in the initramfs, or a deferred load).
+- **Result:** the MHI registers (BAR0 at 0x64300000, BHI at 0x100) show
+  **EXECENV = SBL**, MHISTATUS 0x201 (M0, READY), no error code. SBL now
+  waits for Sahara.
+- **Open:** two SMMU faults right after the SBL load: writes (SID 0x1d01)
+  to 0x64100000, the MSI target (dwc uses `cfg0_base`, terminated by
+  iMSI-RX). They are probably the SBL-entry notification; the host never
+  logged the SBL EE change. The Mi 10T kernel uses the same MSI scheme.
+  Look at this with the Sahara client in stage 2.
+- The Mi 10T kernel source (apollo-7.1.0-r12) is in
+  `references/apollo-linux/` (`drivers/bus/mhi/host/sahara.c`,
+  `mhi_bl.c`, `satellite.c`, `mhi_chan_keepalive.c`, their `pci_generic`).
 
 ## Plan (stages, each testable)
 
