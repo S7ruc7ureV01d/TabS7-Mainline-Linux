@@ -136,9 +136,14 @@ Known / harmless, left:
 - A prefix created before the 32-bit emulator was installed has an empty
   syswow64 ("could not load kernel32.dll" for every 32-bit program):
   recreate it.
-- Not tested yet: Direct3D (wined3d on freedreno GL, or DXVK on Turnip -
-  `/opt/hangover/share/dxvk-v2.7.1.tar.gz`), HiDPI scaling, the Wayland
-  driver.
+- Graphics (tested with small x64 test programs built with mingw):
+  **DXVK 2.7.1** (`tools/rootfs/wine/gts7l-wine-dxvk enable|disable`, arm64ec
+  build in system32, x32 in syswow64): D3D11 feature level 11_0 on "Turnip
+  Adreno (TM) 650", 115 fps vsync-bound clear loop. **WGL/OpenGL**: an x64
+  program gets a 4.6 core context on freedreno (FD650), 115 fps.
+- PuTTY renders small but sharp (Wine assumes 96 DPI; the panel runs at
+  1.85x) - raise the DPI in winecfg -> Graphics if wanted.
+- Not tested yet: a real game, Steam, the Wayland driver.
 
 ### Charging: what's not covered
 

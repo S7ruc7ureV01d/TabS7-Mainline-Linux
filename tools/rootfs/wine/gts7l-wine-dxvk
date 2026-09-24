@@ -1,0 +1,40 @@
+#!/bin/bash
+# Enable/disable DXVK (Direct3D 8/9/10/11 -> Vulkan, on Turnip) in a Wine
+# prefix: gts7l-wine-dxvk [enable|disable]   (default prefix: ~/.wine)
+#
+# x86-64 games run as ARM64EC under Hangover, so system32 gets DXVK's
+# arm64ec build (native code, no emulation of DXVK itself); syswow64 gets
+# the x32 build for 32-bit games.
+set -euo pipefail
+
+TAR=$(ls /opt/hangover/share/dxvk-*.tar.gz | tail -1)
+PFX=${WINEPREFIX:-$HOME/.wine}
+DLLS="d3d8 d3d9 d3d10core d3d11 dxgi"
+export WINEDEBUG=-all
+
+[ -d "$PFX/drive_c/windows/system32" ] || wine wineboot -u
+case "${1:-enable}" in
+enable)
+	tmp=$(mktemp -d)
+	tar xzf "$TAR" -C "$tmp" --strip-components=1
+	for d in $DLLS; do
+		cp "$tmp/arm64ec/$d.dll" "$PFX/drive_c/windows/system32/"
+		cp "$tmp/x32/$d.dll" "$PFX/drive_c/windows/syswow64/"
+		wine reg add 'HKCU\Software\Wine\DllOverrides' /v $d /d native /f >/dev/null
+	done
+	rm -rf "$tmp"
+	echo "DXVK $(basename "$TAR" .tar.gz) enabled in $PFX"
+	;;
+disable)
+	for d in $DLLS; do
+		wine reg delete 'HKCU\Software\Wine\DllOverrides' /v $d /f >/dev/null 2>&1 || true
+	done
+	# restore Wine's own builtin DLLs
+	wine wineboot -u
+	echo "DXVK disabled in $PFX (Wine's wined3d is used again)"
+	;;
+*)
+	echo "usage: $0 [enable|disable]" >&2
+	exit 1
+	;;
+esac
