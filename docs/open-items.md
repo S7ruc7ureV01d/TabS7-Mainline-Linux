@@ -124,6 +124,22 @@ Known / harmless, left:
   Vulkan 1.3, vkcube runs on Wayland. Left: powerdevil DDC probing `/dev/i2c-*` gets EACCES at login, portal
   "App info not found" for KDE background services.
 
+### Windows programs (Wine) (2026-09-24)
+
+- `tools/rootfs/wine/install-hangover.sh`: Hangover 11.16 (Wine 11.16 +
+  FEX + Box64) from its Debian 13 build, unpacked to `/opt/hangover`, with
+  `wine` etc. in `/usr/local/bin` and `.exe`/`.msi` opening with Wine.
+- Tested: x86-64 console (Python 3.12 embeddable) via ARM64EC/FEX; i386 via
+  WoW64 with both Box64 (default) and FEX (`HODLL=libwow64fex.dll`); a GUI
+  x86-64 program (PuTTY) on the desktop (Xwayland). Wine startup ~0.5 s,
+  emulated Python ~2.7x slower than native.
+- A prefix created before the 32-bit emulator was installed has an empty
+  syswow64 ("could not load kernel32.dll" for every 32-bit program):
+  recreate it.
+- Not tested yet: Direct3D (wined3d on freedreno GL, or DXVK on Turnip -
+  `/opt/hangover/share/dxvk-v2.7.1.tar.gz`), HiDPI scaling, the Wayland
+  driver.
+
 ### Charging: what's not covered
 
 - **PPS / up to 45 W:** stock uses a separate **PCA9468** direct charger
