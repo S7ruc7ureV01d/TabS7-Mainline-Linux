@@ -82,6 +82,40 @@ exactly, checked 2026-09-24), `kernel/dts/sm8250-samsung-gts7l.dts` and
   simple-framebuffer handover from the bootloader, and the display driver
   resets and re-initialises the panel.
 
+### Boot log sweep (2026-09-24)
+
+Kernel + journal warnings of a fresh boot and a 52-minute boot, grouped.
+
+Fixed:
+- **SLPI log flood**: `qcom_q6v5_pas 5c00000.remoteproc: Handover signaled,
+  but it already happened`, ~72/min while the light sensor streams (the
+  SLPI re-raises its smp2p ready/handover bits; no crash). Now debug level
+  (patch 0049).
+- **PM8009 doesn't exist** on this board (stock SPMI SIDs 0/1/3/4/5/8/9, no
+  smpf1/smpf2 in cmd-db): `pm8009.dtsi` and its `regulators-2` block gave
+  two SPMI WARN backtraces, `pmic-spmi 0-0a/0-0b` probe -5 and `smpf1`
+  errors every boot. Removed from the DTS (nothing used them).
+- **Reserved-memory overlap**: the live-sized `removed_mem` covers
+  upstream's unused `camera_mem`; deleted `camera_mem`.
+- **systemd-networkd** (Arch ARM default) managed nothing - NetworkManager
+  has Wi-Fi, the gadget script has usb0 - and its wait-online failed after
+  2 min at every boot, delaying `network-online.target`. Disabled on the
+  tablet (goes into the next rootfs snapshot).
+
+Known / harmless, left:
+- Wi-Fi (`ath11k_pci ... -110`) and Bluetooth (`htbtfw20.tlv -2`) first
+  probes run before the rootfs is mounted; `wlan-pci-rebind` and
+  `bt-uart-rebind` services redo them (BT set up at ~8 s).
+- DSI PHY clock WARNs (see Known quirks), `Forcing sync_state()` at ~16 s
+  (GMU, PRNG and crypto engine have no bound driver), dummy-regulator
+  notices (cs35l41 VA/VP, PCIe, GPU, camera), max77705 of_node notices,
+  `Initramfs unpacking failed` (stock template ramdisk), touch CRC-loop
+  warning (cleared by the driver every boot).
+- Userspace: no rtkit (PipeWire/KWin run without realtime priority), no
+  wireless-regdb (`regulatory.db` missing - world regulatory domain),
+  powerdevil DDC probing `/dev/i2c-*` gets EACCES at login, portal
+  "App info not found" for KDE background services.
+
 ### Charging: what's not covered
 
 - **PPS / up to 45 W:** stock uses a separate **PCA9468** direct charger

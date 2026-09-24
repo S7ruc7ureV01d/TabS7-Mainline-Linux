@@ -34,16 +34,16 @@
 #include "sm8250-samsung-common.dtsi"
 
 /*
- * Unlike the Galaxy S20 phones sm8250-samsung-common.dtsi was written for,
- * this tablet has a full three-PMIC complex (PM8150 + PM8150L + PM8009),
- * confirmed in docs/hardware-inventory.md from Samsung's own GPL source.
- * common.dtsi only pulls in pm8150.dtsi - add the other two here so the
- * &pm8150l_gpios references below (volume-up, S Pen, MAX77705 irq - all
- * confirmed wired to PM8150L, not PM8150) resolve. Both self-attach to
- * &spmi_bus internally, so #include is all that's needed.
+ * PMICs: PM8150 (SIDs 0/1, from common.dtsi), PM8150L (SIDs 4/5, added
+ * here for the &pm8150l_gpios references below: volume-up, S Pen, MAX77705
+ * irq) and the modem's PMX55 (SIDs 8/9, below). There is no PM8009 on this
+ * board: stock enumerates SPMI SIDs 0/1/3/4/5/8/9 only
+ * (docs/logs/stock-boot-2026-09-22/04-spmi-devices-real-hardware-enumeration.txt)
+ * and its RPMh command DB has no smpf1/smpf2. pm8009.dtsi used to be
+ * included here, which gave SPMI transaction-failed WARNs for SIDs 0xa/0xb
+ * at every boot.
  */
 #include "pm8150l.dtsi"
-#include "pm8009.dtsi"
 
 / {
 	model = "Samsung Galaxy Tab S7";
@@ -331,6 +331,13 @@
 &removed_mem {
 	reg = <0x0 0x80b00000 0x0 0x5b00000>;
 };
+
+/*
+ * The live removed_mem above ends at 0x86600000 and covers upstream's
+ * camera_mem (0x86200000-0x86700000), which stock doesn't have (System RAM
+ * starts at 0x86600000) and nothing here uses.
+ */
+/delete-node/ &camera_mem;
 
 /*
  * Round 23 (2026-09-19, docs/kernel-boot-debugging.md): pulled Samsung's
@@ -1613,38 +1620,6 @@
 			regulator-name = "vreg_l9c_2p96";
 			regulator-min-microvolt = <2950000>;
 			regulator-max-microvolt = <2960000>;
-			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
-		};
-	};
-
-	/*
-	 * PM8009 - same situation as PM8150L above: #included for
-	 * &pm8009_gpios (MAX77705 irq) but never had its regulator nodes
-	 * defined. "f" as the pmic-id letter and voltage ranges again match
-	 * elish's own regulators-2 block; smps2 is the only rail this board
-	 * currently needs (WLAN/BT digital core, downstream: pm8009_s2).
-	 */
-	regulators-2 {
-		compatible = "qcom,pm8009-rpmh-regulators";
-		qcom,pmic-id = "f";
-
-		vdd-s1-supply = <&vph_pwr>;
-		vdd-s2-supply = <&vreg_bob>;
-		vdd-l2-supply = <&vreg_s8c_1p35>;
-		vdd-l5-l6-supply = <&vreg_bob>;
-		vdd-l7-supply = <&vreg_s4a_1p8>;
-
-		vreg_s1f_1p2: smps1 {
-			regulator-name = "vreg_s1f_1p2";
-			regulator-min-microvolt = <1200000>;
-			regulator-max-microvolt = <1200000>;
-			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
-		};
-
-		vreg_s2f_0p95: smps2 {
-			regulator-name = "vreg_s2f_0p95";
-			regulator-min-microvolt = <950000>;
-			regulator-max-microvolt = <1100000>;
 			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
 		};
 	};
