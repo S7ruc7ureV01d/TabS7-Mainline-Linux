@@ -28,6 +28,7 @@
 #include <dt-bindings/input/input.h>
 #include <dt-bindings/interrupt-controller/irq.h>
 #include <dt-bindings/phy/phy.h>
+#include <dt-bindings/phy/phy-qcom-qmp.h>
 #include <dt-bindings/regulator/qcom,rpmh-regulator.h>
 #include <dt-bindings/sound/qcom,q6asm.h>
 #include "sm8250-samsung-common.dtsi"
@@ -1461,6 +1462,14 @@
 			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
 			regulator-allowed-modes = <RPMH_REGULATOR_MODE_HPM>;
 		};
+
+		/* USB 3 QMP PHY PLL supply: stock kona-usb.dtsi, 912 mV */
+		vreg_l18a_0p92: ldo18 {
+			regulator-name = "vreg_l18a_0p92";
+			regulator-min-microvolt = <912000>;
+			regulator-max-microvolt = <912000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+		};
 	};
 
 	/*
@@ -2505,9 +2514,100 @@
  */
 &usb_1 {
 	extcon = <&max77705_usbc>, <&max77705_usbc>;
+	/* USB 3: the QMP PHY provides the pipe clock */
+	/delete-property/ qcom,select-utmi-as-pipe-clk;
 };
 
+/*
+ * No maximum-speed: with "super-speed" (stock's value) dwc3_core_init()
+ * reads DWC3_LLUCTL to force Gen1 on this DWC_usb31 core, and that read
+ * takes a bus fault here and resets the SoC. Mainline SM8250 boards leave
+ * it unset (the hardware maximum).
+ */
 &usb_1_dwc3 {
 	dr_mode = "otg";
 	extcon = <&max77705_usbc>;
+	/delete-property/ maximum-speed;
+	phys = <&usb_1_hsphy>, <&usb_1_qmpphy QMP_USB43DP_USB3_PHY>;
+	phy-names = "usb2-phy", "usb3-phy";
+};
+
+/*
+ * USB 3 (docs/phase4-usb3-scoping.md). QMP combo PHY supplies as stock
+ * (kona-usb.dtsi: core L9A, PLL L18A 912 mV). Graph: dwc3 HS and the QMP
+ * PHY's SS output to the USB-C connector (the MAX77705 USB-C node's child),
+ * through which the USB-C driver finds the PHY's orientation switch.
+ */
+&usb_1_qmpphy {
+	vdda-phy-supply = <&vreg_l9a_1p2>;
+	vdda-pll-supply = <&vreg_l18a_0p92>;
+	status = "okay";
+};
+
+&usb_1_dwc3_hs_out {
+	remote-endpoint = <&usbc_con_hs>;
+};
+
+&usb_1_qmpphy_out {
+	remote-endpoint = <&usbc_con_ss>;
+};
+
+&max77705_usbc {
+	/* PS5169 redriver on the SuperSpeed lanes, programmed by this driver */
+	maxim,usb3-redriver = <&ps5169>;
+
+	connector {
+		compatible = "usb-c-connector";
+		label = "USB-C";
+		power-role = "dual";
+		data-role = "dual";
+
+		ports {
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			port@0 {
+				reg = <0>;
+				usbc_con_hs: endpoint {
+					remote-endpoint = <&usb_1_dwc3_hs_out>;
+				};
+			};
+
+			port@1 {
+				reg = <1>;
+				usbc_con_ss: endpoint {
+					remote-endpoint = <&usb_1_qmpphy_out>;
+				};
+			};
+		};
+	};
+};
+
+/*
+ * i2c14 (QUP SE14, gpio40/41) carries the Parade PS5169 USB 3/DP redriver
+ * (stock r07 fragment@173). The Samsung common dtsi reserves gpio40-43 as
+ * "Unused"; on this board stock drives them from Linux (the PS5169 bus,
+ * and gpio42 is the rear ultra-wide camera's VANA), so only the
+ * fingerprint SPI pins stay reserved.
+ */
+&tlmm {
+	gpio-reserved-ranges = <20 4>;
+
+	/* PS5169 enable (stock combo,redriver_en; ABL already drives it high) */
+	ps5169-en-hog {
+		gpio-hog;
+		gpios = <8 GPIO_ACTIVE_HIGH>;
+		output-high;
+		line-name = "ps5169-en";
+	};
+};
+
+&i2c14 {
+	clock-frequency = <400000>;
+	status = "okay";
+
+	ps5169: redriver@28 {
+		compatible = "parade,ps5169";
+		reg = <0x28>;
+	};
 };

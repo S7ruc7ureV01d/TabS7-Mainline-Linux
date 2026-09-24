@@ -690,3 +690,8 @@ CONFIG_EXFAT_FS=y
 # (xHCI, dwc3 dual-role, usb-storage and USB HID were already =y; the USB-C
 # driver now selects EXTCON.)
 CONFIG_USB_UAS=y
+
+# USB 3 (docs/phase4-usb3-scoping.md): the QMP combo PHY and the Type-C
+# core (for its orientation switch) were =m.
+CONFIG_TYPEC=y
+CONFIG_PHY_QCOM_QMP_COMBO=y

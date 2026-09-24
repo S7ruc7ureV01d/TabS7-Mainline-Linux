@@ -1,0 +1,236 @@
+From: gts7l project
+Subject: [PATCH] power: supply: max77705_usbc_ilim: USB 3 lane orientation
+ and the PS5169 redriver
+
+The SuperSpeed lanes run through a Parade PS5169 redriver between the
+QMP combo PHY and the connector, and which pair is live depends on the
+cable orientation. Stock sets both the PHY's lane select (dwc3-msm reads
+the cc_dir GPIO) and the redriver's flip (ps5169_config()) from it.
+
+Do the same from CC_STATUS0 CCPinStat (1: CC1, 2: CC2) on every attach,
+host or device: typec_switch_set() on the QMP PHY's orientation switch,
+found through the "connector" child node's graph, and the PS5169 mode
+(0x40 = 0xc0 USB 3 CC1 / 0xd0 CC2, 0xa0 = 0x02; cleared to 0x80 on
+detach), before the data role changes. At probe run stock's WORK_MODE
+init with the gts7l values. The redriver is an optional
+"maxim,usb3-redriver" phandle to its I2C client.
+
+Tested: an HP P500 SSD enumerates at SuperSpeed in both orientations,
+229 MB/s read (29 MB/s over USB 2.0).
+
+diff --git a/drivers/power/supply/Kconfig b/drivers/power/supply/Kconfig
+index 0da03d03e..aaa2c7450 100644
+--- a/drivers/power/supply/Kconfig
++++ b/drivers/power/supply/Kconfig
+@@ -645,6 +645,7 @@ config CHARGER_MAX77705
+ config CHARGER_MAX77705_USBC_ILIM
+ 	tristate "Maxim MAX77705 USB-C input current selection"
+ 	depends on CHARGER_MAX77705 && I2C && IIO
++	depends on TYPEC
+ 	select EXTCON
+ 	select REGMAP_I2C
+ 	help
+diff --git a/drivers/power/supply/max77705_usbc_ilim.c b/drivers/power/supply/max77705_usbc_ilim.c
+index a5be2a97c..66d17f0ec 100644
+--- a/drivers/power/supply/max77705_usbc_ilim.c
++++ b/drivers/power/supply/max77705_usbc_ilim.c
+@@ -45,6 +45,7 @@
+ #include <linux/power/max77705_charger.h>
+ #include <linux/regmap.h>
+ #include <linux/unaligned.h>
++#include <linux/usb/typec_mux.h>
+ #include <linux/workqueue.h>
+ 
+ #define MAX77705_USBC_REG_UIC_INT	0x02
+@@ -81,6 +82,7 @@
+ #define MAX77705_BC_VBUSDET		BIT(7)
+ #define MAX77705_BC_CHGTYP		GENMASK(1, 0)
+ /* CC_STATUS0 */
++#define MAX77705_CC_CCPINSTAT		GENMASK(7, 6)	/* 1: CC1, 2: CC2 */
+ #define MAX77705_CC_CCISTAT		GENMASK(5, 4)
+ #define MAX77705_CC_CCSTAT		GENMASK(2, 0)
+ #define MAX77705_CCSTAT_SINK		1	/* we sink: charger or PC */
+@@ -106,6 +108,25 @@
+  * the data lines stay disconnected. Stock sets COM_USB for an OTG attach.
+  */
+ #define MAX77705_OP_CONTROL1_W		0x06
++/*
++ * Parade PS5169 USB 3/DP redriver between the QMP PHY and the connector
++ * (stock drivers/redriver/ps5169.c, gts7l values). 0x40 selects the mode:
++ * 0xc0 USB 3 only, CC1 ("front"); 0xd0 the same, CC2; 0x80 cleared.
++ */
++#define PS5169_MODE			0x40
++#define PS5169_MODE_USB3_CC1		0xc0
++#define PS5169_MODE_USB3_CC2		0xd0
++#define PS5169_MODE_CLEAR		0x80
++
++static const u8 ps5169_init[][2] = {
++	{ 0x9d, 0x00 }, { 0x40, 0x80 }, { 0xa0, 0x02 }, { 0x8d, 0x01 },
++	{ 0x90, 0x01 }, { 0x51, 0x40 }, { 0x50, 0x20 }, { 0x54, 0x00 },
++	{ 0x5d, 0x44 }, { 0x55, 0x00 }, { 0x56, 0x00 }, { 0x57, 0x00 },
++	{ 0x58, 0x00 }, { 0x59, 0x00 }, { 0x5a, 0x00 }, { 0x5b, 0x00 },
++	{ 0x5f, 0x00 }, { 0x60, 0x00 }, { 0x61, 0x03 }, { 0x65, 0x40 },
++	{ 0x66, 0x00 }, { 0x67, 0x03 }, { 0x52, 0x30 }, { 0x5e, 0x06 },
++};
++
+ /* The charger's CHG_CNFG_02: OTG (boost) current limit */
+ #define MAX77705_CNFG02_OTG_ILIM	GENMASK(7, 6)
+ #define MAX77705_CTRL1_COM_USB		0x09
+@@ -198,6 +219,9 @@ struct max77705_usbc_ilim {
+ 	struct regmap *chg_regmap;	/* the charger's, for the OTG boost */
+ 	struct extcon_dev *extcon;
+ 	bool source;			/* supplying VBUS to a USB device */
++	struct i2c_client *redriver;	/* PS5169, optional */
++	struct typec_switch *orient_sw;	/* the QMP PHY's lane select */
++	enum typec_orientation orient;
+ 	struct power_supply *charger;
+ 	struct iio_channel *batt_therm;
+ 	struct mutex lock;
+@@ -467,6 +491,53 @@ static void max77705_set_source(struct max77705_usbc_ilim *ilim, bool on)
+ 		dev_warn(ilim->dev, "cannot set the USB data switch: %d\n", ret);
+ }
+ 
++/*
++ * USB 3 lanes: which CC pin the cable uses decides which SuperSpeed pair
++ * is live. Stock sets both the PHY's lane select and the redriver's flip
++ * from it (dwc3-msm's cc_dir, ps5169_config()); same here, from CCPinStat.
++ */
++static void max77705_set_orientation(struct max77705_usbc_ilim *ilim,
++				     enum typec_orientation orient)
++{
++	u8 mode;
++	int ret;
++
++	if (orient == ilim->orient)
++		return;
++	ilim->orient = orient;
++
++	if (ilim->orient_sw) {
++		ret = typec_switch_set(ilim->orient_sw, orient);
++		if (ret)
++			dev_warn(ilim->dev, "cannot set the lane orientation: %d\n", ret);
++	}
++
++	if (!ilim->redriver)
++		return;
++	mode = orient == TYPEC_ORIENTATION_NORMAL ? PS5169_MODE_USB3_CC1 :
++	       orient == TYPEC_ORIENTATION_REVERSE ? PS5169_MODE_USB3_CC2 :
++	       PS5169_MODE_CLEAR;
++	ret = i2c_smbus_write_byte_data(ilim->redriver, PS5169_MODE, mode);
++	if (!ret)
++		ret = i2c_smbus_write_byte_data(ilim->redriver, 0xa0, 0x02);
++	if (!ret && orient == TYPEC_ORIENTATION_NONE)
++		ret = i2c_smbus_write_byte_data(ilim->redriver, 0xa1, 0x00);
++	if (ret)
++		dev_warn(ilim->dev, "cannot set the redriver mode: %d\n", ret);
++}
++
++static enum typec_orientation max77705_cc_orientation(unsigned int cc0)
++{
++	switch (FIELD_GET(MAX77705_CC_CCPINSTAT, cc0)) {
++	case 1:
++		return TYPEC_ORIENTATION_NORMAL;
++	case 2:
++		return TYPEC_ORIENTATION_REVERSE;
++	default:
++		return TYPEC_ORIENTATION_NONE;
++	}
++}
++
+ /*
+  * Data and power role from the CC state: a device (we source) gets host
+  * mode and VBUS; a PC or charger (we sink, VBUS present) gets device mode,
+@@ -485,12 +556,16 @@ static bool max77705_roles(struct max77705_usbc_ilim *ilim, unsigned int cc0,
+ 			dev_warn(ilim->dev, "device attached with VBUS present: no boost\n");
+ 		else
+ 			max77705_set_source(ilim, true);
++		max77705_set_orientation(ilim, max77705_cc_orientation(cc0));
+ 		extcon_set_state_sync(ilim->extcon, EXTCON_USB, false);
+ 		extcon_set_state_sync(ilim->extcon, EXTCON_USB_HOST, true);
+ 		return true;
+ 	}
+ 
+ 	max77705_set_source(ilim, false);
++	max77705_set_orientation(ilim, ccstat == MAX77705_CCSTAT_SINK && vbus ?
++				 max77705_cc_orientation(cc0) :
++				 TYPEC_ORIENTATION_NONE);
+ 	extcon_set_state_sync(ilim->extcon, EXTCON_USB_HOST, false);
+ 	extcon_set_state_sync(ilim->extcon, EXTCON_USB,
+ 			      ccstat == MAX77705_CCSTAT_SINK && vbus);
+@@ -674,6 +749,65 @@ static void max77705_usbc_ilim_put_charger(void *data)
+ 	power_supply_put(data);
+ }
+ 
++static void max77705_usbc_ilim_put_redriver(void *data)
++{
++	put_device(&((struct i2c_client *)data)->dev);
++}
++
++static void max77705_usbc_ilim_put_switch(void *data)
++{
++	typec_switch_put(data);
++}
++
++/* Optional: USB 3 redriver and lane-orientation switch */
++static int max77705_usb3_init(struct max77705_usbc_ilim *ilim)
++{
++	struct device *dev = ilim->dev;
++	struct fwnode_handle *connector;
++	struct device_node *np;
++	int i, ret;
++
++	np = of_parse_phandle(dev->of_node, "maxim,usb3-redriver", 0);
++	if (np) {
++		ilim->redriver = of_find_i2c_device_by_node(np);
++		of_node_put(np);
++		if (!ilim->redriver)
++			return dev_err_probe(dev, -EPROBE_DEFER, "waiting for the redriver\n");
++		ret = devm_add_action_or_reset(dev, max77705_usbc_ilim_put_redriver,
++					       ilim->redriver);
++		if (ret)
++			return ret;
++
++		/* Stock's WORK_MODE: reset pulse, then the gts7l settings */
++		i2c_smbus_write_byte_data(ilim->redriver, 0x9d, 0x80);
++		usleep_range(10000, 10100);
++		for (i = 0; i < ARRAY_SIZE(ps5169_init); i++) {
++			ret = i2c_smbus_write_byte_data(ilim->redriver, ps5169_init[i][0],
++							ps5169_init[i][1]);
++			if (ret)
++				return dev_err_probe(dev, ret, "redriver init failed\n");
++		}
++	}
++
++	connector = device_get_named_child_node(dev, "connector");
++	if (connector) {
++		ilim->orient_sw = fwnode_typec_switch_get(connector);
++		fwnode_handle_put(connector);
++		if (IS_ERR(ilim->orient_sw))
++			return dev_err_probe(dev, PTR_ERR(ilim->orient_sw),
++					     "no lane orientation switch\n");
++		if (ilim->orient_sw) {
++			ret = devm_add_action_or_reset(dev, max77705_usbc_ilim_put_switch,
++						       ilim->orient_sw);
++			if (ret)
++				return ret;
++		}
++	}
++
++	ilim->orient = TYPEC_ORIENTATION_NONE;
++	return 0;
++}
++
+ static int max77705_usbc_ilim_probe(struct i2c_client *client)
+ {
+ 	struct device *dev = &client->dev;
+@@ -716,6 +850,10 @@ static int max77705_usbc_ilim_probe(struct i2c_client *client)
+ 	if (!ilim->chg_regmap)
+ 		return dev_err_probe(dev, -ENODEV, "no charger regmap\n");
+ 
++	ret = max77705_usb3_init(ilim);
++	if (ret)
++		return ret;
++
+ 	ilim->extcon = devm_extcon_dev_allocate(dev, max77705_extcon_cables);
+ 	if (IS_ERR(ilim->extcon))
+ 		return PTR_ERR(ilim->extcon);
