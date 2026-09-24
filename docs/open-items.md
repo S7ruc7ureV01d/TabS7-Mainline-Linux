@@ -1,4 +1,4 @@
-# Open items (as of 2026-09-23)
+# Open items (as of 2026-09-24)
 
 A single list of everything still unfinished, gathered from the roadmap, the
 scoping docs and this session's work. Each item says where it stands and the
@@ -19,7 +19,7 @@ exactly, checked 2026-09-23), `kernel/dts/sm8250-samsung-gts7l.dts` and
 | **LTE modem** | In scope (roadmap 2026-09-11 decision), but it has no checklist line and was never scoped. | Scoping pass: which modem subsystem (MPSS on SM8250), its firmware, and mainline's `qcom_q6v5_pas` + QMI/`rmnet` + ModemManager path. |
 | **Cameras** | In progress (`docs/phase4-camera-scoping.md`). Rear main (Samsung S5K3M5) works in apps: CAMSS + libcamera simple pipeline/software ISP + PipeWire, 30 fps, AE/AWB, fixed focus (`gts7l-cam-focus`, `FOCUS=330`). **Proper autofocus deferred** (owner, 2026-09-23): libcamera's simple pipeline has no AF/lens control; the GT9769 actuator works (dw9768.c). Rear ultra-wide (S5K5E9) and front (S5K4HA) need new drivers. | New sensor drivers: pull the stock sensor modules (`/vendor/lib64/camera/com.qti.sensormodule.*.bin`) during the stock boot. AF: contrast AF in libcamera, then restore the `lens-focus` link. |
 | **Fingerprint** | Goodix GW3X in the power button. Stock's kernel side is only a TEE shim. | Check `libfprint` support for this sensor; it probably needs the TZ app, which may make it infeasible. |
-| **USB-C DisplayPort** | USB host and USB 3 SuperSpeed are done (`docs/phase4-usb-host-scoping.md`, `docs/phase4-usb3-scoping.md`). DP alt mode needs the CCIC's VDM side (SET_ALTERNATEMODE bit 1), the PS5169 DP modes, the QMP PHY's DP half and the MDSS DP controller. | Enable VDM discovery and log what a DP dock/monitor reports. |
+| **USB-C DisplayPort** | **Works** (2026-09-24, `docs/phase4-usb-dp-scoping.md`, patches 0037/0038): DP alt mode, 4 lanes (pin C), both orientations, two monitors, KDE second screen. Left: picture takes 7-10 s (the CCIC firmware waits ~7 s between Enter and Configure); pin D (DP + USB 3) untested; DP audio not looked at. | Optional: send DP Status/Configure right after Enter to cut the delay. |
 | **Book Cover Keyboard** | Pogo pins, an `stm32@2a` MCU (`stm,touchpad`, `stm,keypad`) in the stock DT. Untested. | Scoping: the stock `stm32` driver and its I2C protocol. |
 | **Installer ZIP, dual boot, pacman updates, "Tab Companion" app** | Phase 5 packaging, not started. | After the hardware items; see `docs/phase5-userspace-scoping.md`. |
 | **Project docs** | `hardware-status.md`, `development-notes.md`, `porting-log.md`, known issues, a licensing/provenance file (roadmap end). | This file covers "known issues" in part. |

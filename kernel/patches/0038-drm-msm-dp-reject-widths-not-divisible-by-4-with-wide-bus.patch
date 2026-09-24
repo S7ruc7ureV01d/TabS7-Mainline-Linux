@@ -1,0 +1,28 @@
+From: gts7l project
+Subject: [PATCH] drm/msm/dp: reject widths not divisible by 4 with the
+ wide bus
+
+With the wide bus (two pixels per clock) a 1366x768 mode gives a sheared,
+tilted and flickering picture on SM8250; 1360x768 and 1280x720 on the
+same monitors are fine. Filter such modes out in mode_valid so userspace
+picks the next one.
+
+diff --git a/drivers/gpu/drm/msm/dp/dp_display.c b/drivers/gpu/drm/msm/dp/dp_display.c
+index dc6f33809..55a63b380 100644
+--- a/drivers/gpu/drm/msm/dp/dp_display.c
++++ b/drivers/gpu/drm/msm/dp/dp_display.c
+@@ -709,6 +709,14 @@ enum drm_mode_status msm_dp_bridge_mode_valid(struct drm_bridge *bridge,
+ 	msm_dp_display = container_of(dp, struct msm_dp_display_private, msm_dp_display);
+ 	link_info = &msm_dp_display->panel->link_info;
+ 
++	/*
++	 * With the wide bus (2 pixels per clock) a width that is not a
++	 * multiple of 4 gives a sheared, flickering picture (seen on SM8250
++	 * with 1366x768 monitors; 1360x768 and 1280x720 are fine).
++	 */
++	if (msm_dp_wide_bus_available(dp) && mode->hdisplay % 4)
++		return MODE_H_ILLEGAL;
++
+ 	if ((drm_mode_is_420_only(&dp->connector->display_info, mode) &&
+ 	     msm_dp_display->panel->vsc_sdp_supported) ||
+ 	     msm_dp_wide_bus_available(dp))

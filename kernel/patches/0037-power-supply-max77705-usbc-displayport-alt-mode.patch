@@ -1,0 +1,698 @@
+From: gts7l project
+Subject: [PATCH] power: supply: max77705_usbc_ilim: DisplayPort alt mode
+
+The MAX77705 runs USB PD in its own firmware, including the Discover
+Identity / SVIDs / Modes VDM exchange, but on gts7l it never enters the
+DisplayPort mode by itself. Stock drives the rest from the AP through the
+opcode mailbox (VDM_SET_REQ 0x48, VDM_GET_RESP 0x4b), and so does this:
+
+- SET_ALTERNATEMODE with SRCCAP | VDM at probe, and the PD_INT (PDMSG,
+  DP Status/Configure/Attention) and VDM_INT (Modes, Enter) interrupts
+  unmasked.
+- On Discover Modes, record the partner's DP pin assignments and send
+  Enter Mode (0xff018104) 1.5 s later. Sending it straight away collides
+  with the firmware's own discovery (the partner also has Samsung's SVID
+  0x04e8) and is dropped. After Enter the firmware runs DP Status and
+  Configure itself; a Configure ACK from it (or ours, as a fallback)
+  switches the data path: typec_mux_set() on the QMP combo PHY
+  (TYPEC_DP_STATE_C/E for 4 lanes, D for 2 lanes + USB 3), the PS5169
+  redriver's DP modes, and the SBU/AUX analog switch (optional
+  "dp-aux-en" / "dp-aux-sel" GPIOs, "dp-aux-pullup" supply). Without the
+  AUX switch every DPCD read times out.
+- HPD from the Attention / DP Status VDOs goes to a drm_aux_hpd bridge on
+  the connector node, which the msm DP controller's bridge chain ends in.
+
+max77705_opcode() used a two-byte buffer, so every multi-byte VDM request
+failed with -EINVAL; it now takes the full opcode length. The 0x48 reply
+only comes after the partner answers, so it is polled for up to 1 s and
+a timeout is not treated as an error.
+
+A USB attach after a DP session re-asserts the PHY's USB mode: the QMP
+PHY drops the switch-back ("DP PHY is still in use, delaying switch")
+while the DP side is still powered, which left device mode dead after
+unplugging a monitor.
+
+Tested: two USB-C monitors, both orientations; picture about 7-10 s after
+plugging in, most of it the firmware's gap between Enter and Configure.
+
+diff --git a/drivers/power/supply/Kconfig b/drivers/power/supply/Kconfig
+index aaa2c7450..358977d05 100644
+--- a/drivers/power/supply/Kconfig
++++ b/drivers/power/supply/Kconfig
+@@ -647,6 +647,7 @@ config CHARGER_MAX77705_USBC_ILIM
+ 	depends on CHARGER_MAX77705 && I2C && IIO
+ 	depends on TYPEC
+ 	select EXTCON
++	select DRM_AUX_HPD_BRIDGE if DRM_BRIDGE && OF
+ 	select REGMAP_I2C
+ 	help
+ 	  Say Y to set the MAX77705 charger's input and charge current from
+diff --git a/drivers/power/supply/max77705_usbc_ilim.c b/drivers/power/supply/max77705_usbc_ilim.c
+index 66d17f0ec..93a52e370 100644
+--- a/drivers/power/supply/max77705_usbc_ilim.c
++++ b/drivers/power/supply/max77705_usbc_ilim.c
+@@ -35,7 +35,11 @@
+ #include <linux/i2c.h>
+ #include <linux/iio/consumer.h>
+ #include <linux/interrupt.h>
++#include <linux/auxiliary_bus.h>
++#include <linux/delay.h>
+ #include <linux/extcon-provider.h>
++#include <linux/gpio/consumer.h>
++#include <linux/regulator/consumer.h>
+ #include <linux/mfd/max77705-private.h>
+ #include <linux/minmax.h>
+ #include <linux/module.h>
+@@ -45,7 +49,11 @@
+ #include <linux/power/max77705_charger.h>
+ #include <linux/regmap.h>
+ #include <linux/unaligned.h>
++#include <linux/usb/typec_dp.h>
+ #include <linux/usb/typec_mux.h>
++
++#include <drm/bridge/aux-bridge.h>
++#include <drm/drm_connector.h>
+ #include <linux/workqueue.h>
+ 
+ #define MAX77705_USBC_REG_UIC_INT	0x02
+@@ -59,6 +67,7 @@
+ #define MAX77705_USBC_REG_UIC_INT_M	0x0e
+ #define MAX77705_USBC_REG_CC_INT_M	0x0f
+ #define MAX77705_USBC_REG_PD_INT_M	0x10
++#define MAX77705_USBC_REG_VDM_INT_M	0x11
+ #define MAX77705_USBC_REG_OPCODE_W	0x21
+ #define MAX77705_USBC_REG_OPCODE_END	0x41
+ #define MAX77705_USBC_REG_OPCODE_R	0x51
+@@ -75,6 +84,15 @@
+ #define MAX77705_CCSTATI		BIT(0)
+ /* PD_INT(_M) */
+ #define MAX77705_PDMSGI			BIT(7)
++#define MAX77705_DP_ATTENTIONI		BIT(4)
++#define MAX77705_DP_CONFIGUREI		BIT(3)
++#define MAX77705_DP_STATUSI		BIT(2)
++#define MAX77705_DP_PD_INTS		(MAX77705_DP_ATTENTIONI | \
++					 MAX77705_DP_CONFIGUREI | \
++					 MAX77705_DP_STATUSI)
++/* VDM_INT(_M): the firmware's own discovery (downstream max77705-irq.c) */
++#define MAX77705_VDM_ENTER_MODEI	BIT(3)
++#define MAX77705_VDM_DISCOVER_MODESI	BIT(2)
+ /* USBC_STATUS1 */
+ #define MAX77705_VBADC			GENMASK(7, 4)
+ #define MAX77705_VBADC_8V5_9V5		0x6
+@@ -101,6 +119,40 @@
+  */
+ #define MAX77705_OP_SET_ALTERNATEMODE	0x55
+ #define MAX77705_ALTMODE_SRCCAP		BIT(0)
++#define MAX77705_ALTMODE_VDM		BIT(1)
++
++/*
++ * DisplayPort alt mode. With ALTMODE_VDM the firmware runs Discover
++ * Identity/SVIDs/Modes by itself; the AP reads the answers
++ * (VDM_GET_RESP <id>: [4..7] VDM header, [8..] VDOs) and sends Enter Mode
++ * and DP Configure (VDM_SET_REQ: SEND_VDM_BYTE_DATA, VDM header, VDOs),
++ * as stock's max77705_alternate.c does.
++ */
++#define MAX77705_OP_VDM_SET_REQ		0x48
++#define MAX77705_OP_VDM_GET_RESP	0x4b
++#define MAX77705_VDM_ID_MODES		0x03
++#define MAX77705_VDM_ID_ENTER		0x04
++#define MAX77705_VDM_ID_ATTENTION	0x06
++#define MAX77705_VDM_ID_DP_STATUS	0x10
++#define MAX77705_VDM_ID_DP_CONFIGURE	0x11
++/* SEND_VDM_BYTE_DATA: Num_Of_VDO bits 2:0, Cmd_Type (1 = ACK) bits 4:3 */
++#define MAX77705_VDM_BYTE(nvdo)		((nvdo) | 1 << 3)
++/* Structured VDM header */
++#define VDM_HDR_SVID			GENMASK(31, 16)
++#define VDM_HDR_CMDT			GENMASK(7, 6)	/* 1: ACK */
++#define VDM_HDR_ENTER_DP		0xff018104	/* Enter Mode, pos 1 */
++#define VDM_HDR_CONFIGURE_DP		0xff018111	/* DP Configure, pos 1 */
++/* DP mode VDO (Discover Modes) */
++#define MAX_DPCAP_UFP_D			BIT(0)
++#define MAX_DPCAP_RECEPTACLE		BIT(6)
++#define MAX_DPCAP_DFP_D_PINS		GENMASK(15, 8)
++#define MAX_DPCAP_UFP_D_PINS		GENMASK(23, 16)
++/* DP Status VDO */
++#define MAX_DPSTS_CONNECTED		GENMASK(1, 0)
++#define MAX_DPSTS_MF_PREFER		BIT(4)
++#define MAX_DPSTS_HPD			BIT(7)
++/* DP Configure VDO byte 0: configure as UFP_D, DP 1.3 signalling */
++#define DP_CONF_UFP_D_DP13		0x06
+ /*
+  * CONTROL1: the D+/D- switch (COMN1SW bits 2:0, COMP2SW bits 5:3; 001 =
+  * USB to the SoC). The reset default 0x00 is open with the switch
+@@ -117,6 +169,10 @@
+ #define PS5169_MODE_USB3_CC1		0xc0
+ #define PS5169_MODE_USB3_CC2		0xd0
+ #define PS5169_MODE_CLEAR		0x80
++#define PS5169_MODE_DP4_CC1		0xa0	/* DP only (pin C/E) */
++#define PS5169_MODE_DP4_CC2		0xb0
++#define PS5169_MODE_DP2_USB_CC1		0xe0	/* 2-lane DP + USB 3 (pin D) */
++#define PS5169_MODE_DP2_USB_CC2		0xf0
+ 
+ static const u8 ps5169_init[][2] = {
+ 	{ 0x9d, 0x00 }, { 0x40, 0x80 }, { 0xa0, 0x02 }, { 0x8d, 0x01 },
+@@ -212,6 +268,7 @@ enum max77705_pd_state {
+ #define MAX77705_DEBOUNCE_MS		300
+ #define MAX77705_POLL_MS		30000	/* temperature, while attached */
+ #define MAX77705_PD_TIMEOUT_MS		3000
++#define MAX77705_DP_ENTER_DELAY_MS	1500
+ 
+ struct max77705_usbc_ilim {
+ 	struct device *dev;
+@@ -222,11 +279,24 @@ struct max77705_usbc_ilim {
+ 	struct i2c_client *redriver;	/* PS5169, optional */
+ 	struct typec_switch *orient_sw;	/* the QMP PHY's lane select */
+ 	enum typec_orientation orient;
++	/* DisplayPort alt mode */
++	struct typec_mux *mux;		/* the QMP PHY's USB/DP mode */
++	struct auxiliary_device *dp_hpd; /* DRM HPD bridge on the connector */
++	unsigned int vdm_int, pd_int;	/* pending VDM/DP events */
++	u8 dp_pins;			/* pin assignments the partner offers */
++	u8 dp_pin;			/* the one configured, 0: none */
++	bool dp_muxed;			/* PHY and redriver in DP mode */
++	/* DP AUX over SBU: an analog switch (enable, CC1/CC2 select), pull-ups */
++	struct gpio_desc *aux_en, *aux_sel;
++	struct regulator *aux_pullup;
++	bool aux_on;
++	bool dp_hpd_high;
+ 	struct power_supply *charger;
+ 	struct iio_channel *batt_therm;
+ 	struct mutex lock;
+ 	struct delayed_work work;
+ 	struct delayed_work pd_timeout;
++	struct delayed_work dp_enter;	/* Enter Mode once discovery is done */
+ 	enum max77705_tband tband;
+ 	enum max77705_pd_state pd;
+ 	bool attached;
+@@ -359,7 +429,7 @@ static void max77705_apply(struct max77705_usbc_ilim *ilim, int ilim_ma,
+ static int max77705_opcode(struct max77705_usbc_ilim *ilim, u8 opcode,
+ 			   const u8 *data, size_t len)
+ {
+-	u8 buf[2] = { opcode };
++	u8 buf[MAX77705_USBC_OPCODE_LEN] = { opcode };
+ 	int ret;
+ 
+ 	if (len > sizeof(buf) - 1)
+@@ -496,6 +566,8 @@ static void max77705_set_source(struct max77705_usbc_ilim *ilim, bool on)
+  * is live. Stock sets both the PHY's lane select and the redriver's flip
+  * from it (dwc3-msm's cc_dir, ps5169_config()); same here, from CCPinStat.
+  */
++static void max77705_dp_mux(struct max77705_usbc_ilim *ilim, u8 pin);
++
+ static void max77705_set_orientation(struct max77705_usbc_ilim *ilim,
+ 				     enum typec_orientation orient)
+ {
+@@ -506,6 +578,15 @@ static void max77705_set_orientation(struct max77705_usbc_ilim *ilim,
+ 		return;
+ 	ilim->orient = orient;
+ 
++	/*
++	 * Put the PHY back in USB mode on every non-DP attach: switching back
++	 * right at a DP detach is dropped by the QMP PHY while the DP side is
++	 * still powered ("delaying switch"), and it then stayed DP-only, with
++	 * USB device mode dead until the next reboot.
++	 */
++	if (orient != TYPEC_ORIENTATION_NONE && !ilim->dp_muxed)
++		max77705_dp_mux(ilim, 0);
++
+ 	if (ilim->orient_sw) {
+ 		ret = typec_switch_set(ilim->orient_sw, orient);
+ 		if (ret)
+@@ -538,6 +619,312 @@ static enum typec_orientation max77705_cc_orientation(unsigned int cc0)
+ 	}
+ }
+ 
++/*
++ * Synchronous firmware command for the DP state machine: the work holds
++ * the lock the interrupt thread would need to report the reply, so poll
++ * the reply buffer instead (the firmware answers within milliseconds).
++ */
++static int max77705_vdm_cmd(struct max77705_usbc_ilim *ilim, u8 opcode,
++			    const u8 *data, size_t len, u8 *reply)
++{
++	int ret, i;
++
++	ret = max77705_opcode(ilim, opcode, data, len);
++	if (ret)
++		return ret;
++	for (i = 0; i < 10; i++) {
++		msleep(20);
++		ret = regmap_bulk_read(ilim->regmap, MAX77705_USBC_REG_OPCODE_R,
++				       reply, MAX77705_USBC_OPCODE_LEN);
++		if (ret)
++			return ret;
++		if (reply[0] == opcode && (opcode != MAX77705_OP_VDM_GET_RESP ||
++					   reply[1] == data[0]))
++			return 0;
++	}
++	return -ETIMEDOUT;
++}
++
++/* The firmware's stored answer: VDM header and first VDO */
++static int max77705_vdm_resp(struct max77705_usbc_ilim *ilim, u8 id,
++			     u32 *hdr, u32 *vdo)
++{
++	u8 r[MAX77705_USBC_OPCODE_LEN];
++	int ret;
++
++	ret = max77705_vdm_cmd(ilim, MAX77705_OP_VDM_GET_RESP, &id, 1, r);
++	if (ret)
++		return ret;
++	*hdr = get_unaligned_le32(&r[4]);
++	*vdo = get_unaligned_le32(&r[8]);
++	return 0;
++}
++
++/*
++ * Send a VDM to the partner. The firmware answers only once the partner
++ * has ([1] = 0xff: not sent, else [2..5] the partner's VDM header), and
++ * the outcome also arrives as the Enter Mode / DP Configure interrupt, so
++ * a slow answer is not an error.
++ */
++static int max77705_vdm_send(struct max77705_usbc_ilim *ilim, u32 hdr,
++			     const u8 *vdo, int nvdo)
++{
++	u8 buf[1 + 4 + 4], r[MAX77705_USBC_OPCODE_LEN];
++	int ret, i;
++
++	buf[0] = MAX77705_VDM_BYTE(nvdo);
++	put_unaligned_le32(hdr, &buf[1]);
++	if (nvdo)
++		memcpy(&buf[5], vdo, 4);
++	ret = max77705_opcode(ilim, MAX77705_OP_VDM_SET_REQ, buf, 1 + 4 + 4 * nvdo);
++	if (ret)
++		return ret;
++	for (i = 0; i < 25; i++) {
++		msleep(40);
++		if (regmap_bulk_read(ilim->regmap, MAX77705_USBC_REG_OPCODE_R, r, sizeof(r)))
++			break;
++		if (r[0] == MAX77705_OP_VDM_SET_REQ)
++			return r[1] == 0xff ? -EIO : 0;
++	}
++	dev_dbg(ilim->dev, "no answer yet to VDM 0x%08x\n", hdr);
++	return 0;
++}
++
++static void max77705_dp_hpd(struct max77705_usbc_ilim *ilim, bool high)
++{
++	if (high == ilim->dp_hpd_high)
++		return;
++	ilim->dp_hpd_high = high;
++	dev_info(ilim->dev, "DisplayPort HPD %s\n", high ? "high" : "low");
++	if (ilim->dp_hpd)
++		drm_aux_hpd_bridge_notify(&ilim->dp_hpd->dev,
++					  high ? connector_status_connected :
++					  connector_status_disconnected);
++}
++
++/*
++ * DP AUX runs over the SBU pins through an analog switch (stock
++ * secdp_power_set_gpio(): select CC1/CC2 first, then enable).
++ */
++static void max77705_dp_aux(struct max77705_usbc_ilim *ilim, bool on)
++{
++	if (on == ilim->aux_on || !ilim->aux_en)
++		return;
++	ilim->aux_on = on;
++	if (on) {
++		if (ilim->aux_pullup && regulator_enable(ilim->aux_pullup))
++			dev_warn(ilim->dev, "cannot enable the AUX pull-ups\n");
++		gpiod_set_value_cansleep(ilim->aux_sel,
++					 ilim->orient == TYPEC_ORIENTATION_REVERSE);
++		usleep_range(100, 120);
++		gpiod_set_value_cansleep(ilim->aux_en, 1);
++	} else {
++		gpiod_set_value_cansleep(ilim->aux_en, 0);
++		if (ilim->aux_pullup)
++			regulator_disable(ilim->aux_pullup);
++	}
++}
++
++/* QMP PHY and PS5169 into (or out of) DisplayPort */
++static void max77705_dp_mux(struct max77705_usbc_ilim *ilim, u8 pin)
++{
++	static struct typec_altmode dp_alt = { .svid = USB_TYPEC_DP_SID };
++	struct typec_mux_state state = { };
++	bool cc2 = ilim->orient == TYPEC_ORIENTATION_REVERSE;
++	u8 mode;
++	int ret;
++
++	if (pin) {
++		state.alt = &dp_alt;
++		state.mode = pin == DP_PIN_ASSIGN_D ? TYPEC_DP_STATE_D :
++			     pin == DP_PIN_ASSIGN_E ? TYPEC_DP_STATE_E :
++			     TYPEC_DP_STATE_C;
++	} else {
++		state.mode = TYPEC_STATE_USB;
++	}
++	if (ilim->mux) {
++		ret = typec_mux_set(ilim->mux, &state);
++		if (ret)
++			dev_warn(ilim->dev, "cannot switch the PHY mode: %d\n", ret);
++	}
++	max77705_dp_aux(ilim, pin);
++
++	if (!ilim->redriver || !pin)
++		return;
++	if (pin == DP_PIN_ASSIGN_D)
++		mode = cc2 ? PS5169_MODE_DP2_USB_CC2 : PS5169_MODE_DP2_USB_CC1;
++	else
++		mode = cc2 ? PS5169_MODE_DP4_CC2 : PS5169_MODE_DP4_CC1;
++	ret = i2c_smbus_write_byte_data(ilim->redriver, PS5169_MODE, mode);
++	if (!ret)
++		ret = i2c_smbus_write_byte_data(ilim->redriver, 0xa0, 0x00);
++	if (!ret)
++		ret = i2c_smbus_write_byte_data(ilim->redriver, 0xa1, 0x04);
++	if (ret)
++		dev_warn(ilim->dev, "cannot set the redriver DP mode: %d\n", ret);
++}
++
++static void max77705_dp_reset(struct max77705_usbc_ilim *ilim)
++{
++	ilim->vdm_int = ilim->pd_int = 0;
++	ilim->dp_pins = 0;
++	ilim->dp_pin = 0;
++	max77705_dp_hpd(ilim, false);
++	if (ilim->dp_muxed) {
++		ilim->dp_muxed = false;
++		max77705_dp_mux(ilim, 0);
++	}
++}
++
++/* Configure acknowledged: lanes into DP mode, then HPD as last reported */
++static void max77705_dp_configured(struct max77705_usbc_ilim *ilim)
++{
++	u32 hdr, vdo;
++
++	if (ilim->dp_muxed)
++		return;
++	ilim->dp_muxed = true;
++	dev_info(ilim->dev, "DP configured, pin %c\n", 'A' + ilim->dp_pin);
++	max77705_dp_mux(ilim, ilim->dp_pin);
++	if (!max77705_vdm_resp(ilim, MAX77705_VDM_ID_ATTENTION, &hdr, &vdo) &&
++	    FIELD_GET(VDM_HDR_SVID, hdr) == USB_TYPEC_DP_SID)
++		max77705_dp_hpd(ilim, vdo & MAX_DPSTS_HPD);
++	else if (!max77705_vdm_resp(ilim, MAX77705_VDM_ID_DP_STATUS, &hdr, &vdo))
++		max77705_dp_hpd(ilim, vdo & MAX_DPSTS_HPD);
++}
++
++static u8 max77705_dp_pick_pin(u8 pins, bool mf_prefer)
++{
++	if (mf_prefer && (pins & BIT(DP_PIN_ASSIGN_D)))
++		return DP_PIN_ASSIGN_D;
++	if (pins & BIT(DP_PIN_ASSIGN_C))
++		return DP_PIN_ASSIGN_C;
++	if (pins & BIT(DP_PIN_ASSIGN_E))
++		return DP_PIN_ASSIGN_E;
++	if (pins & BIT(DP_PIN_ASSIGN_D))
++		return DP_PIN_ASSIGN_D;
++	return 0;
++}
++
++/* DP Status answer: configure the pin if not done yet, then HPD */
++static void max77705_dp_status(struct max77705_usbc_ilim *ilim, u32 vdo)
++{
++	u8 conf[4];
++	int i;
++
++	if (!ilim->dp_pin && FIELD_GET(MAX_DPSTS_CONNECTED, vdo)) {
++		u8 pin = max77705_dp_pick_pin(ilim->dp_pins, vdo & MAX_DPSTS_MF_PREFER);
++
++		if (!pin)
++			return;
++		conf[0] = DP_CONF_UFP_D_DP13;
++		conf[1] = BIT(pin);
++		conf[2] = conf[3] = 0;
++		dev_info(ilim->dev, "DP status 0x%08x: configuring pin %c\n",
++			 vdo, 'A' + pin);
++		ilim->dp_pin = pin;
++		if (max77705_vdm_send(ilim, VDM_HDR_CONFIGURE_DP, conf, 1)) {
++			dev_warn(ilim->dev, "cannot send DP Configure\n");
++			ilim->dp_pin = 0;
++			return;
++		}
++		/* The ACK may come without an interrupt too */
++		for (i = 0; i < 20 && !ilim->dp_muxed; i++) {
++			u32 hdr, cvdo;
++
++			if (!max77705_vdm_resp(ilim, MAX77705_VDM_ID_DP_CONFIGURE, &hdr, &cvdo) &&
++			    FIELD_GET(VDM_HDR_SVID, hdr) == USB_TYPEC_DP_SID &&
++			    FIELD_GET(VDM_HDR_CMDT, hdr) == 1) {
++				max77705_dp_configured(ilim);
++				return;
++			}
++			msleep(100);
++		}
++	}
++}
++
++static void max77705_dp_enter_work(struct work_struct *work)
++{
++	struct max77705_usbc_ilim *ilim =
++		container_of(to_delayed_work(work), struct max77705_usbc_ilim, dp_enter);
++
++	mutex_lock(&ilim->lock);
++	if (ilim->source && ilim->dp_pins && !ilim->dp_pin && !ilim->dp_muxed) {
++		dev_info(ilim->dev, "entering DP mode\n");
++		if (max77705_vdm_send(ilim, VDM_HDR_ENTER_DP, NULL, 0))
++			dev_warn(ilim->dev, "cannot send DP Enter Mode\n");
++	}
++	mutex_unlock(&ilim->lock);
++}
++
++/* DP alt mode events, while we source a device */
++static void max77705_dp_events(struct max77705_usbc_ilim *ilim)
++{
++	unsigned int vdm = ilim->vdm_int, pd = ilim->pd_int;
++	u32 hdr, vdo;
++
++	ilim->vdm_int = ilim->pd_int = 0;
++	if (vdm || (pd & MAX77705_DP_PD_INTS))
++		dev_dbg(ilim->dev, "alt mode events: VDM 0x%02x, PD 0x%02x\n", vdm, pd);
++
++	if ((vdm & MAX77705_VDM_DISCOVER_MODESI) &&
++	    !max77705_vdm_resp(ilim, MAX77705_VDM_ID_MODES, &hdr, &vdo) &&
++	    FIELD_GET(VDM_HDR_SVID, hdr) == USB_TYPEC_DP_SID &&
++	    FIELD_GET(VDM_HDR_CMDT, hdr) == 1 && (vdo & MAX_DPCAP_UFP_D)) {
++		ilim->dp_pins = vdo & MAX_DPCAP_RECEPTACLE ?
++				FIELD_GET(MAX_DPCAP_UFP_D_PINS, vdo) :
++				FIELD_GET(MAX_DPCAP_DFP_D_PINS, vdo);
++		/*
++		 * Enter Mode must wait until the firmware has finished
++		 * discovering (it goes on to the partner's other SVIDs, e.g.
++		 * Samsung's): sent at once it collided and the sequence never
++		 * completed. Sent later, the firmware then runs DP Status and
++		 * DP Configure by itself; left alone it only sometimes enters
++		 * by itself (~8 s later).
++		 */
++		dev_info(ilim->dev, "DisplayPort partner, pins 0x%02x\n", ilim->dp_pins);
++		/* Re-armed by each Discover Modes: fires once discovery settles */
++		mod_delayed_work(system_wq, &ilim->dp_enter,
++				 msecs_to_jiffies(MAX77705_DP_ENTER_DELAY_MS));
++	}
++
++	if ((vdm & MAX77705_VDM_ENTER_MODEI) && ilim->dp_pins &&
++	    !max77705_vdm_resp(ilim, MAX77705_VDM_ID_ENTER, &hdr, &vdo) &&
++	    FIELD_GET(VDM_HDR_CMDT, hdr) != 1)
++		dev_warn(ilim->dev, "DP Enter Mode refused (0x%08x)\n", hdr);
++
++	if ((pd & MAX77705_DP_STATUSI) && ilim->dp_pins &&
++	    !max77705_vdm_resp(ilim, MAX77705_VDM_ID_DP_STATUS, &hdr, &vdo)) {
++		max77705_dp_status(ilim, vdo);
++		if (ilim->dp_pin && (pd & MAX77705_DP_CONFIGUREI) == 0)
++			max77705_dp_hpd(ilim, vdo & MAX_DPSTS_HPD);
++	}
++
++	/*
++	 * After our Enter Mode the firmware may run DP Status and DP Configure
++	 * by itself (seen: Configure ACK and the partner's Attention, with no
++	 * Status event for us). Then the pin is the one the partner offers.
++	 */
++	if ((pd & MAX77705_DP_CONFIGUREI) && ilim->dp_pins &&
++	    !max77705_vdm_resp(ilim, MAX77705_VDM_ID_DP_CONFIGURE, &hdr, &vdo)) {
++		if (FIELD_GET(VDM_HDR_CMDT, hdr) == 1) {
++			if (!ilim->dp_pin)
++				ilim->dp_pin = max77705_dp_pick_pin(ilim->dp_pins, false);
++			max77705_dp_configured(ilim);
++		} else {
++			dev_warn(ilim->dev, "DP Configure refused (0x%08x)\n", hdr);
++			ilim->dp_pin = 0;
++		}
++	}
++
++	if ((pd & MAX77705_DP_ATTENTIONI) && ilim->dp_pins &&
++	    !max77705_vdm_resp(ilim, MAX77705_VDM_ID_ATTENTION, &hdr, &vdo)) {
++		dev_dbg(ilim->dev, "DP attention 0x%08x\n", vdo);
++		if (ilim->dp_muxed)
++			max77705_dp_hpd(ilim, vdo & MAX_DPSTS_HPD);
++	}
++}
++
+ /*
+  * Data and power role from the CC state: a device (we source) gets host
+  * mode and VBUS; a PC or charger (we sink, VBUS present) gets device mode,
+@@ -559,9 +946,12 @@ static bool max77705_roles(struct max77705_usbc_ilim *ilim, unsigned int cc0,
+ 		max77705_set_orientation(ilim, max77705_cc_orientation(cc0));
+ 		extcon_set_state_sync(ilim->extcon, EXTCON_USB, false);
+ 		extcon_set_state_sync(ilim->extcon, EXTCON_USB_HOST, true);
++		max77705_dp_events(ilim);
+ 		return true;
+ 	}
+ 
++	max77705_dp_reset(ilim);
++
+ 	max77705_set_source(ilim, false);
+ 	max77705_set_orientation(ilim, ccstat == MAX77705_CCSTAT_SINK && vbus ?
+ 				 max77705_cc_orientation(cc0) :
+@@ -695,15 +1085,17 @@ static void max77705_pd_timeout(struct work_struct *work)
+ static irqreturn_t max77705_usbc_ilim_irq(int irq, void *data)
+ {
+ 	struct max77705_usbc_ilim *ilim = data;
+-	unsigned int uic = 0, pd = 0, msg, val;
++	unsigned int uic = 0, pd = 0, vdm = 0, msg, val;
+ 
+ 	/* The interrupt registers clear on read */
+ 	regmap_read(ilim->regmap, MAX77705_USBC_REG_UIC_INT, &uic);
+ 	regmap_read(ilim->regmap, MAX77705_USBC_REG_CC_INT, &val);
+ 	regmap_read(ilim->regmap, MAX77705_USBC_REG_PD_INT, &pd);
+-	regmap_read(ilim->regmap, MAX77705_USBC_REG_VDM_INT, &val);
++	regmap_read(ilim->regmap, MAX77705_USBC_REG_VDM_INT, &vdm);
+ 
+ 	mutex_lock(&ilim->lock);
++	ilim->vdm_int |= vdm;
++	ilim->pd_int |= pd & MAX77705_DP_PD_INTS;
+ 	if (uic & MAX77705_APCMDRESI)
+ 		ilim->cmd_done = true;
+ 	if ((pd & MAX77705_PDMSGI) &&
+@@ -712,9 +1104,10 @@ static irqreturn_t max77705_usbc_ilim_irq(int irq, void *data)
+ 		ilim->psrdy = true;
+ 	mutex_unlock(&ilim->lock);
+ 
+-	/* Command replies need no debounce */
++	/* Command replies and DP alt mode events need no debounce */
+ 	mod_delayed_work(system_wq, &ilim->work,
+-			 (uic & MAX77705_APCMDRESI) ? 0 :
++			 ((uic & MAX77705_APCMDRESI) || vdm ||
++			  (pd & MAX77705_DP_PD_INTS)) ? 0 :
+ 			 msecs_to_jiffies(MAX77705_DEBOUNCE_MS));
+ 
+ 	return IRQ_HANDLED;
+@@ -730,7 +1123,7 @@ static bool max77705_usbc_writeable(struct device *dev, unsigned int reg)
+ {
+ 	/* The interrupt masks and the firmware command buffer only */
+ 	return (reg >= MAX77705_USBC_REG_UIC_INT_M &&
+-		reg <= MAX77705_USBC_REG_PD_INT_M) ||
++		reg <= MAX77705_USBC_REG_VDM_INT_M) ||
+ 	       (reg >= MAX77705_USBC_REG_OPCODE_W &&
+ 		reg <= MAX77705_USBC_REG_OPCODE_END);
+ }
+@@ -759,6 +1152,11 @@ static void max77705_usbc_ilim_put_switch(void *data)
+ 	typec_switch_put(data);
+ }
+ 
++static void max77705_usbc_ilim_put_mux(void *data)
++{
++	typec_mux_put(data);
++}
++
+ /* Optional: USB 3 redriver and lane-orientation switch */
+ static int max77705_usb3_init(struct max77705_usbc_ilim *ilim)
+ {
+@@ -792,27 +1190,70 @@ static int max77705_usb3_init(struct max77705_usbc_ilim *ilim)
+ 	connector = device_get_named_child_node(dev, "connector");
+ 	if (connector) {
+ 		ilim->orient_sw = fwnode_typec_switch_get(connector);
+-		fwnode_handle_put(connector);
+-		if (IS_ERR(ilim->orient_sw))
++		if (IS_ERR(ilim->orient_sw)) {
++			fwnode_handle_put(connector);
+ 			return dev_err_probe(dev, PTR_ERR(ilim->orient_sw),
+ 					     "no lane orientation switch\n");
++		}
+ 		if (ilim->orient_sw) {
+ 			ret = devm_add_action_or_reset(dev, max77705_usbc_ilim_put_switch,
+ 						       ilim->orient_sw);
+ 			if (ret)
+-				return ret;
++				goto put_connector;
++		}
++
++		/* DisplayPort: the PHY's mode switch and an HPD bridge */
++		ilim->mux = fwnode_typec_mux_get(connector);
++		if (IS_ERR(ilim->mux)) {
++			ret = dev_err_probe(dev, PTR_ERR(ilim->mux), "no PHY mode switch\n");
++			goto put_connector;
++		}
++		if (ilim->mux) {
++			ret = devm_add_action_or_reset(dev, max77705_usbc_ilim_put_mux,
++						       ilim->mux);
++			if (ret)
++				goto put_connector;
++		}
++		if (IS_ENABLED(CONFIG_DRM_AUX_HPD_BRIDGE)) {
++			ilim->dp_hpd = devm_drm_dp_hpd_bridge_alloc(dev, to_of_node(connector));
++			if (IS_ERR(ilim->dp_hpd)) {
++				ret = PTR_ERR(ilim->dp_hpd);
++				goto put_connector;
++			}
++			ret = devm_drm_dp_hpd_bridge_add(dev, ilim->dp_hpd);
++			if (ret)
++				goto put_connector;
+ 		}
++		fwnode_handle_put(connector);
++	}
++
++	/* DP AUX switch on the SBU lines, optional */
++	ilim->aux_en = devm_gpiod_get_optional(dev, "dp-aux-en", GPIOD_OUT_LOW);
++	if (IS_ERR(ilim->aux_en))
++		return dev_err_probe(dev, PTR_ERR(ilim->aux_en), "dp-aux-en\n");
++	ilim->aux_sel = devm_gpiod_get_optional(dev, "dp-aux-sel", GPIOD_OUT_LOW);
++	if (IS_ERR(ilim->aux_sel))
++		return dev_err_probe(dev, PTR_ERR(ilim->aux_sel), "dp-aux-sel\n");
++	ilim->aux_pullup = devm_regulator_get_optional(dev, "dp-aux-pullup");
++	if (IS_ERR(ilim->aux_pullup)) {
++		if (PTR_ERR(ilim->aux_pullup) == -EPROBE_DEFER)
++			return -EPROBE_DEFER;
++		ilim->aux_pullup = NULL;
+ 	}
+ 
+ 	ilim->orient = TYPEC_ORIENTATION_NONE;
+ 	return 0;
++
++put_connector:
++	fwnode_handle_put(connector);
++	return ret;
+ }
+ 
+ static int max77705_usbc_ilim_probe(struct i2c_client *client)
+ {
+ 	struct device *dev = &client->dev;
+ 	struct max77705_usbc_ilim *ilim;
+-	u8 altmode = MAX77705_ALTMODE_SRCCAP;
++	u8 altmode = MAX77705_ALTMODE_SRCCAP | MAX77705_ALTMODE_VDM;
+ 	unsigned int msg;
+ 	int ret;
+ 
+@@ -865,6 +1306,9 @@ static int max77705_usbc_ilim_probe(struct i2c_client *client)
+ 	if (!ret)
+ 		ret = devm_delayed_work_autocancel(dev, &ilim->pd_timeout,
+ 						   max77705_pd_timeout);
++	if (!ret)
++		ret = devm_delayed_work_autocancel(dev, &ilim->dp_enter,
++						   max77705_dp_enter_work);
+ 	if (ret)
+ 		return ret;
+ 
+@@ -877,7 +1321,11 @@ static int max77705_usbc_ilim_probe(struct i2c_client *client)
+ 				   (u8)~(MAX77705_CCISTATI | MAX77705_CCSTATI));
+ 	if (!ret)
+ 		ret = regmap_write(ilim->regmap, MAX77705_USBC_REG_PD_INT_M,
+-				   (u8)~MAX77705_PDMSGI);
++				   (u8)~(MAX77705_PDMSGI | MAX77705_DP_PD_INTS));
++	if (!ret)
++		ret = regmap_write(ilim->regmap, MAX77705_USBC_REG_VDM_INT_M,
++				   (u8)~(MAX77705_VDM_DISCOVER_MODESI |
++					 MAX77705_VDM_ENTER_MODEI));
+ 	if (ret)
+ 		return dev_err_probe(dev, ret, "cannot unmask interrupts\n");
+ 

@@ -512,6 +512,7 @@
  * the pmic_arb domain. No override needed here.
  */
 
+
 /*
  * Touchscreen: Novatek NT36523 TDDI (same IC drives the display panel -
  * see docs/hardware-inventory.md). Wired in Samsung's DT as "novatek,nvt-ts",
@@ -2541,7 +2542,28 @@
 &usb_1_qmpphy {
 	vdda-phy-supply = <&vreg_l9a_1p2>;
 	vdda-pll-supply = <&vreg_l18a_0p92>;
+	/* USB/DP lane mode, set by the USB-C driver for DP alt mode */
+	mode-switch;
 	status = "okay";
+};
+
+/*
+ * DisplayPort over USB-C (docs/phase4-usb-dp-scoping.md): MDSS DP ->
+ * QMP PHY DP half -> PS5169 -> connector. HPD comes from the USB-C driver
+ * (DP alt mode Status/Attention) through a DRM HPD bridge on the
+ * connector node, which the QMP PHY's aux bridge chains to.
+ */
+&mdss_dp {
+	status = "okay";
+};
+
+&mdss_dp_out {
+	data-lanes = <0 1 2 3>;
+	remote-endpoint = <&usb_1_qmpphy_dp_in>;
+};
+
+&usb_1_qmpphy_dp_in {
+	remote-endpoint = <&mdss_dp_out>;
 };
 
 &usb_1_dwc3_hs_out {
@@ -2555,6 +2577,18 @@
 &max77705_usbc {
 	/* PS5169 redriver on the SuperSpeed lanes, programmed by this driver */
 	maxim,usb3-redriver = <&ps5169>;
+
+	/*
+	 * DP AUX over the SBU pins goes through an analog switch (stock r07
+	 * fragment@132: qcom,aux-en-gpio gpio10 active-low, qcom,aux-sel-gpio
+	 * gpio47 = 0 for CC1 / 1 for CC2, aux-pullup-supply pm8150_l2).
+	 * Without it every DPCD read timed out.
+	 */
+	dp-aux-en-gpios = <&tlmm 10 GPIO_ACTIVE_LOW>;
+	dp-aux-sel-gpios = <&tlmm 47 GPIO_ACTIVE_HIGH>;
+	dp-aux-pullup-supply = <&vreg_l2a_3p1>;
+	pinctrl-0 = <&dp_aux_sw>;
+	pinctrl-names = "default";
 
 	connector {
 		compatible = "usb-c-connector";
@@ -2592,6 +2626,13 @@
  */
 &tlmm {
 	gpio-reserved-ranges = <20 4>;
+
+	dp_aux_sw: dp-aux-sw-state {
+		pins = "gpio10", "gpio47";
+		function = "gpio";
+		drive-strength = <8>;
+		bias-disable;
+	};
 
 	/* PS5169 enable (stock combo,redriver_en; ABL already drives it high) */
 	ps5169-en-hog {
