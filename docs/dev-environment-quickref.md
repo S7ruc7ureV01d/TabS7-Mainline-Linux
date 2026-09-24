@@ -72,8 +72,8 @@ alone without asking, and getting this wrong wastes a round-trip):
     `/etc/sudoers.d/10-wheel` (`%wheel ALL=(ALL:ALL) ALL`, password
     required).
   - **Current rootfs tarball:**
-    `work/archroot-build/archroot-rootfs-v12.tar` (2026-09-24, sha256
-    `98881196fd89f94c1aa9e1cf5a5674360207d68e65d939367f69c0d7f9730b0f`).
+    `work/archroot-build/archroot-rootfs-v13.tar` (2026-09-24, sha256
+    `bc38d553047229322ae7b453cf286f4ff5799978de07fa9849be81b607d71467`).
     Lineage, each step a verified stream-rewrite of the previous one with
     Python's `tarfile` (GNU `tar --delete` corrupted this archive):
     - v5 = v4 + `authorized_keys` owned by root + `/etc/sudoers.d/10-wheel`
@@ -145,6 +145,26 @@ alone without asking, and getting this wrong wastes a round-trip):
 
       Verified: 183435 entries = v11 - 4 + 6; capabilities identical;
       the new files match the repo; GNU tar and bsdtar read it cleanly.
+    - v13 = v12 + the port software installed live since v10, taken from
+      the tablet with GNU tar (`--xattrs --numeric-owner`, only the listed
+      entries):
+      - 76 packages with their pacman db entries: the camera stack
+        (libcamera, -ipa, -tools, pipewire-libcamera, gst-plugin-libcamera,
+        gst-plugin-pipewire, gst-plugins-good, kamoso), dosfstools and
+        exfatprogs (microSD), kdialog (recovery launcher), plasma-keyboard,
+        spectacle, and their dependencies;
+      - libssc 0.4.4-1.1 (`tools/rootfs/sensors/libssc/`, the
+        ambient_light_v fallback) replacing 0.4.4-1;
+      - `tools/rootfs/camera/` (focus service, enabled), `recovery/`, and
+        `sensors/autobrightness/` (curve seeding, enabled for all users).
+
+      Not included: the owner's apps (Krita, Prism Launcher, Telegram,
+      Vesktop) and dev/debug tools (base-devel, git, meson, ninja,
+      gobject-introspection, yay, fastfetch, tcpdump, libgpiod), and the
+      static Wi-Fi setting. Verified: 189943 entries = v12 - 54 replaced
+      + 6562 added, no duplicate names; capabilities identical; every file
+      listed in all 741 pacman db entries is present; GNU tar and bsdtar
+      read it cleanly.
 
     File capabilities (`kwin_wayland`, `newuidmap`, ...) are preserved
     byte-for-byte. Python tags two entries with a `hdrcharset=BINARY` pax
