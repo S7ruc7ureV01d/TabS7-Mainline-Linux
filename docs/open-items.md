@@ -115,7 +115,13 @@ Known / harmless, left:
   installed (PipeWire data loops now RR 20; KWin's own "Failed to gain real
   time" needs CAP_SYS_NICE, normal on Arch); wireless-regdb installed, and
   `tools/rootfs/wifi/wlan-pci-rebind-regdb.conf` runs `iw reg reload` once
-  the rootfs is up (cfg80211 asks at ~2.7 s, too early). Left: powerdevil DDC probing `/dev/i2c-*` gets EACCES at login, portal
+  the rootfs is up (cfg80211 asks at ~2.7 s, too early). **pipewire-alsa**
+  was missing: an ALSA-only app (Minecraft 1.12.2's bundled OpenAL) opened
+  the speaker PCM directly, PipeWire's sink failed with EBUSY and KDE showed
+  no audio devices. Installed (with a full `pacman -Syu`, PipeWire 1.6.9);
+  ALSA `default` now goes through PipeWire and streams share the speaker.
+  Also installed vulkan-freedreno + vulkan-tools: Turnip on the Adreno 650,
+  Vulkan 1.3, vkcube runs on Wayland. Left: powerdevil DDC probing `/dev/i2c-*` gets EACCES at login, portal
   "App info not found" for KDE background services.
 
 ### Charging: what's not covered
