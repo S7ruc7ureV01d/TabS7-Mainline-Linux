@@ -681,3 +681,7 @@ CONFIG_DMABUF_HEAPS_CMA=y
 CONFIG_UDMABUF=y
 # Rear main AF actuator: Giantec GT9769, handled by dw9768.c.
 CONFIG_VIDEO_DW9768=y
+
+# microSD (docs/phase4-microsd-scoping.md): SDHCI_MSM is already =y;
+# exFAT for SDXC cards and exFAT-formatted cards (TWRP offers it).
+CONFIG_EXFAT_FS=y
