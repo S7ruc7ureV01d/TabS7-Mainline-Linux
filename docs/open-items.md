@@ -69,6 +69,19 @@ exactly, checked 2026-09-24), `kernel/dts/sm8250-samsung-gts7l.dts` and
   Settings -> Display & Monitor -> Refresh rate**. A switch is a full
   modeset (short blank), not seamless.
 
+### Boot stall after the uniLoader screen (fixed 2026-09-24, patch 0048)
+
+- Symptom: after the uniLoader message the screen went blank (backlight
+  on) for ~20 s, then the backlight blinked and the kernel log appeared.
+- Cause: the touchscreen driver reflashed the touch firmware on every
+  probe (~20 s, synchronous), and nothing else probed meanwhile - the
+  display driver only got to run at ~21 s. Now it compares the chip's
+  firmware version and flash checksums with the file first, like
+  downstream, and flashes only on a mismatch. Kernel boot: ~23 s -> 2.9 s.
+- The remaining short blank + backlight blink (~1-2 s) is normal here: no
+  simple-framebuffer handover from the bootloader, and the display driver
+  resets and re-initialises the panel.
+
 ### Charging: what's not covered
 
 - **PPS / up to 45 W:** stock uses a separate **PCA9468** direct charger

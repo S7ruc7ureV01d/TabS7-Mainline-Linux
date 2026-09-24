@@ -1,0 +1,106 @@
+From: gts7l project
+Subject: [PATCH] Input: nt36523-gts7l: only flash the firmware when it differs
+
+The driver reflashed the touch firmware on every probe, ~20 s of
+synchronous probe that held up the rest of the boot: the screen sat
+blank (backlight on) after the uniLoader message until the display
+driver could probe at ~21 s.
+
+Do what downstream nvt_ts_firmware_update_on_probe() does: read the
+chip's firmware version (event map 0x78, version + inverted version),
+compare it with the file's (4 KiB before its end), then compare the
+per-block flash checksums; flash only on a mismatch. On a match the
+chip is restarted with a bootloader reset.
+
+Tested on gts7l: chip 0x18/0xe7 = file, checksums match, touch
+registered at 1.6 s, kernel boot 2.9 s (was ~23 s).
+
+diff --git a/drivers/input/touchscreen/nt36523-gts7l.c b/drivers/input/touchscreen/nt36523-gts7l.c
+index c006e8c06..dcd4e7045 100644
+--- a/drivers/input/touchscreen/nt36523-gts7l.c
++++ b/drivers/input/touchscreen/nt36523-gts7l.c
+@@ -591,8 +591,9 @@ static int nt36523_verify_flash(struct i2c_client *client, const u8 *data,
+ 
+ 		rd_csum = (buf[2] << 8) | buf[1];
+ 		if (wr_csum != rd_csum) {
+-			dev_err(&client->dev,
+-				"firmware verify failed on block %u\n", i);
++			dev_dbg(&client->dev,
++				"block %u checksum 0x%04x, file 0x%04x\n",
++				i, rd_csum, wr_csum);
+ 			return -EIO;
+ 		}
+ 	}
+@@ -623,6 +624,45 @@ static int nt36523_fw_need_write_size(const struct firmware *fw,
+ 	return -EINVAL;
+ }
+ 
++/*
++ * Downstream nvt_ts_firmware_update_on_probe() only flashes when the chip's
++ * firmware differs from the file: version + inverted version valid and
++ * equal to the file's (nvt_ts_check_fw_ver(), the file's copy sits 4 KiB
++ * before its end), then the per-block flash checksums
++ * (nvt_ts_check_checksum()). Flashing every boot took ~20 s of probe,
++ * which held up the whole boot (display included) at the uniLoader screen.
++ */
++#define NT36523_EVENT_MAP_FWINFO	0x78
++
++static bool nt36523_fw_matches(struct i2c_client *client,
++			       const struct firmware *fw, size_t write_size)
++{
++	u8 bin_ver = fw->data[write_size - NT36523_FLASH_SECTOR_SIZE];
++	u8 bin_bar = fw->data[write_size - NT36523_FLASH_SECTOR_SIZE + 1];
++	u8 buf[3];
++	int ret;
++
++	nt36523_sw_reset_idle(client);
++
++	ret = nt36523_set_page(client, NT36523_I2C_FW_ADDR,
++				NT36523_EVENT_BUF_ADDR);
++	if (ret)
++		return false;
++	buf[0] = NT36523_EVENT_MAP_FWINFO;
++	ret = nt36523_i2c_read(client, NT36523_I2C_FW_ADDR, buf, sizeof(buf));
++	if (ret)
++		return false;
++
++	dev_info(&client->dev, "firmware: chip 0x%02x/0x%02x, file 0x%02x/0x%02x\n",
++		 buf[1], buf[2], bin_ver, bin_bar);
++	if (buf[1] + buf[2] != 0xff || buf[1] != bin_ver)
++		return false;
++
++	if (nt36523_resume_pd(client))
++		return false;
++	return !nt36523_verify_flash(client, fw->data, write_size);
++}
++
+ static int nt36523_flash_firmware(struct i2c_client *client,
+ 				   const struct firmware *fw)
+ {
+@@ -637,6 +677,14 @@ static int nt36523_flash_firmware(struct i2c_client *client,
+ 
+ 	nt36523_stop_crc_reboot(client);
+ 
++	if (nt36523_fw_matches(client, fw, write_size)) {
++		dev_info(&client->dev, "firmware up to date, not flashing\n");
++		nt36523_bootloader_reset(client);
++		return nt36523_check_fw_reset_state(client,
++						    NT36523_RESET_STATE_INIT);
++	}
++	dev_info(&client->dev, "flashing firmware\n");
++
+ 	ret = nt36523_init_bootloader(client);
+ 	if (ret)
+ 		return ret;
+@@ -654,8 +702,10 @@ static int nt36523_flash_firmware(struct i2c_client *client,
+ 		return ret;
+ 
+ 	ret = nt36523_verify_flash(client, fw->data, write_size);
+-	if (ret)
++	if (ret) {
++		dev_err(&client->dev, "firmware verify failed: %d\n", ret);
+ 		return ret;
++	}
+ 
+ 	nt36523_bootloader_reset(client);
+ 
