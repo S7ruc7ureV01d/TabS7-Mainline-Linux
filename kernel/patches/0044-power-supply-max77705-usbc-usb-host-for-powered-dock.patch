@@ -1,0 +1,165 @@
+From: gts7l project
+Subject: [PATCH] power: supply: max77705_usbc_ilim: USB host when a powered
+ dock makes us DFP
+
+A powered dock/hub (seen: a Switch-style dock, VID 0x057e, pins C/D)
+powers the tablet but makes it the USB host (PD_STATUS1 bit 7, stock
+BIT_PD_DataRole = DFP), as Switch docks do. We treated every sink with
+VBUS as a PC and went to device mode: the dock's hub and SSD vanished.
+
+Now a sink that is DFP gets host mode and the D+/D- switch to the SoC
+(COM_USB), while the input current / PD logic still runs; the DATAROLE
+interrupt (PD_INT bit 5) is unmasked and needs no debounce. With it the
+dock's SSD enumerates at SuperSpeed and the tablet charges.
+
+DP alt mode in this role is not attempted: stock sends Discover Identity
+from its data role handler, but this firmware answers VDM_SET_REQ with
+0xff as a sink and its opcode mailbox then stays stuck (the 9 V request
+was lost too).
+
+diff --git a/drivers/power/supply/max77705_usbc_ilim.c b/drivers/power/supply/max77705_usbc_ilim.c
+index e56672592..edd5cea01 100644
+--- a/drivers/power/supply/max77705_usbc_ilim.c
++++ b/drivers/power/supply/max77705_usbc_ilim.c
+@@ -64,6 +64,8 @@
+ #define MAX77705_USBC_REG_BC_STATUS	0x08
+ #define MAX77705_USBC_REG_CC_STATUS0	0x0a
+ #define MAX77705_USBC_REG_PD_STATUS0	0x0c
++#define MAX77705_USBC_REG_PD_STATUS1	0x0d
++#define MAX77705_PD_DATAROLE_DFP	BIT(7)	/* stock BIT_PD_DataRole */
+ #define MAX77705_USBC_REG_UIC_INT_M	0x0e
+ #define MAX77705_USBC_REG_CC_INT_M	0x0f
+ #define MAX77705_USBC_REG_PD_INT_M	0x10
+@@ -86,6 +88,7 @@
+ #define MAX77705_CCSTATI		BIT(0)
+ /* PD_INT(_M) */
+ #define MAX77705_PDMSGI			BIT(7)
++#define MAX77705_DATAROLEI		BIT(5)
+ #define MAX77705_DP_ATTENTIONI		BIT(4)
+ #define MAX77705_DP_CONFIGUREI		BIT(3)
+ #define MAX77705_DP_STATUSI		BIT(2)
+@@ -298,6 +301,7 @@ struct max77705_usbc_ilim {
+ 	bool dp_hpd_high;
+ 	bool dp_entered;	/* Enter Mode ACKed */
+ 	bool dp_session;	/* DP was up since the last attach */
++	bool dfp_sink;		/* powered by the partner, but USB host (dock) */
+ 	int dp_enter_tries;
+ 	struct power_supply *charger;
+ 	struct iio_channel *batt_therm;
+@@ -529,9 +533,17 @@ static const unsigned int max77705_extcon_cables[] = {
+ };
+ 
+ /* The charger's OTG boost: 5 V out on VBUS (stock: CHG_CNFG_00 mode 0xf) */
++/* D+/D- to the SoC (hosting) or back to BC1.2 control */
++static void max77705_usb_switch(struct max77705_usbc_ilim *ilim, bool on)
++{
++	u8 ctrl1 = on ? MAX77705_CTRL1_COM_USB : MAX77705_CTRL1_DEFAULT;
++
++	if (max77705_opcode(ilim, MAX77705_OP_CONTROL1_W, &ctrl1, 1))
++		dev_warn(ilim->dev, "cannot set the USB data switch\n");
++}
++
+ static void max77705_set_source(struct max77705_usbc_ilim *ilim, bool on)
+ {
+-	u8 ctrl1;
+ 	int ret;
+ 
+ 	if (on == ilim->source)
+@@ -563,10 +575,7 @@ static void max77705_set_source(struct max77705_usbc_ilim *ilim, bool on)
+ 		 on ? "on" : "off");
+ 
+ 	/* Data lines to the SoC while hosting; back to BC1.2 control after */
+-	ctrl1 = on ? MAX77705_CTRL1_COM_USB : MAX77705_CTRL1_DEFAULT;
+-	ret = max77705_opcode(ilim, MAX77705_OP_CONTROL1_W, &ctrl1, 1);
+-	if (ret)
+-		dev_warn(ilim->dev, "cannot set the USB data switch: %d\n", ret);
++	max77705_usb_switch(ilim, on);
+ }
+ 
+ /*
+@@ -979,10 +988,39 @@ static void max77705_dp_events(struct max77705_usbc_ilim *ilim)
+  * extcon.
+  */
+ static bool max77705_roles(struct max77705_usbc_ilim *ilim, unsigned int cc0,
+-			   unsigned int bc)
++			   unsigned int bc, unsigned int pd1)
+ {
+ 	unsigned int ccstat = FIELD_GET(MAX77705_CC_CCSTAT, cc0);
+ 	bool vbus = bc & MAX77705_BC_VBUSDET;
++	bool dfp_sink = ccstat == MAX77705_CCSTAT_SINK && vbus &&
++			(pd1 & MAX77705_PD_DATAROLE_DFP);
++
++	/*
++	 * A powered dock or hub: it powers us but made us the USB host (PD
++	 * data role DFP, e.g. after its DR_Swap, as Switch-style docks do).
++	 * Host mode then, while the input current logic below still runs.
++	 * DP alt mode in this role is not done: stock sends Discover Identity
++	 * here (max77705_datarole_irq_handler()), but this firmware refuses
++	 * VDM_SET_REQ as a sink (reply 0xff) and its mailbox then stays stuck,
++	 * which also lost the 9 V request (docs/phase4-usb-dp-scoping.md).
++	 */
++	if (dfp_sink) {
++		max77705_set_source(ilim, false);
++		max77705_set_orientation(ilim, max77705_cc_orientation(cc0));
++		if (!ilim->dfp_sink) {
++			ilim->dfp_sink = true;
++			dev_info(ilim->dev, "powered by a dock that made us USB host: host mode\n");
++			max77705_usb_switch(ilim, true);
++		}
++		extcon_set_state_sync(ilim->extcon, EXTCON_USB, false);
++		extcon_set_state_sync(ilim->extcon, EXTCON_USB_HOST, true);
++		max77705_dp_events(ilim);
++		return false;
++	}
++	if (ilim->dfp_sink) {
++		ilim->dfp_sink = false;
++		max77705_usb_switch(ilim, false);
++	}
+ 
+ 	if (ccstat == MAX77705_CCSTAT_SOURCE) {
+ 		/* Never drive VBUS against a source that is already there */
+@@ -1022,13 +1060,14 @@ static bool max77705_roles(struct max77705_usbc_ilim *ilim, unsigned int cc0,
+ 
+ static void max77705_update(struct max77705_usbc_ilim *ilim)
+ {
+-	unsigned int bc, cc0, st1, chgtyp, ccistat;
++	unsigned int bc, cc0, st1, pd1, chgtyp, ccistat;
+ 	int ilim_ma, chg_ma;
+ 	bool vbus_9v;
+ 
+ 	if (regmap_read(ilim->regmap, MAX77705_USBC_REG_BC_STATUS, &bc) ||
+ 	    regmap_read(ilim->regmap, MAX77705_USBC_REG_CC_STATUS0, &cc0) ||
+-	    regmap_read(ilim->regmap, MAX77705_USBC_REG_STATUS1, &st1)) {
++	    regmap_read(ilim->regmap, MAX77705_USBC_REG_STATUS1, &st1) ||
++	    regmap_read(ilim->regmap, MAX77705_USBC_REG_PD_STATUS1, &pd1)) {
+ 		dev_warn(ilim->dev, "cannot read USB-C status\n");
+ 		return;
+ 	}
+@@ -1040,7 +1079,7 @@ static void max77705_update(struct max77705_usbc_ilim *ilim)
+ 	 * Sourcing a USB device: VBUS is our own boost, not a charger, so the
+ 	 * input current logic below has nothing to do.
+ 	 */
+-	if (max77705_roles(ilim, cc0, bc)) {
++	if (max77705_roles(ilim, cc0, bc, pd1)) {
+ 		ilim->attached = false;
+ 		ilim->pd = MAX77705_PD_IDLE;
+ 		ilim->psrdy = false;
+@@ -1165,7 +1204,7 @@ static irqreturn_t max77705_usbc_ilim_irq(int irq, void *data)
+ 	/* Command replies and DP alt mode events need no debounce */
+ 	mod_delayed_work(system_wq, &ilim->work,
+ 			 ((uic & MAX77705_APCMDRESI) || vdm ||
+-			  (pd & MAX77705_DP_PD_INTS)) ? 0 :
++			  (pd & (MAX77705_DP_PD_INTS | MAX77705_DATAROLEI))) ? 0 :
+ 			 msecs_to_jiffies(MAX77705_DEBOUNCE_MS));
+ 
+ 	return IRQ_HANDLED;
+@@ -1380,7 +1419,8 @@ static int max77705_usbc_ilim_probe(struct i2c_client *client)
+ 				   (u8)~(MAX77705_CCISTATI | MAX77705_CCSTATI));
+ 	if (!ret)
+ 		ret = regmap_write(ilim->regmap, MAX77705_USBC_REG_PD_INT_M,
+-				   (u8)~(MAX77705_PDMSGI | MAX77705_DP_PD_INTS));
++				   (u8)~(MAX77705_PDMSGI | MAX77705_DATAROLEI |
++					 MAX77705_DP_PD_INTS));
+ 	if (!ret)
+ 		ret = regmap_write(ilim->regmap, MAX77705_USBC_REG_VDM_INT_M,
+ 				   (u8)~(MAX77705_VDM_DISCOVER_MODESI |

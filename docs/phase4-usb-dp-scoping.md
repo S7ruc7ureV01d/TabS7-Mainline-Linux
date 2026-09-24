@@ -6,7 +6,8 @@ device mode (ssh over the cable) comes back after unplugging.
 Patches 0037 (USB-C driver) and 0038 (msm DP mode filter), plus DT;
 0039 (QMP PHY) and 0040 (USB-C driver follow-ups) fix USB after DP;
 0041 (QMP PHY) and 0042 (aux-hpd bridge) fix booting with a monitor
-attached; 0043 (QMP PHY + dwc3 glue) keeps USB 2 working in DP-only mode.
+attached; 0043 (QMP PHY + dwc3 glue) keeps USB 2 working in DP-only mode;
+0044 (USB-C driver) gives USB host mode behind a powered dock.
 
 ## The path
 
@@ -166,6 +167,36 @@ it. Stock sends Enter straight from the Discover Modes handler (queued
 behind its other opcodes); sent at once here it collided with the
 firmware's Samsung-SVID discovery. Speeding it up needs experiments
 (e.g. queueing Enter like stock, or SET_ALTERNATEMODE variants); parked.
+
+## A powered dock (0044, DP not working)
+
+Tested 2026-09-24 with a Switch-style USB-C hub/dock (HDMI, USB 3, PD in):
+Discover Identity VID **0x057e** (Nintendo), SVIDs: DP only, DP mode VDO
+`0x00000c05` (UFP_D, plug, DFP_D pins **C and D**).
+
+- **Tablet powering the dock:** discovery works, but the dock never
+  answers Enter Mode (3 tries; the firmware refused the third with
+  `0xff`). The SSD only ran through the dock's USB 2 hub.
+- **Dock on its charger (tablet is the sink):** 9 V PD contract, and the
+  dock makes the tablet DFP (PD_STATUS1 bit 7, stock `BIT_PD_DataRole`),
+  as Switch docks do. The driver used to take every sink with VBUS for a
+  PC (device mode). 0044: sink + DFP = host mode (+ COM_USB, the
+  DATAROLE interrupt, PD_INT bit 5). The SSD then enumerates at
+  SuperSpeed and the tablet charges.
+- **DP as a DFP sink is not possible from our side yet:** stock sends
+  Discover Identity from its data-role handler, but this firmware answers
+  our VDM_SET_REQ with `0xff` in that role, and the opcode mailbox then
+  stays stuck until the next attach (that also lost the 9 V request once).
+  0044 therefore sends no VDMs in that role.
+
+## To grab during the stock boot
+
+- **DP audio:** play audio to a monitor under DeX; kernel log with audio
+  debug, `tinymix` "Display Port" controls, AFE commands.
+- **This dock (VID 0x057e):** does DeX get a picture through it, with and
+  without its charger? If yes, capture the CCIC sequence (stock's
+  `max77705` msg_maxim log: SET_ALTERNATEMODE value, data/power roles,
+  who sends Discover Identity/Enter, and when).
 
 ## Don't
 
