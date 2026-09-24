@@ -6,9 +6,10 @@ first concrete step. Finished work is in `plans/roadmap.md` and the scoping
 docs it links.
 
 **Build state:** the kernel is fully reproducible from the repo. v7.2 plus
-`kernel/patches/0002-0036` (all apply cleanly and reproduce the working tree
-exactly, checked 2026-09-23), `kernel/dts/sm8250-samsung-gts7l.dts` and
-`kernel/config/gts7l.fragment`. The current rootfs tarball is v10
+`kernel/patches/0002-0044` (all apply cleanly and reproduce the working tree
+exactly, checked 2026-09-24), `kernel/dts/sm8250-samsung-gts7l.dts` and
+`kernel/config/gts7l.fragment`. Work in progress outside the series:
+`kernel/patches-wip/`. The current rootfs tarball is v12
 (`docs/dev-environment-quickref.md`).
 
 ## Not started (roadmap exit criteria)
