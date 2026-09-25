@@ -1,0 +1,34 @@
+#!/bin/sh
+# Rear flashlight (PM8150L flash LED, `white:flash`): on, off or toggle.
+# Uses logind's Session.SetBrightness, which lets the active desktop
+# session set LED brightness without root or a udev rule; from a shell
+# outside the session (ssh), run it as root and it writes sysfs directly.
+set -eu
+LED=white:flash
+SYS=/sys/class/leds/$LED
+[ -d "$SYS" ] || { echo "no $LED LED" >&2; exit 1; }
+max=$(cat "$SYS/max_brightness")
+cur=$(cat "$SYS/brightness")
+case ${1:-toggle} in
+on) new=$max ;;
+low) new=$((max / 4)) ;;
+off) new=0 ;;
+toggle) if [ "$cur" -gt 0 ]; then new=0; else new=$max; fi ;;
+*) echo "usage: $0 [toggle|on|low|off]" >&2; exit 2 ;;
+esac
+if [ "$(id -u)" -eq 0 ]; then
+	echo "$new" > "$SYS/brightness"
+else
+	# the desktop session (inherited XDG_SESSION_ID), else the caller's own;
+	# object paths escape a leading digit as _3N (session "1" -> _31)
+	obj=auto
+	if [ -n "${XDG_SESSION_ID:-}" ]; then
+		id=$XDG_SESSION_ID
+		case $id in
+		[0-9]*) obj=_3${id%"${id#?}"}${id#?} ;;
+		*) obj=$id ;;
+		esac
+	fi
+	busctl call org.freedesktop.login1 /org/freedesktop/login1/session/$obj \
+		org.freedesktop.login1.Session SetBrightness ssu leds "$LED" "$new"
+fi

@@ -153,6 +153,10 @@ From the Tab S9 Ultra port's feature list, taken from the stock overlay
 - **Flashlight / camera flash**: PM8150L flash LED (0xd300), channels 1+2
   ganged as `white:flash` (torch up to 600 mA total, flash 2 A / 1.28 s,
   stock per-channel defaults). Torch confirmed at level 1 and 255.
+  **Flashlight launcher** (`tools/rootfs/flashlight/`, installed on the
+  tablet): app menu entry "Flashlight" toggles it, right-click actions for
+  dim/off; `gts7l-flashlight [toggle|on|low|off]` sets it through logind's
+  Session.SetBrightness (no root, no udev rule).
 - **Vibration motor**: stock `msm_vibrator` (COINDC) on PM8150L LDO7 at
   3.0 V, as `regulator-haptic` (FF_RUMBLE input device). Pulses confirmed by
   the owner.

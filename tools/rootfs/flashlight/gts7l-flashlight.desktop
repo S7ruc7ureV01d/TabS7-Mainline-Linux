@@ -1,0 +1,20 @@
+[Desktop Entry]
+Type=Application
+Name=Flashlight
+GenericName=Torch
+Comment=Turn the rear flashlight on or off
+Icon=gts7l-flashlight
+Exec=gts7l-flashlight toggle
+Categories=Utility;
+Keywords=flashlight;torch;flash;light;lamp;
+Actions=low;off;
+
+[Desktop Action low]
+Name=Flashlight (dim)
+Icon=gts7l-flashlight
+Exec=gts7l-flashlight low
+
+[Desktop Action off]
+Name=Flashlight off
+Icon=gts7l-flashlight
+Exec=gts7l-flashlight off

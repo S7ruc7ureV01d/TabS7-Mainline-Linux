@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- beam -->
+  <path d="M18 16 L8 2 L56 2 L46 16 Z" fill="#ffe082" opacity="0.85"/>
+  <!-- head -->
+  <path d="M16 16 H48 L42 28 H22 Z" fill="#546e7a"/>
+  <rect x="16" y="14" width="32" height="4" rx="1" fill="#fff59d"/>
+  <!-- body -->
+  <rect x="22" y="28" width="20" height="32" rx="3" fill="#37474f"/>
+  <!-- switch -->
+  <rect x="29" y="34" width="6" height="10" rx="2" fill="#ef5350"/>
+</svg>
