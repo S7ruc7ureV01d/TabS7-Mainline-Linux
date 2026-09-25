@@ -1,0 +1,38 @@
+# gts7l: KDE's first-boot setup wizard (Plasma 6.5+), not packaged by Arch.
+# Built from KDE's release tarball matching the installed Plasma; used by the
+# installer ZIP to ask for language, keyboard, time zone and the first user.
+# Dependencies after the AUR plasma-setup-git PKGBUILD plus a display manager
+# (it writes its temporary autologin for plasmalogin or sddm).
+pkgname=plasma-setup
+pkgver=6.7.5
+pkgrel=1
+pkgdesc="Initial system setup (first-boot wizard) for KDE Plasma"
+arch=('aarch64' 'x86_64')
+url="https://invent.kde.org/plasma/plasma-setup"
+license=('LGPL-2.1-or-later' 'GPL-2.0-or-later' 'BSD-2-Clause')
+depends=(
+  'gcc-libs' 'glibc' 'qt6-base' 'qt6-declarative' 'qt6-svg'
+  'kauth' 'kcoreaddons' 'ki18n' 'kpackage' 'kconfig' 'kirigami'
+  'libkscreen' 'plasma-workspace' 'plasma-desktop' 'kitemmodels'
+  'plasma-login-manager' 'polkit' 'networkmanager-qt'
+)
+makedepends=('cmake' 'extra-cmake-modules' 'gettext')
+source=("https://download.kde.org/stable/plasma/$pkgver/$pkgname-$pkgver.tar.xz")
+sha256sums=('64bc032ef9e8a6549fc2dd8b5fa64118e25da652e3de8adb1c974efbd33258dd')
+
+build() {
+  cmake -B build -S "$pkgname-$pkgver" \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DCMAKE_INSTALL_LIBEXECDIR=lib \
+    -DBUILD_TESTING=OFF
+  cmake --build build
+}
+
+package() {
+  DESTDIR="$pkgdir" cmake --install build
+  # build-internal static QML plugin, not needed at runtime
+  rm -f "$pkgdir"/usr/lib/libcomponentspluginplugin.a
+  install -Dm644 "$pkgname-$pkgver/LICENSES/BSD-2-Clause.txt" \
+    "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}
