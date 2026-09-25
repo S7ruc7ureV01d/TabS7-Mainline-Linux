@@ -145,6 +145,25 @@ Known / harmless, left:
   1.85x) - raise the DPI in winecfg -> Graphics if wanted.
 - Not tested yet: a real game, Steam, the Wayland driver.
 
+### Flashlight, vibration motor, cover sensors (done 2026-09-24)
+
+From the Tab S9 Ultra port's feature list, taken from the stock overlay
+(r07) and verified on hardware:
+
+- **Flashlight / camera flash**: PM8150L flash LED (0xd300), channels 1+2
+  ganged as `white:flash` (torch up to 600 mA total, flash 2 A / 1.28 s,
+  stock per-channel defaults). Torch confirmed at level 1 and 255.
+- **Vibration motor**: stock `msm_vibrator` (COINDC) on PM8150L LDO7 at
+  3.0 V, as `regulator-haptic` (FF_RUMBLE input device). Pulses confirmed by
+  the owner.
+- **Cover sensors**: `hall` (tlmm 157) as **SW_LID** (wakeup source) and
+  `hall_wacom` (tlmm 110) as SW_MACHINE_COVER, both active-low (measured
+  with a magnet; stock's flag 0 on the Wacom one is not a GPIO polarity).
+  A magnet on the flip-cover sensor suspends via KDE's lid action and
+  removing it resumes (tested). "Turn off screen" instead of sleep is a
+  KDE Power Management setting.
+- Not done: S Pen features (no original pen), keyboard cover (no cover).
+
 ### Charging: what's not covered
 
 - **PPS / up to 45 W:** stock uses a separate **PCA9468** direct charger
@@ -172,7 +191,6 @@ Known / harmless, left:
 | Once per boot: LPASS LPI pinctrl vote timeout (`AFE failed to vote (3)`, `-110`). The first AFE command after the ADSP comes up gets no reply; harmless because the VA macro holds the same votes. | `docs/phase3-audio-scoping.md` |
 | 24-bit audio front end: S24 playback is silent and S24 capture is garbage. PipeWire is pinned to S16 for both (as stock). | same |
 | Speaker left/right stays fixed to the landscape ends when rotated to portrait. It would need a small service to swap WirePlumber positions on rotation. | same |
-| SLPI "Handover signaled, but it already happened" log spam, tracking the accelerometer stream. Cosmetic. | `docs/dev-environment-quickref.md` |
 | `CONFIG_BOOTPARAM_SOFTLOCKUP_PANIC` is 0, so there is no panic on soft lockups. It was always 0: the old `=y` is invalid since it became an int. Set 1 if crash capture on soft lockups is wanted again. | `kernel/config/gts7l.fragment` |
 | DSI PHY probe logs 4 clock WARNs (`dsi0_phy_pll_out_dsiclk already unprepared/disabled`, from PLL reparenting in `dsi_phy_driver_probe`), on every boot since at least #120. The display works. | `docs/phase4-usb3-scoping.md` (noticed in a pstore log) |
 | `CONFIG_CMDLINE` still has `loglevel=15 clk_ignore_unused` from bring-up. `clk_ignore_unused` is still needed (display); `loglevel=15` could drop. The owner said to skip this for now. | `kernel/config/gts7l.fragment` |
