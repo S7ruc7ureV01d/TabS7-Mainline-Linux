@@ -9,7 +9,7 @@ docs it links.
 `kernel/patches/0002-0044` (all apply cleanly and reproduce the working tree
 exactly, checked 2026-09-24), `kernel/dts/sm8250-samsung-gts7l.dts` and
 `kernel/config/gts7l.fragment`. Work in progress outside the series:
-`kernel/patches-wip/`. The current rootfs tarball is v12
+`kernel/patches-wip/`. The current rootfs tarball is v14
 (`docs/dev-environment-quickref.md`).
 
 ## Not started (roadmap exit criteria)

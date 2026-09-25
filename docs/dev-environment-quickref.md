@@ -72,8 +72,8 @@ alone without asking, and getting this wrong wastes a round-trip):
     `/etc/sudoers.d/10-wheel` (`%wheel ALL=(ALL:ALL) ALL`, password
     required).
   - **Current rootfs tarball:**
-    `work/archroot-build/archroot-rootfs-v13.tar` (2026-09-24, sha256
-    `bc38d553047229322ae7b453cf286f4ff5799978de07fa9849be81b607d71467`).
+    `work/archroot-build/archroot-rootfs-v14.tar` (2026-09-24, sha256
+    `58225a9cbf14937c2148e4bab63c2b70cba95a9897d56a5668176fc48cf8e642`).
     Lineage, each step a verified stream-rewrite of the previous one with
     Python's `tarfile` (GNU `tar --delete` corrupted this archive):
     - v5 = v4 + `authorized_keys` owned by root + `/etc/sudoers.d/10-wheel`
@@ -165,6 +165,29 @@ alone without asking, and getting this wrong wastes a round-trip):
       + 6562 added, no duplicate names; capabilities identical; every file
       listed in all 741 pacman db entries is present; GNU tar and bsdtar
       read it cleanly.
+
+    - v14 = v13 + the live changes since v13 (same method: a GNU tar of
+      the exact entries from the tablet, merged with Python's `tarfile`):
+      - 35 packages upgraded by the 2026-09-24 `pacman -Syu` (PipeWire /
+        WirePlumber 1.6.9, GStreamer, ffmpeg, Firefox, util-linux, ...):
+        old files and db entries replaced, 36 files that left those
+        packages dropped;
+      - 8 packages added: rtkit (PipeWire realtime), wireless-regdb + iw
+        (`tools/rootfs/wifi/` regdb reload drop-in), pipewire-alsa (ALSA
+        apps go through PipeWire instead of grabbing the speaker),
+        vulkan-freedreno, vulkan-mesa-implicit-layers, vulkan-tools,
+        mesa-utils; the `rtkit` user/group in the four account files;
+      - systemd-networkd disabled (its 8 enable links removed): nothing
+        used it and its wait-online failed after 2 min every boot;
+      - `tools/rootfs/flashlight/` (Flashlight launcher) and
+        `gts7l-wine-dxvk`.
+
+      Not included: Wine itself (`/opt/hangover`, 2.4 GB - run
+      `tools/rootfs/wine/install-hangover.sh`), the owner's apps and dev
+      tools (as in v13) and the static Wi-Fi setting. Verified: 190059
+      entries = v13 - 188 dropped - 8086 replaced + 8390 added, no
+      duplicate names; capabilities identical; every file listed in all
+      749 pacman db entries is present; GNU tar and bsdtar read it cleanly.
 
     File capabilities (`kwin_wayland`, `newuidmap`, ...) are preserved
     byte-for-byte. Python tags two entries with a `hdrcharset=BINARY` pax
