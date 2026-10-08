@@ -6,7 +6,7 @@ first concrete step. Finished work is in `plans/roadmap.md` and the scoping
 docs it links.
 
 **Build state:** the kernel is fully reproducible from the repo. v7.2 plus
-`kernel/patches/0002-0044` (all apply cleanly and reproduce the working tree
+`kernel/patches/0002-0049` (all apply cleanly and reproduce the working tree
 exactly, checked 2026-09-24), `kernel/dts/sm8250-samsung-gts7l.dts` and
 `kernel/config/gts7l.fragment`. Work in progress outside the series:
 `kernel/patches-wip/`. The current rootfs tarball is v14
@@ -17,6 +17,7 @@ exactly, checked 2026-09-24), `kernel/dts/sm8250-samsung-gts7l.dts` and
 | Item | What is known | First step |
 |---|---|---|
 | **Suspend/resume** | In progress (`docs/phase3-suspend-scoping.md`). s2idle suspends and resumes; the SLPI crash (0026) and four drivers holding CXO in sleep (0027-0030) are fixed, and the application CPUs' RPMh sleep votes are now clean. The SoC still never reaches AOSS sleep/CX collapse (`qcom_stats` 0), so the blocker is outside Linux's own votes. | Check the display RSC and the unbooted subsystems; compare with stock Android's sleep stats. |
+| **Offline charging** | Plugging the charger into a powered-off tablet boots Linux (ABL boots `boot` on a charger power-on; stock boots into its own low-power charging mode, LPM, from the same image). Reported by the owner 2026-10-08. | Detect the charger power-on reason (PON / `androidboot.mode=charger`-equivalent) in the initramfs and run a minimal charging screen instead of switching to the full system. |
 | **LTE modem** | Scoped 2026-09-24 (`docs/phase4-lte-modem-scoping.md`): external flashless **SDX55** on PCIe2/MHI, reset via its PMX55 PMIC (SPMI SID 8); all firmware in the `modem` partition, EFS in `mdm1m9kefs*` (backed up, not in git). No mainline support; the Xiaomi Mi 10T pmOS port (same SoC/modem, kernel 7.1) has it working with a Sahara client, esoc import and custom userspace. | Stage 1: PMX55 reset + AP2MDM GPIOs + PCIe2, see 17cb:0306 enumerate and SBL load. |
 | **Cameras** | In progress (`docs/phase4-camera-scoping.md`). Rear main (Samsung S5K3M5) works in apps: CAMSS + libcamera simple pipeline/software ISP + PipeWire, 30 fps, AE/AWB, fixed focus (`gts7l-cam-focus`, `FOCUS=330`). **Proper autofocus deferred** (owner, 2026-09-23): libcamera's simple pipeline has no AF/lens control; the GT9769 actuator works (dw9768.c). Rear ultra-wide (S5K5E9) and front (S5K4HA) need new drivers. | New sensor drivers: pull the stock sensor modules (`/vendor/lib64/camera/com.qti.sensormodule.*.bin`) during the stock boot. AF: contrast AF in libcamera, then restore the `lens-focus` link. |
 | **Fingerprint** | **Not feasible, parked** (2026-09-24, `docs/phase4-fingerprint-scoping.md`): Goodix GW36T1 on SPI owned by the secure world; Samsung's production kernel only handles power/reset/IRQ, image capture and matching run in a trusted app. No libfprint driver. | None. |
