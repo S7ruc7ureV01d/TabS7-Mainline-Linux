@@ -162,8 +162,10 @@ controller firmware (`kernel/firmware/tsp_novatek/`), which Samsung
 publishes in its GPL kernel source for this model and which is built into
 the kernel image.
 
-The kernel patches and device tree are under the GPL-2.0, like the Linux
-kernel. Other components keep the licenses stated in their directories.
+This project is licensed under the [GPL-2.0](LICENSE), like the Linux
+kernel it patches. Third-party components keep the licenses stated in their
+directories (uniLoader, the TWRP device tree, and upstream sources the
+packaging files build).
 
 ## Credits
 
@@ -177,3 +179,8 @@ kernel. Other components keep the licenses stated in their directories.
   [ianmacd/twrp_gts7l](https://github.com/ianmacd/twrp_gts7l)
 - postmarketOS, libssc, hexagonrpcd, KDE, Arch Linux ARM, Hangover, and the
   authors of the bundled on-screen keyboards
+
+## Disclaimer
+
+This project was built with the help of AI (Claude Code). The released build
+was tested on real hardware. Use at your own risk.
