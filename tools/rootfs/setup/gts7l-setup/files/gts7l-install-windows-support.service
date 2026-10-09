@@ -1,0 +1,18 @@
+# Installs Wine for Windows programs (Hangover: Wine + FEX/Box64) once the
+# tablet is online, if "Windows app support" was chosen during first-boot
+# setup. Runs until it succeeds once, then disables itself.
+[Unit]
+Description=Install Windows program support (Wine/Hangover)
+Wants=network-online.target
+After=network-online.target
+ConditionPathExists=!/opt/hangover/bin/wine
+
+[Service]
+Type=oneshot
+ExecStart=/usr/lib/gts7l-setup/install-hangover.sh
+ExecStartPost=/usr/bin/systemctl disable gts7l-install-windows-support.service
+Restart=on-failure
+RestartSec=60
+
+[Install]
+WantedBy=multi-user.target

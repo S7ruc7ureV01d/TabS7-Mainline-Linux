@@ -5,7 +5,7 @@
 # (it writes its temporary autologin for plasmalogin or sddm).
 pkgname=plasma-setup
 pkgver=6.7.5
-pkgrel=1
+pkgrel=2
 pkgdesc="Initial system setup (first-boot wizard) for KDE Plasma"
 arch=('aarch64' 'x86_64')
 url="https://invent.kde.org/plasma/plasma-setup"
@@ -17,8 +17,16 @@ depends=(
   'plasma-login-manager' 'polkit' 'networkmanager-qt'
 )
 makedepends=('cmake' 'extra-cmake-modules' 'gettext')
-source=("https://download.kde.org/stable/plasma/$pkgver/$pkgname-$pkgver.tar.xz")
-sha256sums=('64bc032ef9e8a6549fc2dd8b5fa64118e25da652e3de8adb1c974efbd33258dd')
+source=("https://download.kde.org/stable/plasma/$pkgver/$pkgname-$pkgver.tar.xz"
+        0001-gts7l-onFinish-hook-hostname-groups.patch)
+sha256sums=('64bc032ef9e8a6549fc2dd8b5fa64118e25da652e3de8adb1c974efbd33258dd'
+            'SKIP')
+
+prepare() {
+  # onFinish hook for distro pages (gts7l-setup), "tabs7" as the suggested
+  # hostname, and the groups the tablet's admin user needs
+  patch -d "$pkgname-$pkgver" -p1 < 0001-gts7l-onFinish-hook-hostname-groups.patch
+}
 
 build() {
   cmake -B build -S "$pkgname-$pkgver" \

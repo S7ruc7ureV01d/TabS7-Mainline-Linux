@@ -1,0 +1,16 @@
+{
+    "KPackageStructure": "KDE/PlasmaSetup",
+    "KPlugin": {
+        "Authors": [
+            {
+                "Name": "gts7l project"
+            }
+        ],
+        "Description": "Galaxy Tab S7 settings: display, login, remote access and Windows programs.",
+        "Id": "org.gts7l.plasmasetup.tablet",
+        "License": "LGPL-2.1-or-later",
+        "Name": "Tablet Settings"
+    },
+    "X-KDE-ParentApp": "org.kde.plasmasetup",
+    "X-KDE-Weight": 45
+}

@@ -1,0 +1,8 @@
+// gts7l first-boot page: the plasma-setup user (the wizard's session, which
+// has no password) may apply the tablet settings without authenticating,
+// like plasma-setup's own rule for its account/locale actions.
+polkit.addRule(function (action, subject) {
+    if (subject.user === "plasma-setup" && action.id === "org.gts7l.setup.apply") {
+        return polkit.Result.YES;
+    }
+});

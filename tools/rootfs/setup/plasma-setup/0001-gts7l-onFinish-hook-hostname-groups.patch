@@ -1,0 +1,42 @@
+diff -ru a/files/plasmasetuprc b/files/plasmasetuprc
+--- a/files/plasmasetuprc	2026-09-25 00:25:16.297031783 -0300
++++ b/files/plasmasetuprc	2026-09-25 00:25:16.323688542 -0300
+@@ -19,4 +19,4 @@
+ # Example: UserGroups=wheel,lp,kvm
+ #
+ # NOTE: Leaving this key empty results in the hard-coded default of "wheel".
+-UserGroups=wheel
++UserGroups=wheel,input,render,video
+diff -ru a/modules/hostname/contents/ui/main.qml b/modules/hostname/contents/ui/main.qml
+--- a/modules/hostname/contents/ui/main.qml	2026-09-25 00:25:16.297447118 -0300
++++ b/modules/hostname/contents/ui/main.qml	2026-09-25 00:25:32.818639468 -0300
+@@ -52,6 +52,10 @@
+             let username = AccountController.username;
+             let prefix = username.length > 0 ? username : "plasma";
+             hostnameField.text = prefix + "-pc";
++        } else if (hostnameField.text === HostnameUtil.hostname) {
++            // gts7l: suggest the tablet's name instead of the distro default
++            hostnameField.text = "tabs7";
++            HostnameUtil.hostname = hostnameField.text;
+         }
+         hostnameField.forceActiveFocus();
+     }
+diff -ru a/src/qml/Wizard.qml b/src/qml/Wizard.qml
+--- a/src/qml/Wizard.qml	2026-09-25 00:25:16.299374823 -0300
++++ b/src/qml/Wizard.qml	2026-09-25 00:25:16.323619735 -0300
+@@ -73,6 +73,15 @@
+     }
+ 
+     function finishFinalPage(): void {
++        // gts7l: let distro modules apply their choices first, through an
++        // optional `onFinish` function (like `onPageActivated`).
++        for (let i = 0; i < stepCount; i++) {
++            let item = stepsRepeater.itemAt(i);
++            if (item && item.module && typeof item.module.onFinish === "function") {
++                item.module.onFinish();
++            }
++        }
++
+         // Finalize the initial setup process and exit the wizard.
+         InitialStartUtil.finish();
+     }

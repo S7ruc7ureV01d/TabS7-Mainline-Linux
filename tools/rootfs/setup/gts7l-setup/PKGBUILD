@@ -1,0 +1,23 @@
+# gts7l: the Galaxy Tab S7 page of the first-boot wizard (plasma-setup) and its
+# root helper. Builds from this directory (makepkg in tools/rootfs/setup/gts7l-setup).
+pkgname=gts7l-setup
+pkgver=1.0
+pkgrel=1
+pkgdesc="Galaxy Tab S7 first-boot settings page for KDE's plasma-setup"
+arch=('aarch64')
+license=('LGPL-2.1-or-later')
+depends=('plasma-setup>=6.7.5-2' 'qt6-base' 'qt6-declarative' 'kauth' 'kirigami' 'polkit' 'systemd' 'curl' 'libarchive')
+makedepends=('cmake' 'extra-cmake-modules')
+
+build() {
+  cmake -B build -S "$startdir" \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DCMAKE_INSTALL_LIBEXECDIR=lib \
+    -DKDE_INSTALL_USE_QT_SYS_PATHS=ON
+  cmake --build build
+}
+
+package() {
+  DESTDIR="$pkgdir" cmake --install build
+}
