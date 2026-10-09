@@ -39,4 +39,5 @@ kpackage_install_package(module org.gts7l.plasmasetup.tablet packages plasma)
 
 install(FILES files/gts7l-setup.rules DESTINATION ${KDE_INSTALL_DATADIR}/polkit-1/rules.d)
 install(FILES files/gts7l-install-windows-support.service DESTINATION ${KDE_INSTALL_SYSTEMDUNITDIR}/system)
-install(PROGRAMS files/install-hangover.sh DESTINATION ${KDE_INSTALL_LIBDIR}/gts7l-setup)
+install(PROGRAMS files/install-hangover.sh files/notify-users DESTINATION ${KDE_INSTALL_LIBDIR}/gts7l-setup)
+install(FILES files/gts7l-plasma-setup.tmpfiles DESTINATION ${KDE_INSTALL_LIBDIR}/tmpfiles.d RENAME gts7l-plasma-setup.conf)

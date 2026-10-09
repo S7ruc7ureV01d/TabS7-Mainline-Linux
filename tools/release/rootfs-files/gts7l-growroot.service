@@ -1,12 +1,14 @@
 # First boot after installation: grow the root filesystem to the whole
 # userdata partition (the installer writes a smaller image). ext4 grows
-# online, so this runs with / mounted.
+# online, so this runs with / mounted. The installer already grows it in
+# TWRP; this is the fallback.
 [Unit]
 Description=Grow the root filesystem to the whole partition
 ConditionPathExists=!/var/lib/gts7l/growroot-done
 DefaultDependencies=no
-After=local-fs.target
-Before=sysinit.target
+# right after / is writable, before anything can fill the small image
+After=systemd-remount-fs.service
+Before=sysinit.target gts7l-swapfile-create.service swapfile.swap systemd-sysusers.service
 
 [Service]
 Type=oneshot

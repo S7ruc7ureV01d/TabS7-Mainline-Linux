@@ -198,6 +198,12 @@ ui_print "Verifying..."
 GOT=$(dd if="$USERDATA" bs=1M count=$ROOTFS_MIB 2>/dev/null | sha256sum | cut -d' ' -f1)
 [ "$GOT" = "$ROOTFS_SHA" ] || abort "the written system does not match the image (got $GOT)"
 
+# Grow it to the whole partition now: a first boot on the smaller image
+# fills it (the swap file) before anything could grow it.
+ui_print "Growing the filesystem to the whole partition..."
+e2fsck -fy "$USERDATA" >/dev/null 2>&1
+resize2fs "$USERDATA" >/dev/null 2>&1 || ui_print "  (resize failed; the first boot grows it instead)"
+
 ui_print "Installing this tablet's firmware and calibration..."
 mount -t ext4 -o rw "$USERDATA" $M/root || abort "cannot mount the new system"
 R=$M/root

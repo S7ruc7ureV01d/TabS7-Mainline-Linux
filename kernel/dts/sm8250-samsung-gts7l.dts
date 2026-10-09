@@ -751,9 +751,17 @@
  * capacity/voltage data - this pass is charging-status only, not fuel
  * gauge) satisfies it.
  */
+/*
+ * Charge voltage: stock's battery,chg_float_voltage = <0x111c> (4380 mV),
+ * what Samsung charges this pack to. Without it the charger stayed at its
+ * 4.2 V default, which the fuel gauge (modelled for 4.38 V) reports as ~96 %.
+ * Above 42 C stock drops to 4.15 V; the charger driver can't change the
+ * voltage at run time, so our usbc-ilim driver cuts the current there instead.
+ */
 / {
 	battery: simple-battery {
 		compatible = "simple-battery";
+		voltage-max-design-microvolt = <4380000>;
 	};
 };
 

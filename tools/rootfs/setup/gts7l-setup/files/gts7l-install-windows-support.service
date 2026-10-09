@@ -11,6 +11,10 @@ ConditionPathExists=!/opt/hangover/bin/wine
 Type=oneshot
 ExecStart=/usr/lib/gts7l-setup/install-hangover.sh
 ExecStartPost=/usr/bin/systemctl disable gts7l-install-windows-support.service
+ExecStartPost=/usr/lib/gts7l-setup/notify-users "Windows programs" "Wine is installed: open .exe files from the file manager, or run wine in a terminal."
+# On failure (usually no internet yet): tell the user once per boot; it retries.
+ExecStopPost=/bin/sh -c '[ "$SERVICE_RESULT" = success ] || [ -e /run/gts7l-wine-notified ] || { touch /run/gts7l-wine-notified; /usr/lib/gts7l-setup/notify-users "Windows programs" "Wine will be installed when the tablet is connected to the internet."; }'
+
 Restart=on-failure
 RestartSec=60
 

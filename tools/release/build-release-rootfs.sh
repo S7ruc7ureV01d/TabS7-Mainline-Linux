@@ -58,6 +58,8 @@ fi
 usermod --root "$R" -p '!*' root
 rm -rf "$R/root/.ssh" "$R/root/stock-firmware-dump" "$R/root/.bash_history" "$R/root/.cache"
 rm -f "$R"/etc/ssh/ssh_host_*
+# development config: root password logins over SSH
+rm -f "$R/etc/ssh/sshd_config.d/10-root-login.conf"
 
 echo "== proprietary and per-device data out (the installer adds the target's own)"
 rm -rf "$R/usr/lib/firmware/qcom/sm8250/samsung"
@@ -96,7 +98,9 @@ echo "== image"
 used=$(du -sxm "$R" | cut -f1)
 size=$(( used * 125 / 100 + 1024 ))
 rm -f "$OUT/rootfs.img"
-mkfs.ext4 -q -L archroot -m 1 -d "$R" "$OUT/rootfs.img" "${size}M"
+# No orphan_file: TWRP's e2fsprogs (1.45) and kernel (4.19) can't handle it
+# (read-write mounts and fsck fail after an unclean shutdown).
+mkfs.ext4 -q -L archroot -m 1 -O ^orphan_file -d "$R" "$OUT/rootfs.img" "${size}M"
 e2fsck -fy "$OUT/rootfs.img" >/dev/null || true
 {
 	echo "built $(date -u +%FT%TZ) from $(basename "$BASE")"

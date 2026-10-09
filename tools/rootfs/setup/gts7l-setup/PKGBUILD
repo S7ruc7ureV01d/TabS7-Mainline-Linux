@@ -1,7 +1,7 @@
 # gts7l: the Galaxy Tab S7 page of the first-boot wizard (plasma-setup) and its
 # root helper. Builds from this directory (makepkg in tools/rootfs/setup/gts7l-setup).
 pkgname=gts7l-setup
-pkgver=1.0
+pkgver=1.1
 pkgrel=1
 pkgdesc="Galaxy Tab S7 first-boot settings page for KDE's plasma-setup"
 arch=('aarch64')

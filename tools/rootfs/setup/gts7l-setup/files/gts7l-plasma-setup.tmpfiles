@@ -1,0 +1,7 @@
+# gts7l: the first-boot wizard's session uses KDE's stock on-screen keyboard.
+# The floating keyboard (the users' default) is a normal window, which KWin
+# stacks below the fullscreen wizard; the stock one is an input panel, always
+# on top. gts7l-setup's helper drops this choice from the kwinrc the new user
+# inherits.
+d /run/plasma-setup/.config 0750 plasma-setup plasma-setup -
+f /run/plasma-setup/.config/kwinrc 0644 plasma-setup plasma-setup - [Wayland]\nInputMethod=/usr/share/applications/org.kde.plasma.keyboard.desktop\n
