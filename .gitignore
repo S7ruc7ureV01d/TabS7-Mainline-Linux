@@ -8,3 +8,8 @@ work/
 # Generated release files (built images, etc.) - not versioned, see PROVENANCE
 # docs alongside them for how to regenerate and verify
 artifacts/
+
+# makepkg output when packages are built in place
+tools/rootfs/**/src/
+tools/rootfs/**/pkg/
+tools/rootfs/**/*.pkg.tar.*

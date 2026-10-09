@@ -1,0 +1,13 @@
+[Unit]
+Description=Set the Bluetooth controller address (Galaxy Tab S7)
+After=bt-uart-rebind.service bluetooth.service
+Wants=bluetooth.service
+ConditionPathExists=/sys/class/bluetooth
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/gts7l-bt-address
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

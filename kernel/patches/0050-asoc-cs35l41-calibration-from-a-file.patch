@@ -1,0 +1,115 @@
+From: gts7l project
+Subject: [PATCH] ASoC: cs35l41: per-unit calibration from a firmware file
+
+Patch 0018 takes each amp's factory speaker calibration from DT
+properties. That ties a DTB to one unit, while one image serves every
+tablet. When the DT has no calibration, read it from
+cirrus/cs35l41-cal-<system>-<prefix>.txt (e.g. cs35l41-cal-gts7l-fl.txt):
+"<R> <ambient> [<VSC> <ISC>]" in decimal, the same values as the DT
+properties and with the same range checks. The installer writes the
+files from the unit's /efs/cirrus.
+
+It is read once, from pre_run, just before the protection firmware
+first starts: the firmware itself is loaded from the root filesystem at
+that point, so the file is reachable too. Without a file the firmware
+keeps its defaults, as before.
+
+Tested on gts7l: all four amps "Calibration from ...", then
+CAL_SET_STATUS=2 with the expected R/VSC/ISC on each.
+
+diff --git a/sound/soc/codecs/cs35l41.c b/sound/soc/codecs/cs35l41.c
+index 5196a0790..e57c1d587 100644
+--- a/sound/soc/codecs/cs35l41.c
++++ b/sound/soc/codecs/cs35l41.c
+@@ -9,7 +9,9 @@
+ #include <linux/acpi.h>
+ #include <acpi/acpi_bus.h>
+ #include <linux/delay.h>
++#include <linux/ctype.h>
+ #include <linux/err.h>
++#include <linux/firmware.h>
+ #include <linux/init.h>
+ #include <linux/kernel.h>
+ #include <linux/module.h>
+@@ -1195,12 +1197,69 @@ static int cs35l41_read_cal_word(struct cs_dsp *dsp, const char *name,
+  * (cirrus_cal_apply()); write them just before it instead, from pre_run,
+  * where the firmware is loaded but not yet running.
+  */
++/*
++ * Per-unit calibration from a file, for boards that can't carry it in the
++ * DT (one image for every unit): cirrus/cs35l41-cal-<system>-<prefix>.txt,
++ * e.g. cirrus/cs35l41-cal-gts7l-fl.txt, with four decimal numbers:
++ * "<R> <ambient> <VSC> <ISC>" (VSC/ISC may be omitted). The installer
++ * writes it from the unit's factory values. Read once, on the first run:
++ * the firmware loads from the root filesystem at the same point.
++ */
++static void cs35l41_load_cal_file(struct cs35l41_private *cs35l41)
++{
++	struct wm_adsp *dsp = &cs35l41->dsp;
++	const struct firmware *fw;
++	char name[96], buf[96], prefix[8] = "";
++	u32 r, amb, vsc, isc;
++	int i, n;
++
++	if (cs35l41->cal_valid || cs35l41->vimon_cal_valid || cs35l41->cal_file_tried)
++		return;
++	cs35l41->cal_file_tried = true;
++
++	if (!dsp->system_name || !dsp->component || !dsp->component->name_prefix)
++		return;
++	for (i = 0; i < sizeof(prefix) - 1 && dsp->component->name_prefix[i]; i++)
++		prefix[i] = tolower(dsp->component->name_prefix[i]);
++	prefix[i] = '\0';
++
++	snprintf(name, sizeof(name), "cirrus/cs35l41-cal-%s-%s.txt", dsp->system_name, prefix);
++	if (request_firmware_direct(&fw, name, cs35l41->dev)) {
++		dev_info(cs35l41->dev, "No calibration file %s: firmware defaults\n", name);
++		return;
++	}
++
++	n = min(fw->size, sizeof(buf) - 1);
++	memcpy(buf, fw->data, n);
++	buf[n] = '\0';
++	release_firmware(fw);
++
++	n = sscanf(buf, "%u %u %u %u", &r, &amb, &vsc, &isc);
++	if (n >= 2 && r && r < 0x800000 && amb < 0x800000) {
++		cs35l41->cal_r = r;
++		cs35l41->cal_ambient = amb;
++		cs35l41->cal_valid = true;
++	}
++	if (n == 4 && vsc < 0x1000000 && isc < 0x1000000) {
++		cs35l41->vimon_vsc = vsc;
++		cs35l41->vimon_isc = isc;
++		cs35l41->vimon_cal_valid = true;
++	}
++	if (cs35l41->cal_valid)
++		dev_info(cs35l41->dev, "Calibration from %s: R=%u ambient=%u%s\n", name,
++			 r, amb, cs35l41->vimon_cal_valid ? " + VIMON" : "");
++	else
++		dev_warn(cs35l41->dev, "Ignoring invalid calibration file %s\n", name);
++}
++
+ static int cs35l41_dsp_pre_run(struct wm_adsp *dsp)
+ {
+ 	struct cs35l41_private *cs35l41 = container_of(dsp, struct cs35l41_private, dsp);
+ 	struct cs_dsp *cs_dsp = &dsp->cs_dsp;
+ 	int ret;
+ 
++	cs35l41_load_cal_file(cs35l41);
++
+ 	if (cs35l41->cal_valid) {
+ 		ret = cs35l41_write_cal_word(cs_dsp, "CAL_R", CS35L41_CAL_ALG_ID,
+ 					     cs35l41->cal_r);
+diff --git a/sound/soc/codecs/cs35l41.h b/sound/soc/codecs/cs35l41.h
+index e0220e5b1..98da8c43f 100644
+--- a/sound/soc/codecs/cs35l41.h
++++ b/sound/soc/codecs/cs35l41.h
+@@ -40,6 +40,7 @@ struct cs35l41_private {
+ 	bool vimon_cal_valid;
+ 	u32 vimon_vsc;
+ 	u32 vimon_isc;
++	bool cal_file_tried;
+ 	struct delayed_work cal_report_work;
+ 	/* ASP slot width from set_tdm_slot(), 0 = the sample width */
+ 	unsigned int slot_width;

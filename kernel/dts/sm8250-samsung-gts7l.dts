@@ -1892,34 +1892,18 @@
 		vddrfa1p7-supply = <&vreg_pmu_rfa_1p7>;
 
 		/*
-		 * Real hardware test (round79-build) found hci0 registers
-		 * and loads real firmware successfully, but never becomes
-		 * usable - stuck in the kernel's HCI_UNCONFIGURED state
-		 * (confirmed via a raw mgmt-socket "Read Unconfigured
-		 * Controller Index List" query, since bluetoothd's own
-		 * "Controllers: 0" only checks the *configured* list).
-		 * Root cause, found by reading btqca.c directly: this
-		 * chip has no unique burned-in BD address - it reports a
-		 * well-known QCA placeholder/default one instead
-		 * (drivers/bluetooth/btqca.c's qca_check_bdaddr(),
-		 * comparing against a hardcoded default and setting
-		 * HCI_QUIRK_USE_BDADDR_PROPERTY when it matches), and
-		 * mainline's own hci_core (net/bluetooth/hci_sync.c's
-		 * hci_dev_get_bd_addr_from_property()) requires a real
-		 * `local-bd-address` devicetree property before it'll
-		 * treat the controller as configured/usable at all - a
-		 * completely normal, expected situation for this chip
-		 * family, not a bug. No real per-unit address exists to
-		 * use (this isn't a factory-provisioned build), so this is
-		 * a fixed, locally-administered address (bit 1 of the
-		 * first octet set, per the standard IEEE local/universal
-		 * bit - human-readable e6:2e:8b:7a:ca:29, stored
-		 * byte-reversed per hci_dev_get_bd_addr_from_property()'s
-		 * direct bacpy() into the LSB-first bdaddr_t - matches the
-		 * byte order shown in the nxp,88w8987-bt.yaml binding
-		 * example) rather than a real vendor-assigned one.
+		 * This chip has no burned-in BD address: it reports a QCA
+		 * placeholder, and btqca's qca_check_bdaddr() then sets
+		 * HCI_QUIRK_USE_BDADDR_PROPERTY, so the controller stays
+		 * HCI_UNCONFIGURED until an address comes from here or from
+		 * userspace (mgmt Set Public Address). All zeros on purpose:
+		 * one image serves every unit, so the address is set at boot
+		 * by gts7l-bt-address.service (tools/rootfs/bluetooth/) from
+		 * this unit's factory address, which the installer copies
+		 * from Samsung's /efs/bluetooth/bt_addr. (Bring-up used a
+		 * fixed locally administered address here.)
 		 */
-		local-bd-address = [29 ca 7a 8b 2e e6];
+		local-bd-address = [00 00 00 00 00 00];
 	};
 };
 
@@ -2089,11 +2073,14 @@
  *    all four silently in reset.
  *  - cirrus,use-fsync-errata: as stock, for the short-sync TDM port
  *    (patch 0021 writes ASP_CONTROL4 = 0x01010000).
- *  - Calibration (cirrus,cal-* / cirrus,vimon-cal-*, patch 0018): THIS
- *    UNIT's factory values from its /efs (rdc_cal*, temp_cal, vsc_cal*,
- *    isc_cal*), mapped per amp by stock's cirrus,mfd-suffix (0x43 "_b",
- *    0x42 "_br", 0x41 "", 0x40 "_r"). Another tablet needs its own values;
- *    without them the protection firmware falls back to its defaults.
+ *  - Calibration (patches 0018/0050): each unit's factory values from
+ *    its /efs/cirrus (rdc_cal*, temp_cal, vsc_cal*, isc_cal*), mapped per
+ *    amp by stock's cirrus,mfd-suffix (FL 0x43 "_b", FR 0x42 "_br",
+ *    RL 0x41 "", RR 0x40 "_r"). Not in the DT, which is shared by every
+ *    unit: the installer writes them to
+ *    /lib/firmware/cirrus/cs35l41-cal-gts7l-<fl|fr|rl|rr>.txt and the
+ *    driver reads that file before the protection firmware starts.
+ *    Without it the firmware runs with its defaults.
  */
 &gpi_dma1 {
 	status = "okay";
@@ -2129,10 +2116,6 @@
 		cirrus,gpio2-src-select = <2>;
 		cirrus,gpio2-output-enable;
 		cirrus,use-fsync-errata;
-		cirrus,cal-r = <9144>;
-		cirrus,cal-ambient = <27>;
-		cirrus,vimon-cal-vsc = <9560>;
-		cirrus,vimon-cal-isc = <16775534>;
 	};
 
 	cs35l41_41: amplifier@41 {
@@ -2151,10 +2134,6 @@
 		cirrus,gpio2-src-select = <2>;
 		cirrus,gpio2-output-enable;
 		cirrus,use-fsync-errata;
-		cirrus,cal-r = <9087>;
-		cirrus,cal-ambient = <27>;
-		cirrus,vimon-cal-vsc = <16760669>;
-		cirrus,vimon-cal-isc = <16776875>;
 	};
 
 	cs35l41_42: amplifier@42 {
@@ -2173,10 +2152,6 @@
 		cirrus,gpio2-src-select = <2>;
 		cirrus,gpio2-output-enable;
 		cirrus,use-fsync-errata;
-		cirrus,cal-r = <8590>;
-		cirrus,cal-ambient = <27>;
-		cirrus,vimon-cal-vsc = <9608>;
-		cirrus,vimon-cal-isc = <2201>;
 	};
 
 	cs35l41_43: amplifier@43 {
@@ -2195,10 +2170,6 @@
 		cirrus,gpio2-src-select = <2>;
 		cirrus,gpio2-output-enable;
 		cirrus,use-fsync-errata;
-		cirrus,cal-r = <8401>;
-		cirrus,cal-ambient = <27>;
-		cirrus,vimon-cal-vsc = <16769733>;
-		cirrus,vimon-cal-isc = <16776646>;
 	};
 };
 
