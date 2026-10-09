@@ -21,16 +21,16 @@ find_package(KF6 ${KF6_MIN_VERSION} REQUIRED COMPONENTS Auth Package)
 ecm_add_qml_module(gts7lsetup_backend
     URI "org.gts7l.setup"
     GENERATE_PLUGIN_SOURCE
-    SOURCES src/gts7lsetup.cpp src/gts7lsetup.h
+    SOURCES source/gts7lsetup.cpp source/gts7lsetup.h
 )
-target_include_directories(gts7lsetup_backend PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_include_directories(gts7lsetup_backend PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/source)
 target_link_libraries(gts7lsetup_backend PRIVATE Qt::Core Qt::Qml KF6::AuthCore)
 ecm_finalize_qml_module(gts7lsetup_backend)
 
 # Root helper (KAuth helper id org.gts7l.setup, action org.gts7l.setup.apply)
-add_executable(gts7l-setup-helper src/helper/gts7lsetuphelper.cpp src/helper/gts7lsetuphelper.h)
+add_executable(gts7l-setup-helper source/helper/gts7lsetuphelper.cpp source/helper/gts7lsetuphelper.h)
 target_link_libraries(gts7l-setup-helper Qt::Core KF6::AuthCore)
-kauth_install_actions(org.gts7l.setup src/helper/org.gts7l.setup.actions)
+kauth_install_actions(org.gts7l.setup source/helper/org.gts7l.setup.actions)
 install(TARGETS gts7l-setup-helper DESTINATION ${KAUTH_HELPER_INSTALL_DIR})
 kauth_install_helper_files(gts7l-setup-helper org.gts7l.setup root)
 

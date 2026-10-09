@@ -41,6 +41,9 @@ mounts
 echo "== packages: update, then add the release packages"
 pacman --sysroot "$R" -Syu --noconfirm
 pacman --sysroot "$R" -U --noconfirm --needed "$PKGDIR"/*.pkg.tar.*
+# GTK apps (Firefox, ...) follow Plasma: Breeze theme and Plasma's titlebar
+# buttons. Without these GTK falls back to Adwaita with a close button only.
+pacman --sysroot "$R" -S --noconfirm --needed breeze-gtk kde-gtk-config
 pacman --sysroot "$R" -Rdd --noconfirm vboard-git 2>/dev/null || true
 
 echo "== port files"

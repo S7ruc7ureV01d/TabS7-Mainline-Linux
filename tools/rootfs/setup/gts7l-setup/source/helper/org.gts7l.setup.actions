@@ -1,0 +1,9 @@
+[Domain]
+Name=Galaxy Tab S7 setup
+Icon=preferences-system
+
+[org.gts7l.setup.apply]
+Name=Apply first-boot tablet settings
+Description=Set the root password, automatic login, SSH, Windows program support and display defaults
+Policy=auth_admin
+Persistence=session
