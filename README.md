@@ -23,7 +23,7 @@ userspace is a normal Arch Linux ARM system.
 | Desktop | ✅ | KDE Plasma 6.7, Wayland |
 | GPU | ✅ | Adreno 650 hardware acceleration: OpenGL 4.6, Vulkan 1.3 (Freedreno/Turnip) |
 | Touchscreen | ✅ | Novatek NT36523 multitouch |
-| S Pen writing | ✅ | Hover, pressure and the side button (Wacom digitizer) |
+| S Pen writing | 🟡 | Hover, pressure and the side button (Wacom digitizer); no palm rejection yet |
 | S Pen Bluetooth features | ❓ | Air actions, pen battery: not tested |
 | On-screen keyboard | ✅ | Floating, resizable keyboard plus a full PC layout for terminals |
 | Power and volume buttons | ✅ | |
@@ -74,6 +74,8 @@ in [docs/](docs/).
   goes dark for 1-2 s while the display driver takes over.
 - **Battery temperature** in the desktop is a fixed value (the fuel gauge
   is not wired to the thermistor); charging uses the real thermistor.
+- **No palm rejection with the S Pen.** While writing with the pen, a hand
+  resting on the screen is still read as touch input.
 - **Speaker channels** stay fixed to the landscape ends when rotated.
 - Not working yet: LTE, the front and ultra-wide cameras, DisplayPort audio,
   camera autofocus.
@@ -184,3 +186,11 @@ packaging files build).
 
 This project was built with the help of AI (Claude Code). The released build
 was tested on real hardware. Use at your own risk.
+
+I'm not responsible for your device exploding, bending, falling apart or in
+any other way deconstructing itself from a failed flash, broken zip alignment
+or thermonuclear wars. Nor am I held accountable if you accidentally reflash
+the image 3481 times causing your eemc chip to die. If you have any concerns
+about the features or modifications included in this port please do some
+research before flashing it. You are choosing to make these modifications to
+your device.
