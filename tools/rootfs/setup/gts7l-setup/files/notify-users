@@ -3,7 +3,9 @@
 #   notify-users SUMMARY BODY
 # Used by root services (Windows programs install). Goes straight to the
 # freedesktop Notifications service on each user's session bus.
+# Exits 0 only if at least one session got it (1: nobody logged in yet).
 [ $# -ge 2 ] || exit 2
+sent=1
 for s in $(loginctl list-sessions --no-legend | awk '{print $1}'); do
 	[ "$(loginctl show-session "$s" -p Type --value)" = wayland ] || continue
 	u=$(loginctl show-session "$s" -p Name --value)
@@ -13,6 +15,6 @@ for s in $(loginctl list-sessions --no-legend | awk '{print $1}'); do
 		gdbus call --session --dest org.freedesktop.Notifications \
 		--object-path /org/freedesktop/Notifications \
 		--method org.freedesktop.Notifications.Notify \
-		"Tablet" 0 "applications-other" "$1" "$2" "[]" "{}" 5000 >/dev/null 2>&1 || true
+		"Tablet" 0 "applications-other" "$1" "$2" "[]" "{}" 8000 >/dev/null 2>&1 && sent=0
 done
-exit 0
+exit $sent

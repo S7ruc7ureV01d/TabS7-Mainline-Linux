@@ -197,7 +197,12 @@ ActionReply Gts7lSetupHelper::apply(const QVariantMap &args)
         QFile::remove(AUTOLOGIN_CONF);
     }
 
-    const QString sshResult = run(QStringLiteral("systemctl"), {ssh ? QStringLiteral("enable") : QStringLiteral("disable"), QStringLiteral("sshd.service")});
+    // enable/disable for later boots, and start now (the wizard's choice
+    // should work without a reboot)
+    QString sshResult = run(QStringLiteral("systemctl"), {ssh ? QStringLiteral("enable") : QStringLiteral("disable"), QStringLiteral("sshd.service")});
+    if (sshResult.isEmpty() && ssh) {
+        sshResult = run(QStringLiteral("systemctl"), {QStringLiteral("start"), QStringLiteral("--no-block"), QStringLiteral("sshd.service")});
+    }
     if (!sshResult.isEmpty()) {
         problems << sshResult;
     }

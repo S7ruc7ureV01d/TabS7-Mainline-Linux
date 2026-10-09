@@ -1,0 +1,28 @@
+#!/bin/sh
+# Install Windows program support (Wine/Hangover) in the background once the
+# tablet is online, then disable the service. Never fails at boot: without
+# internet it waits (no [FAILED] on the boot console) and tells the user, as
+# soon as someone is logged in, that it will continue when online.
+N=/usr/lib/gts7l-setup/notify-users
+waiting_told=0
+
+online() { curl -fsI --max-time 10 https://github.com >/dev/null 2>&1; }
+
+while :; do
+	if online; then
+		if /usr/lib/gts7l-setup/install-hangover.sh; then
+			systemctl disable gts7l-install-windows-support.service
+			# tell the user once a desktop session exists (give up after an hour)
+			i=0
+			until $N "Windows programs" "Wine is installed: open .exe files from the file manager, or run wine in a terminal."; do
+				i=$((i + 1)); [ $i -ge 120 ] && break
+				sleep 30
+			done
+			exit 0
+		fi
+		echo "install failed, retrying in a minute"
+	elif [ $waiting_told -eq 0 ]; then
+		$N "Windows programs" "Wine will be installed in the background when the tablet is connected to the internet." && waiting_told=1
+	fi
+	sleep 60
+done
