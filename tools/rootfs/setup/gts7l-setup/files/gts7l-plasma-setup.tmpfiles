@@ -3,5 +3,9 @@
 # stacks below the fullscreen wizard; the stock one is an input panel, always
 # on top. gts7l-setup's helper drops this choice from the kwinrc the new user
 # inherits.
-d /run/plasma-setup/.config 0750 plasma-setup plasma-setup -
-f /run/plasma-setup/.config/kwinrc 0644 plasma-setup plasma-setup - [Wayland]\nInputMethod=/usr/share/applications/org.kde.plasma.keyboard.desktop\n
+#
+# Root-owned, like plasma-setup's own entries: its final "Z" line hands the
+# whole tree to the plasma-setup user. A plasma-setup-owned .config created
+# here made systemd-tmpfiles refuse plasma-setup's root-owned autostart/
+# below it ("unsafe path transition"), and the wizard never started.
+f /run/plasma-setup/.config/kwinrc 0644 - - - [Wayland]\nInputMethod=/usr/share/applications/org.kde.plasma.keyboard.desktop\n
