@@ -13,7 +13,8 @@ userspace is a normal Arch Linux ARM system.
 
 > **Status:** usable as a daily desktop for many tasks, but still a
 > bring-up project. Read [Known issues](#known-issues) before installing.
-> The installer is not released yet.
+> Download the installer from the
+> [latest release](https://github.com/S7ruc7ureV01d/TabS7-Mainline-Linux/releases/latest).
 
 ## Hardware compatibility
 
@@ -82,27 +83,43 @@ in [docs/](docs/).
 
 ## Installation
 
-**Not released yet.** A TWRP-flashable installer is being finished:
+Download the files from the
+[latest release](https://github.com/S7ruc7ureV01d/TabS7-Mainline-Linux/releases/latest).
 
-- it formats the `userdata` partition for Linux and installs the system
-  (**everything on Android's data partition is erased**);
-- it copies the firmware and per-device calibration it needs from the
-  tablet itself, so nothing proprietary is redistributed;
-- on first boot, KDE's setup wizard asks for the language, keyboard layout,
-  time zone, user account and host name, then a tablet page for automatic
-  brightness, auto-rotation, automatic login, a root password, SSH and
-  Windows program support.
+**Installing erases Android's data partition (`userdata`).** Back up
+anything you want to keep first.
 
 Requirements:
 
-- a Galaxy Tab S7 **LTE** (`SM-T875`) with an unlocked bootloader;
-- TWRP for `gts7l` (the device tree is in [recovery/](recovery/));
-- unlocking trips Knox permanently and voids the warranty.
+- a Galaxy Tab S7 **LTE** (`SM-T875`) with an **unlocked bootloader**
+  (unlocking erases the tablet and trips Knox permanently);
+- a microSD card (or USB-OTG drive) formatted **FAT32**, with about 2 GB
+  free.
 
-Only the `boot` and `userdata` partitions are written. Android can be
-restored with Odin and the stock firmware for your region. Do not flash a
-newer stock firmware than you need: Samsung's anti-rollback fuse can
-prevent going back to older versions.
+Steps:
+
+1. **Install TWRP** (once). Put the tablet in Download mode and flash
+   `twrp-3.7.1-gts7l-odin.tar` in Odin's **AP** slot. Then boot into TWRP
+   with **Volume Up + Power**. (Already have a custom recovery? Flash
+   `twrp-3.7.1-gts7l.img` to the recovery partition instead.)
+2. **Copy** `gts7l-mainline-linux-v1.0.zip` to the microSD card, not to
+   internal storage: the installer erases it.
+3. In TWRP: **Install → Select Storage → Micro SD card →** the ZIP **→**
+   swipe to confirm. It reads this tablet's firmware and calibration,
+   then writes and verifies the system (a few minutes).
+4. **Reboot → System.** The first boot opens the setup wizard: language,
+   keyboard, time zone, your account, host name, and a tablet page
+   (automatic brightness, auto-rotation, automatic login, root password,
+   SSH, Windows programs).
+
+No proprietary firmware is included: the installer copies the Samsung
+firmware and per-device calibration from your own tablet.
+
+Only the `boot` and `userdata` partitions are written by the installer
+(plus `recovery` and `vbmeta` once, for TWRP). Android can be restored with
+Odin and the stock firmware for your region. Do not flash a newer stock
+firmware than you need: Samsung's anti-rollback fuse can prevent going back
+to older versions.
 
 The Wi-Fi-only Tab S7 (`SM-T870`) is not supported yet.
 
