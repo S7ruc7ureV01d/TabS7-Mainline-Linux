@@ -58,69 +58,6 @@ on fs
     wait /dev/block/platform/soc/${ro.boot.bootdevice}
     symlink /dev/block/platform/soc/${ro.boot.bootdevice} /dev/block/bootdevice
 
-# Boot-history capture: save /proc/last_kmsg (Samsung's ABL/XBL ring buffer -
-# see docs/kernel-boot-debugging.md) into /cache on every recovery boot, so
-# evidence from a boot attempt survives the next reboot without a live adb
-# session catching it in time. /cache is not part of this device's
-# first_stage_mount set (see recovery.fstab - it has no "recoveryonly"
-# auto-mount flag) and is never mounted by TWRP on its own at boot, so it
-# has to be mounted here explicitly. This has to run after the "on fs"
-# block above, which is what creates the /dev/block/bootdevice symlink this
-# depends on - "post-fs" is the earliest trigger point in late-init after
-# that block is guaranteed to have run. Keeps a rolling history of the 5
-# most recent captures (kmsg.0 = newest .. kmsg.4 = oldest); each is only
-# written if /proc/last_kmsg is actually non-empty this boot.
-#
-# A second real-hardware race (2026-09-12): even with the by-name/cache
-# wait above, an unconditional single check of `[ -s /proc/last_kmsg ]`
-# still silently skipped the capture on every automatic boot - confirmed
-# live by proving the exec/post-fs mechanism itself does fire (a trivial
-# probe command run from this same trigger reliably wrote out its own
-# marker file), then finding /proc/last_kmsg empty/unready at that exact
-# point while a manual re-run moments later, by hand, captured correctly.
-# So the ABL/XBL last_kmsg node isn't guaranteed populated as early as
-# `post-fs` fires. Fixed with a short bounded poll (up to 10 one-second
-# tries) before giving up, rather than a single point-in-time check. The
-# poll is written as a fixed-count `for` loop with no `$variable` in it on
-# purpose: init's own property-expansion runs over this whole quoted string
-# before /sbin/sh ever sees it, and a bare (non-`${}`) `$` here is not
-# passed through - it gets read as an init property reference instead
-# (confirmed by reading this tree's own ExpandProps() in
-# system/core/init/util.cpp), which would silently break parsing of this
-# entire command.
-#
-# On real hardware (2026-09-12), placing this straight in "on post-fs" with
-# no further wait lost the capture: the /dev/block/bootdevice symlink from
-# the "on fs" block above only proves the *base* bootdevice path exists,
-# not that ueventd has already scanned the partition table and created the
-# by-name/cache symlink underneath it - that lags slightly behind. Fixed by
-# explicitly waiting on the by-name symlink itself (same "wait" builtin the
-# "on fs" block above already uses for the bootdevice path) before touching
-# it.
-#
-# A third real-hardware finding (2026-09-12, live-debugged by temporarily
-# redirecting this whole script's own stdout/stderr to /tmp and inspecting
-# it after boot): by the time this exec runs, `/cache` is already a
-# *symlink* to `/data/cache`, not the plain directory "on init"'s own
-# "mkdir /cache" created - something else (most likely TWRP's own
-# PartitionManager/recovery service reacting to this device having no
-# fstab entry AOSP's own init/fs_mgr recognizes as a real first-stage
-# mount, since this device's recovery.fstab uses TWRP's own custom format
-# and flags, not real fs_mgr ones) relinks it before this trigger fires.
-# Since `/data` isn't mounted yet this early either, that symlink's target
-# doesn't exist, so mounting or creating anything through the path
-# `/cache` silently fails with ENOENT at every step. This device does have
-# a real, dedicated `cache` partition (per recovery.fstab), and TWRP's own
-# later boot logic proves this exact conflict is recoverable - by the time
-# TWRP's full GUI is up, `/cache` observably *is* the real ext4 partition
-# again, meaning TWRP's own partition mounting does the same
-# remove-the-symlink-first work eventually. This just does that same fix
-# earlier: force-remove whatever currently occupies `/cache` (symlink or
-# not) and recreate it as a real directory before mounting onto it.
-on post-fs
-    wait /dev/block/bootdevice/by-name/cache 5
-    exec u:r:recovery:s0 -- /sbin/sh -c "rm -rf /cache; mkdir -p /cache; mount -t ext4 -o rw /dev/block/bootdevice/by-name/cache /cache; mkdir -p /cache/last_kmsg; for x in 1 2 3 4 5 6 7 8 9 10; do [ -s /proc/last_kmsg ] && break; sleep 1; done; if [ -s /proc/last_kmsg ]; then rm -f /cache/last_kmsg/kmsg.4; mv /cache/last_kmsg/kmsg.3 /cache/last_kmsg/kmsg.4; mv /cache/last_kmsg/kmsg.2 /cache/last_kmsg/kmsg.3; mv /cache/last_kmsg/kmsg.1 /cache/last_kmsg/kmsg.2; mv /cache/last_kmsg/kmsg.0 /cache/last_kmsg/kmsg.1; cp /proc/last_kmsg /cache/last_kmsg/kmsg.0; fi"
-
 # Real-hardware testing on 2026-09-12 (this build) showed `sys.usb.config`
 # ends up as "mtp,adb" by boot completion, not plain "adb" - something later
 # in boot (likely TWRP's own MTP-enable logic) composes that combined value.
