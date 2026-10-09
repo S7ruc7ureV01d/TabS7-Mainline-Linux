@@ -1,0 +1,39 @@
+# gts7l default window rules for the bundled on-screen keyboards: always on
+# top, never take focus from the app being typed into, not in the taskbar.
+[General]
+count=2
+rules=gts7l-floating-keyboard,vboard
+
+[gts7l-floating-keyboard]
+Description=Floating Plasma Keyboard
+above=true
+aboverule=2
+acceptfocus=false
+acceptfocusrule=2
+desktops=
+desktopsrule=2
+skippager=true
+skippagerrule=2
+skipswitcher=true
+skipswitcherrule=2
+skiptaskbar=true
+skiptaskbarrule=2
+wmclass=org.kde.plasma.keyboard
+wmclassmatch=1
+
+[vboard]
+Description=vboard always on top, no focus, remember position
+Enabled=true
+wmclass=io.github.archisman-panigrahi.vboard
+wmclassmatch=1
+wmclasscomplete=false
+position=0,0
+positionrule=4
+above=true
+aboverule=2
+acceptfocus=false
+acceptfocusrule=2
+skiptaskbar=true
+skiptaskbarrule=2
+skippager=true
+skippagerrule=2

@@ -1,0 +1,15 @@
+# gts7l on-screen keyboard defaults: the floating keyboard as Plasma's virtual
+# keyboard, and window rules for it and for vboard (system-wide, /etc/xdg).
+pkgname=gts7l-keyboards
+pkgver=1.0
+pkgrel=1
+pkgdesc='Galaxy Tab S7 on-screen keyboard defaults (floating keyboard, vboard)'
+arch=('any')
+license=('GPL-2.0-only')
+depends=('plasma-keyboard-floating' 'vboard' 'plasma-keyboard')
+backup=('etc/xdg/kwinrc' 'etc/xdg/kwinrulesrc')
+
+package() {
+  install -Dm644 "$startdir/kwinrc" "$pkgdir/etc/xdg/kwinrc"
+  install -Dm644 "$startdir/kwinrulesrc" "$pkgdir/etc/xdg/kwinrulesrc"
+}

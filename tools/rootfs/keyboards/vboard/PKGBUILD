@@ -1,0 +1,35 @@
+# vboard: floating/docked on-screen keyboard with a full PC layout (arrows,
+# Tab, Ctrl, Alt, Super, Esc, F1-F12), typing through /dev/uinput.
+# Based on the upstream AUR PKGBUILD (Archisman Panigrahi), pinned to the
+# commit tested on the gts7l.
+pkgname=vboard
+pkgver=2.11.1.r0.gc7cc7f4
+pkgrel=1
+pkgdesc='Wayland virtual keyboard with modifier keys (floating or docked)'
+arch=('any')
+url='https://github.com/keefeere/vboard'
+license=('GPL-3.0-only')
+depends=('python' 'python-cairo' 'python-gobject' 'gtk3' 'gtk-layer-shell'
+         'python-uinput' 'libayatana-appindicator')
+makedepends=('git' 'meson' 'ninja')
+optdepends=('hunspell-en_us: word suggestions')
+source=("vboard::git+https://github.com/keefeere/vboard.git#commit=c7cc7f49f58086f7b2e9e69aeb64be003cce883d"
+        0001-gts7l-keep-a-system-wide-kwin-rule.patch)
+sha256sums=('SKIP' 'SKIP')
+
+prepare() {
+  patch -d vboard -p1 < 0001-gts7l-keep-a-system-wide-kwin-rule.patch
+}
+
+build() {
+  cd vboard
+  meson setup build --prefix=/usr
+  meson compile -C build
+}
+
+package() {
+  cd vboard
+  meson install -C build --destdir "$pkgdir"
+  # /dev/uinput for the "input" group (vboard types through uinput)
+  install -Dm644 udev/70-vboard-uinput.rules "$pkgdir/usr/lib/udev/rules.d/70-vboard-uinput.rules"
+}

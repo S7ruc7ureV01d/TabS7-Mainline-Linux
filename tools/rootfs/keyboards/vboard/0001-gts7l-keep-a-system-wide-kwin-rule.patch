@@ -1,0 +1,16 @@
+--- a/scripts/install-kwin-rule.sh
++++ b/scripts/install-kwin-rule.sh
+@@ -8,6 +8,13 @@
+ SYSTEM_PREFIX="${VBOARD_PREFIX:-/usr/local}"
+ SYSTEM_CONFIG_FILE="/etc/xdg/kwinrulesrc"
+ 
++# gts7l: the distribution ships this rule in /etc/xdg/kwinrulesrc. Writing a
++# per-user rule list would hide the other system-wide rules (KConfig takes the
++# user's [General] rules over the system one), so leave it alone.
++if grep -q "^\[${RULE_NAME}\]" "$SYSTEM_CONFIG_FILE" 2>/dev/null; then
++    exit 0
++fi
++
+ for arg in "$@"; do
+     case "$arg" in
+         --scope=user|--scope=system|--scope=auto)

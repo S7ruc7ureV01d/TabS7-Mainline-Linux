@@ -1,0 +1,62 @@
+# Floating Plasma Keyboard: a movable, resizable fork of KDE's plasma-keyboard
+# (CC834/plasma-keyboard-floating, based on 6.7.4), pinned to the commit tested
+# on the gts7l. Installed beside the stock plasma-keyboard (it uses its data)
+# the same way the fork's tools/install-user.py does, but system-wide.
+pkgname=plasma-keyboard-floating
+pkgver=6.7.4.r0.g9d9d5c9
+pkgrel=1
+pkgdesc='Movable, resizable on-screen keyboard for KDE Plasma (Wayland)'
+arch=('aarch64' 'x86_64')
+url='https://github.com/CC834/plasma-keyboard-floating'
+license=('GPL-2.0-or-later' 'GPL-3.0-only' 'CC-BY-SA-4.0')
+depends=('plasma-keyboard' 'qt6-base' 'qt6-declarative' 'qt6-virtualkeyboard'
+         'qt6-multimedia' 'qt6-wayland' 'libplasma' 'kirigami' 'ki18n' 'kconfig'
+         'kcoreaddons' 'libxkbcommon' 'wayland')
+makedepends=('git' 'cmake' 'ninja' 'extra-cmake-modules' 'wayland-protocols'
+             'plasma-wayland-protocols')
+source=("pkf::git+https://github.com/CC834/plasma-keyboard-floating.git#commit=9d9d5c93cda3afdfa90a83ca6a43a8e2894f229b")
+sha256sums=('SKIP')
+
+build() {
+  cmake -S pkf -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
+  cmake --build build
+}
+
+package() {
+  install -Dm755 build/bin/plasma-keyboard "$pkgdir/usr/lib/plasma-keyboard-floating/plasma-keyboard-floating"
+
+  install -Dm755 /dev/stdin "$pkgdir/usr/lib/plasma-keyboard-floating/show-floating-keyboard" <<'SH'
+#!/bin/sh
+# Let the launcher return focus to the target application.
+sleep 0.3
+exec qdbus6 org.kde.plasma.keyboard.Floating /Keyboard org.kde.plasma.keyboard.Floating.showKeyboard
+SH
+
+  install -Dm644 /dev/stdin "$pkgdir/usr/share/applications/org.kde.plasma.keyboard-floating.desktop" <<'DESKTOP'
+[Desktop Entry]
+Name=Floating Plasma Keyboard
+Comment=Movable touch keyboard for Plasma
+Exec=/usr/lib/plasma-keyboard-floating/plasma-keyboard-floating
+Type=Application
+X-KDE-Wayland-VirtualKeyboard=true
+Icon=input-keyboard-virtual
+NoDisplay=true
+DESKTOP
+
+  install -Dm644 /dev/stdin "$pkgdir/usr/share/applications/org.kde.plasma.keyboard-floating-show.desktop" <<'DESKTOP'
+[Desktop Entry]
+Name=Show Floating Keyboard
+Comment=Open the floating keyboard in the current app
+Exec=/usr/lib/plasma-keyboard-floating/show-floating-keyboard
+Icon=input-keyboard-virtual
+Type=Application
+StartupNotify=false
+Terminal=false
+Categories=Utility;Accessibility;
+DESKTOP
+
+  install -Dm644 pkf/config/80-floating-keyboard.conf \
+    "$pkgdir/usr/share/wireplumber/wireplumber.conf.d/80-floating-keyboard.conf"
+  install -Dm644 pkf/LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  cp -r pkf/LICENSES "$pkgdir/usr/share/licenses/$pkgname/"
+}

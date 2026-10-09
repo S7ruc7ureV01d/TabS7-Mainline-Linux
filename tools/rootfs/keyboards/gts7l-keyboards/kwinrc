@@ -1,0 +1,5 @@
+# gts7l default: the floating keyboard is Plasma's virtual keyboard. Users can
+# switch (System Settings -> Keyboard -> Virtual Keyboard): Floating Plasma
+# Keyboard, Vboard Plasma Keyboard or the stock Plasma Keyboard.
+[Wayland]
+InputMethod=/usr/share/applications/org.kde.plasma.keyboard-floating.desktop
