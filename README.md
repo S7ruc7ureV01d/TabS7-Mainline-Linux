@@ -1,5 +1,9 @@
 # Mainline Linux for the Samsung Galaxy Tab S7 (LTE)
 
+
+https://github.com/user-attachments/assets/006de4c3-0276-467b-ad57-35186e548fb8
+
+
 Arch Linux ARM with KDE Plasma on the Samsung Galaxy Tab S7 LTE (`SM-T875`,
 `gts7l`), running upstream Linux 7.2 with a set of device patches. No
 Android kernel, no Halium: the stock bootloader loads a mainline kernel
