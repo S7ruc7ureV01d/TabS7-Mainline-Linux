@@ -42,6 +42,9 @@ cleanup() {
 BYNAME=/dev/block/bootdevice/by-name
 part() { [ -b "$BYNAME/$1" ] && echo "$BYNAME/$1"; }
 
+unzip -p "$ZIPFILE" BANNER 2>/dev/null | while IFS= read -r line; do
+	ui_print "$line"
+done
 ui_print "========================================"
 ui_print " Mainline Linux for the Galaxy Tab S7"
 ui_print " $(unzip -p "$ZIPFILE" VERSION 2>/dev/null)"
@@ -71,11 +74,21 @@ SEC_EFS=$(part sec_efs)
 EFS=$(part efs)
 
 unzip -l "$ZIPFILE" > $W.list 2>/dev/null || abort "cannot read the ZIP"
-for f in boot.img rootfs.img ROOTFS-IMAGE BOOT-IMAGE; do
+for f in boot.img ROOTFS-IMAGE BOOT-IMAGE; do
 	grep -q " $f\$" $W.list || abort "the ZIP has no $f"
 done
+# The image is stored in pieces: TWRP's unzip (AOSP ziptool) aborts on an
+# entry of several GiB.
 ROOTFS_SHA=$(unzip -p "$ZIPFILE" ROOTFS-IMAGE | cut -d' ' -f1)
 ROOTFS_MIB=$(unzip -p "$ZIPFILE" ROOTFS-IMAGE | cut -d' ' -f3)
+ROOTFS_PARTS=$(unzip -p "$ZIPFILE" ROOTFS-IMAGE | cut -d' ' -f4)
+CHUNK_MIB=$(unzip -p "$ZIPFILE" ROOTFS-IMAGE | cut -d' ' -f5)
+[ "$ROOTFS_PARTS" -gt 0 ] && [ "$CHUNK_MIB" -gt 0 ] 2>/dev/null || abort "bad rootfs piece list"
+i=0
+while [ $i -lt $ROOTFS_PARTS ]; do
+	grep -q " rootfs.img.$(printf %03d $i)\$" $W.list || abort "the ZIP is missing rootfs piece $i"
+	i=$((i + 1))
+done
 BOOT_SHA=$(unzip -p "$ZIPFILE" BOOT-IMAGE | cut -d' ' -f1)
 BOOT_MIB=$(unzip -p "$ZIPFILE" BOOT-IMAGE | cut -d' ' -f3)
 [ ${#ROOTFS_SHA} -eq 64 ] && [ "$ROOTFS_MIB" -gt 0 ] 2>/dev/null || abort "bad rootfs manifest"
@@ -170,7 +183,14 @@ for mp in $(grep -E "^($USERDATA|$(readlink -f $USERDATA)) " /proc/mounts | cut 
 done
 umount /sdcard 2>/dev/null; umount /data 2>/dev/null
 
-unzip -p "$ZIPFILE" rootfs.img | dd of="$USERDATA" bs=1M 2>/dev/null || abort "writing the system failed"
+i=0
+while [ $i -lt $ROOTFS_PARTS ]; do
+	ui_print "  part $((i + 1)) of $ROOTFS_PARTS"
+	unzip -p "$ZIPFILE" "rootfs.img.$(printf %03d $i)" | \
+		dd of="$USERDATA" bs=1M seek=$((i * CHUNK_MIB)) conv=notrunc 2>/dev/null || \
+		abort "writing part $((i + 1)) failed"
+	i=$((i + 1))
+done
 sync
 ui_print "Verifying..."
 GOT=$(dd if="$USERDATA" bs=1M count=$ROOTFS_MIB 2>/dev/null | sha256sum | cut -d' ' -f1)
