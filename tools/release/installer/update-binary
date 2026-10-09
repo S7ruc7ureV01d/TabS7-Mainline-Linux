@@ -1,0 +1,229 @@
+#!/sbin/sh
+# Galaxy Tab S7 LTE (SM-T875, gts7l) mainline Linux installer, run by TWRP.
+#
+# Installs Arch Linux ARM + KDE Plasma onto the userdata partition (erasing
+# Android's data) and the mainline kernel onto boot. The image carries no
+# proprietary firmware and nothing specific to one tablet: they are copied
+# here from this tablet's own partitions, before anything is written:
+#
+#   apnhlos   image/{adsp,slpi,a650_zap}.*        audio/sensor DSP, GPU zap
+#   vendor    firmware/cs35l40-spk-dsp1-spk-prot.* speaker protection
+#             etc/sensors/{config,sns_reg_config}  sensor hub configuration
+#   persist   sensors/registry/registry/*          factory sensor calibration
+#   sec_efs   cirrus/*_cal*                        factory speaker calibration
+#   efs       bluetooth/bt_addr                    Bluetooth address
+#   cmdline   androidboot.revision                 board revision
+#
+# TWRP's shell is mksh with 32-bit arithmetic: every size here is in MiB.
+
+OUTFD=$2
+ZIPFILE=$3
+
+ui_print() {
+	echo "ui_print $1" >> /proc/self/fd/$OUTFD
+	echo "ui_print" >> /proc/self/fd/$OUTFD
+}
+abort() {
+	ui_print " "
+	ui_print "ERROR: $1"
+	cleanup
+	exit 1
+}
+
+W=/tmp/gts7l-install
+M=$W/mnt
+D=$W/data
+cleanup() {
+	for m in $M/apnhlos $M/vendor $M/persist $M/sec_efs $M/efs $M/root; do
+		umount "$m" 2>/dev/null
+	done
+}
+
+BYNAME=/dev/block/bootdevice/by-name
+part() { [ -b "$BYNAME/$1" ] && echo "$BYNAME/$1"; }
+
+ui_print "========================================"
+ui_print " Mainline Linux for the Galaxy Tab S7"
+ui_print " $(unzip -p "$ZIPFILE" VERSION 2>/dev/null)"
+ui_print "========================================"
+
+# ---- checks -------------------------------------------------------------
+
+DEVICE=$(getprop ro.product.device)
+case "$DEVICE" in
+	gts7l|gts7leea) ;;
+	*) abort "this is for the Galaxy Tab S7 LTE (gts7l), not '$DEVICE'" ;;
+esac
+
+case "$ZIPFILE" in
+	/data/*|/sdcard/*|/mnt/sdcard/*|/storage/emulated/*)
+		ui_print "The ZIP is on internal storage, which this installer erases."
+		ui_print "Copy it to a microSD card or a USB drive and flash it from there."
+		abort "the ZIP is stored on the partition being replaced"
+		;;
+esac
+
+BOOT=$(part boot) || abort "no boot partition"
+USERDATA=$(part userdata) || abort "no userdata partition"
+APNHLOS=$(part apnhlos) || abort "no apnhlos partition"
+PERSIST=$(part persist) || abort "no persist partition"
+SEC_EFS=$(part sec_efs)
+EFS=$(part efs)
+
+unzip -l "$ZIPFILE" > $W.list 2>/dev/null || abort "cannot read the ZIP"
+for f in boot.img rootfs.img ROOTFS-IMAGE BOOT-IMAGE; do
+	grep -q " $f\$" $W.list || abort "the ZIP has no $f"
+done
+ROOTFS_SHA=$(unzip -p "$ZIPFILE" ROOTFS-IMAGE | cut -d' ' -f1)
+ROOTFS_MIB=$(unzip -p "$ZIPFILE" ROOTFS-IMAGE | cut -d' ' -f3)
+BOOT_SHA=$(unzip -p "$ZIPFILE" BOOT-IMAGE | cut -d' ' -f1)
+BOOT_MIB=$(unzip -p "$ZIPFILE" BOOT-IMAGE | cut -d' ' -f3)
+[ ${#ROOTFS_SHA} -eq 64 ] && [ "$ROOTFS_MIB" -gt 0 ] 2>/dev/null || abort "bad rootfs manifest"
+[ ${#BOOT_SHA} -eq 64 ] && [ "$BOOT_MIB" -gt 0 ] 2>/dev/null || abort "bad boot manifest"
+
+# the partition must extend past the image's last MiB
+PROBE=$(dd if="$USERDATA" bs=1M skip=$((ROOTFS_MIB - 1)) count=1 2>/dev/null | wc -c)
+[ "$PROBE" -eq 1048576 ] || abort "userdata is smaller than the $ROOTFS_MIB MiB image"
+
+# ---- this tablet's firmware and calibration ----------------------------
+
+ui_print " "
+ui_print "Reading this tablet's firmware and calibration..."
+rm -rf $W; mkdir -p $M/apnhlos $M/vendor $M/persist $M/sec_efs $M/efs $M/root $D/fw $D/cirrus $D/sensors $D/registry
+
+mount -t vfat -o ro "$APNHLOS" $M/apnhlos || abort "cannot mount apnhlos"
+for f in adsp slpi a650_zap; do
+	[ -f $M/apnhlos/image/$f.mdt ] || abort "apnhlos has no image/$f.mdt"
+	cp $M/apnhlos/image/$f.* $D/fw/ || abort "cannot copy $f firmware"
+done
+umount $M/apnhlos
+ui_print "  DSP and GPU firmware: $(ls $D/fw | wc -l) files"
+
+VENDOR_DEV=/dev/block/mapper/vendor
+[ -b $VENDOR_DEV ] || abort "no vendor partition (/dev/block/mapper/vendor)"
+mount -t ext4 -o ro $VENDOR_DEV $M/vendor 2>/dev/null || \
+	mount -t erofs -o ro $VENDOR_DEV $M/vendor || abort "cannot mount vendor"
+for e in wmfw bin; do
+	cp $M/vendor/firmware/cs35l40-spk-dsp1-spk-prot.$e $D/cirrus/cs35l41-dsp1-spk-prot-gts7l.$e || \
+		abort "vendor has no speaker protection firmware (.$e)"
+done
+[ -d $M/vendor/etc/sensors/config ] && [ -f $M/vendor/etc/sensors/sns_reg_config ] || \
+	abort "vendor has no sensor configuration"
+cp -r $M/vendor/etc/sensors/config $D/sensors/config
+cp $M/vendor/etc/sensors/sns_reg_config $D/sensors/sns_reg_config
+umount $M/vendor
+ui_print "  speaker protection firmware, $(ls $D/sensors/config | wc -l) sensor configs"
+
+mount -t ext4 -o ro,noload "$PERSIST" $M/persist || abort "cannot mount persist"
+if [ -d $M/persist/sensors/registry/registry ]; then
+	cp $M/persist/sensors/registry/registry/* $D/registry/ 2>/dev/null
+fi
+umount $M/persist
+ui_print "  sensor calibration: $(ls $D/registry | wc -l) registry files"
+
+# Speaker calibration, per amplifier: FL 0x43 "_b", FR 0x42 "_br",
+# RL 0x41 "", RR 0x40 "_r" (stock's cirrus,mfd-suffix).
+CAL=0
+if [ -n "$SEC_EFS" ] && mount -t ext4 -o ro,noload "$SEC_EFS" $M/sec_efs; then
+	C=$M/sec_efs/cirrus
+	v() { tr -d '\000\n\r ' < $C/$1 2>/dev/null; }
+	T=$(v temp_cal)
+	for s in fl:_b fr:_br rl: rr:_r; do
+		p=${s%%:*}; x=${s#*:}
+		r=$(v rdc_cal$x)
+		case "$r$T" in ''|*[!0-9]*) continue ;; esac
+		echo "$r $T $(v vsc_cal$x) $(v isc_cal$x)" > $D/cirrus/cs35l41-cal-gts7l-$p.txt
+		CAL=$((CAL + 1))
+	done
+	umount $M/sec_efs
+fi
+if [ $CAL -eq 4 ]; then
+	ui_print "  speaker calibration: 4 amplifiers"
+else
+	rm -f $D/cirrus/cs35l41-cal-gts7l-*.txt
+	ui_print "  speaker calibration: not found, firmware defaults"
+fi
+
+BT=""
+if [ -n "$EFS" ] && mount -t ext4 -o ro,noload "$EFS" $M/efs; then
+	BT=$(tr -dc '0-9A-Fa-f' < $M/efs/bluetooth/bt_addr 2>/dev/null)
+	umount $M/efs
+fi
+if [ ${#BT} -eq 12 ]; then
+	BT=$(echo "$BT" | sed 's/../&:/g; s/:$//' | tr 'A-F' 'a-f')
+	ui_print "  Bluetooth address: $BT"
+else
+	BT=""
+	ui_print "  Bluetooth address: not found, one is generated on first boot"
+fi
+
+REV=$(sed -n 's/.*androidboot\.revision=\([0-9]*\).*/\1/p' /proc/cmdline)
+[ -n "$REV" ] || REV=7
+ui_print "  board revision: $REV"
+
+# ---- root filesystem ----------------------------------------------------
+
+ui_print " "
+ui_print "Erasing userdata and writing the system ($ROOTFS_MIB MiB)..."
+for mp in $(grep -E "^($USERDATA|$(readlink -f $USERDATA)) " /proc/mounts | cut -d' ' -f2); do
+	umount "$mp" 2>/dev/null || umount -l "$mp" || abort "cannot unmount $mp"
+done
+umount /sdcard 2>/dev/null; umount /data 2>/dev/null
+
+unzip -p "$ZIPFILE" rootfs.img | dd of="$USERDATA" bs=1M 2>/dev/null || abort "writing the system failed"
+sync
+ui_print "Verifying..."
+GOT=$(dd if="$USERDATA" bs=1M count=$ROOTFS_MIB 2>/dev/null | sha256sum | cut -d' ' -f1)
+[ "$GOT" = "$ROOTFS_SHA" ] || abort "the written system does not match the image (got $GOT)"
+
+ui_print "Installing this tablet's firmware and calibration..."
+mount -t ext4 -o rw "$USERDATA" $M/root || abort "cannot mount the new system"
+R=$M/root
+FWD=$R/usr/lib/firmware/qcom/sm8250/samsung/gts7l
+mkdir -p $FWD && cp $D/fw/* $FWD/ || abort "cannot install DSP firmware"
+cp $D/cirrus/* $R/usr/lib/firmware/cirrus/ || abort "cannot install speaker firmware"
+chown -R 0:0 $FWD $R/usr/lib/firmware/cirrus
+chmod 644 $FWD/* $R/usr/lib/firmware/cirrus/*
+
+H=$R/usr/share/qcom/sm8250/Samsung/gts7l
+FASTRPC=$(grep '^fastrpc:' $R/etc/passwd | cut -d: -f3)
+FASTRPC_G=$(grep '^fastrpc:' $R/etc/group | cut -d: -f3)
+[ -n "$FASTRPC" ] && [ -n "$FASTRPC_G" ] || abort "the new system has no fastrpc user"
+mkdir -p $H/sensors/persist/registry $H/socinfo
+cp -r $D/sensors/config $H/sensors/config
+sed 's#^file=revision=.*#file=revision=/sys/devices/soc0/ssc_hw_rev#' \
+	$D/sensors/sns_reg_config > $H/sensors/sns_reg.conf
+echo "$REV" > $H/socinfo/ssc_hw_rev
+cp $D/registry/* $H/sensors/persist/registry/ 2>/dev/null
+ln -sfn persist/registry $H/sensors/registry
+chown -R 0:0 $H/sensors/config $H/sensors/sns_reg.conf $H/socinfo
+chown -R $FASTRPC:$FASTRPC_G $H/sensors/persist
+chmod 775 $H/sensors/persist/registry
+
+# This installation's identity (an empty machine-id would make systemd
+# treat the boot as a first boot and apply Arch's unit presets)
+tr -d '-' < /proc/sys/kernel/random/uuid > $R/etc/machine-id
+chmod 444 $R/etc/machine-id
+
+if [ -n "$BT" ]; then
+	mkdir -p $R/etc/gts7l
+	echo "$BT" > $R/etc/gts7l/bt-address
+fi
+sync
+umount $M/root || abort "cannot unmount the new system"
+
+# ---- kernel -------------------------------------------------------------
+
+ui_print "Writing the kernel..."
+unzip -p "$ZIPFILE" boot.img | dd of="$BOOT" bs=1M 2>/dev/null || abort "writing boot failed"
+sync
+GOT=$(dd if="$BOOT" bs=1M count=$BOOT_MIB 2>/dev/null | sha256sum | cut -d' ' -f1)
+[ "$GOT" = "$BOOT_SHA" ] || abort "the written kernel does not match (got $GOT)"
+
+cleanup
+rm -rf $W
+ui_print " "
+ui_print "Done. Reboot: the first boot grows the filesystem to the"
+ui_print "whole partition, then the setup wizard asks for language,"
+ui_print "keyboard, time zone, your account and tablet settings."
+exit 0

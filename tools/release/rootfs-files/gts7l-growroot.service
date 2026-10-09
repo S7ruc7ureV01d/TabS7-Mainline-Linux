@@ -1,0 +1,16 @@
+# First boot after installation: grow the root filesystem to the whole
+# userdata partition (the installer writes a smaller image). ext4 grows
+# online, so this runs with / mounted.
+[Unit]
+Description=Grow the root filesystem to the whole partition
+ConditionPathExists=!/var/lib/gts7l/growroot-done
+DefaultDependencies=no
+After=local-fs.target
+Before=sysinit.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c 'resize2fs "$(findmnt -no SOURCE /)" && mkdir -p /var/lib/gts7l && touch /var/lib/gts7l/growroot-done'
+
+[Install]
+WantedBy=sysinit.target
